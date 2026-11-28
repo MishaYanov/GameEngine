@@ -298,6 +298,8 @@ pub struct ModelAssetDto {
 	mesh_count: Option<usize>,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	meshes: Vec<ModelMeshDto>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	script_descriptor: Option<runtime::components::ScriptDescriptor>,
 }
 
 #[derive(Serialize)]
@@ -317,10 +319,17 @@ impl ModelAssetDto {
 				.into(),
 			path: asset.path.clone(),
 			kind: match asset.kind {
+				runtime::asset_catalog::AssetKind::Model => "model",
 				runtime::asset_catalog::AssetKind::Prefab => "prefab",
 				runtime::asset_catalog::AssetKind::AudioClip => "audio_clip",
 				runtime::asset_catalog::AssetKind::SkyPanorama => "sky_panorama",
-				_ => "model",
+				runtime::asset_catalog::AssetKind::AnimatorGraph => "animator_graph",
+				runtime::asset_catalog::AssetKind::AnimationClip => "animation_clip",
+				runtime::asset_catalog::AssetKind::ControlsGraph => "controls_graph",
+				runtime::asset_catalog::AssetKind::InputActions => "input_actions",
+				runtime::asset_catalog::AssetKind::Texture => "texture",
+				runtime::asset_catalog::AssetKind::RustScript => "rust_script",
+				runtime::asset_catalog::AssetKind::Scene => "scene",
 			},
 			asset_id: Some(asset.id.clone()),
 			fingerprint: Some(asset.fingerprint.clone()),
@@ -328,6 +337,7 @@ impl ModelAssetDto {
 			source_path: asset.source_path.clone(),
 			mesh_count: (asset.kind == runtime::asset_catalog::AssetKind::Model)
 				.then_some(asset.meshes.len()),
+			script_descriptor: None,
 			meshes: asset
 				.meshes
 				.iter()
@@ -342,7 +352,65 @@ impl ModelAssetDto {
 				.collect(),
 		}
 	}
+
+	fn soundtrack_file(path: &str) -> Self {
+		Self {
+			name: Path::new(path)
+				.file_stem()
+				.and_then(|name| name.to_str())
+				.unwrap_or("Game audio")
+				.into(),
+			path: path.into(),
+			kind: "game_audio",
+			asset_id: None,
+			fingerprint: None,
+			revision: None,
+			source_path: None,
+			mesh_count: None,
+			meshes: Vec::new(),
+			script_descriptor: None,
+		}
+	}
 }
+
+fn editor_asset_catalog(
+	asset_root: &Path,
+	migrate_project: Option<&runtime::scene_catalog::SceneCatalog>,
+) -> Result<Vec<ModelAssetDto>, String> {
+	use runtime::asset_catalog::AssetKind;
+	use runtime::assets::project_assets;
+
+	let catalog = match migrate_project {
+		Some(scenes) => project_assets::migrate_project_catalog(asset_root, scenes)?,
+		None => project_assets::load_catalog(asset_root)?,
+	};
+	let mut assets: Vec<_> = catalog
+		.assets
+		.iter()
+		.filter(|asset| asset.kind != AssetKind::Scene)
+		.map(|asset| {
+			let mut entry = ModelAssetDto::from_asset(asset);
+			if asset.kind == AssetKind::RustScript {
+				entry.script_descriptor = bridge::script_assets::read_source(asset_root, asset).ok()
+					.and_then(|source| bridge::script_assets::descriptor(asset, &source).ok());
+			}
+			entry
+		})
+		.collect();
+
+	match bridge::project_audio::load(asset_root) {
+		Ok(Some(soundtrack)) => {
+			assets.extend(soundtrack.files().filter_map(|(path, _)| {
+				catalog.by_path(path).is_none().then(|| ModelAssetDto::soundtrack_file(path))
+			}));
+		}
+		Ok(None) => {}
+		Err(error) => engine_logger::warn!(target: "editor_assets", "Could not list game audio: {error}"),
+	}
+	assets.sort_by(|a, b| a.path.cmp(&b.path));
+	Ok(assets)
+}
+
 #[cfg(test)]
 #[path = "../../tests/unit/commands/editor/asset_dto_contract.rs"]
 mod asset_dto_contract;
@@ -358,22 +426,10 @@ pub async fn editor_assets(
 		let workspace = slot
 			.as_ref()
 			.ok_or("Open a scene before using the editor")?;
-		let catalog = runtime::assets::project_assets::migrate_catalog(&workspace.asset_root)?;
-		let mut assets: Vec<_> = catalog
-			.assets
-			.iter()
-			.filter(|asset| {
-				matches!(
-					asset.kind,
-					runtime::asset_catalog::AssetKind::Model
-						| runtime::asset_catalog::AssetKind::Prefab
-						| runtime::asset_catalog::AssetKind::AudioClip
-				)
-			})
-			.map(ModelAssetDto::from_asset)
-			.collect();
-		assets.sort_by(|a, b| a.path.cmp(&b.path));
-		Ok(assets)
+		let session = workspace.backend.session();
+		let scenes = (!session.is_playing() && !session.has_transaction())
+			.then_some(&session.project().scenes);
+		editor_asset_catalog(&workspace.asset_root, scenes)
 	})
 	.await
 	.map_err(|error| format!("Asset catalog worker failed: {error}"))?

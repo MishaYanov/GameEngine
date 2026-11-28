@@ -1,13 +1,18 @@
 @if (supported()) {
-	<div class="actions" aria-label="Prop authoring">
-		<button type="button" [disabled]="!available() || !hasSelection()" (click)="beginCreate()">
-			Create Prop from Selection…
+    <div class="asset-tool-group" role="group" aria-label="Prop authoring">
+        <button class="asset-icon-button" type="button" aria-label="Create Prop from Selection…"
+                title="Create Prop from Selection…"
+                [disabled]="!available() || !hasSelection()" (click)="beginCreate()">
+            <editor-icon name="plus"/>
 		</button>
-		<button type="button" [disabled]="!available() || !isPrefab()" (click)="openSource(false)">
-			Edit Prop Source…
+        <button class="asset-icon-button" type="button" aria-label="Edit Prop Source…"
+                title="Edit selected Prop source…"
+                [disabled]="!available() || !isPrefab()" (click)="openSource(false)">
+            <editor-icon name="edit"/>
 		</button>
-		<button type="button" [disabled]="!available() || !isPrefab()" (click)="openSource(true)">
-			Place Linked Prop…
+        <button class="asset-icon-button" type="button" aria-label="Place Linked Prop…" title="Place Linked Prop…"
+                [disabled]="!available() || !isPrefab()" (click)="openSource(true)">
+            <editor-icon name="link"/>
 		</button>
 	</div>
 	@if (!createOpen() && !linkOpen()) {

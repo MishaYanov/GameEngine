@@ -3,9 +3,11 @@
 //! advances to contact and projects remaining motion along at most three contact planes;
 //! it is not a rigid-body solver or triangle-accurate collision system.
 
+mod foot_support;
 mod geometry;
 mod matrix;
 mod movement;
+mod projectile;
 
 use geometry::{
 	Shape, WorldCollider, bounds_overlap, collider_geometry, contact_geometry, world_colliders,

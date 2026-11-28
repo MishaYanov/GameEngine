@@ -3,16 +3,21 @@ import {parseF32} from '../../../../core/editor/authoring-number';
 import type {EntityKey, ModelAsset} from '../../../../core/editor/editor.models';
 import type {NestedPropBinding, NestedPropPlacementRequest, NestedPropSource} from '../../../../core/editor/linked-prefabs.models';
 
-type SlotChoice = {readonly value: string; readonly label: string; readonly target: NestedPropBinding};
+import {EditorSearchPicker, type SearchPickerOption} from '../../../../shared/components/search-picker/search-picker';
+
+type SlotChoice = SearchPickerOption & { readonly target: NestedPropBinding };
 
 @Component({
     selector: 'editor-nested-prop-editor',
+    imports: [EditorSearchPicker],
     templateUrl: './nested-prop-editor.html',
     styles: `
         form, label {display: grid; gap: var(--space-1);}
-        fieldset {display: grid; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--color-border);}
+        fieldset {display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: var(--space-2);
+            border: 1px solid var(--color-border);}
+        legend {max-width: 100%; overflow-wrap: anywhere;}
         label {min-width: 0;}
-        select, input, button {
+        input, button {
             padding: var(--space-1) var(--space-2);
             border: 1px solid var(--color-border);
             border-radius: var(--radius-sm);
@@ -44,14 +49,21 @@ export class NestedPropEditor {
     protected readonly available = computed(() => this.assets().filter(asset =>
         asset.kind === 'prefab' && asset.asset_id && asset.asset_id !== this.ownerAssetId() && asset.fingerprint,
     ));
+    protected readonly assetOptions = computed<readonly SearchPickerOption[]>(() =>
+        this.available().flatMap(asset => asset.asset_id
+            ? [{id: asset.asset_id, label: asset.name, description: asset.path}] : []));
     protected readonly choices = computed<readonly SlotChoice[]>(() => [
         ...this.objects().map(object => ({
-            value: 'object:' + object.key, label: object.name, target: {kind: 'object' as const, key: object.key},
+            id: 'object:' + object.key, label: object.name, description: 'Object in this Prop',
+            target: {kind: 'object' as const, key: object.key},
         })),
         ...this.outerSlots().map(name => ({
-            value: 'slot:' + name, label: 'External slot · ' + name, target: {kind: 'slot' as const, name},
+            id: 'slot:' + name, label: name, description: 'External slot',
+            target: {kind: 'slot' as const, name},
         })),
     ]);
+    private readonly bindingTargets = computed(() =>
+        new Map(this.choices().map(choice => [choice.id, choice.target])));
     protected readonly currentReview = computed(() => {
         const reviewed = this.review();
         const asset = this.available().find(item => item.asset_id === this.selected());
@@ -64,7 +76,7 @@ export class NestedPropEditor {
         const name = this.name().trim();
         if (!review || !name || /\p{Cc}/u.test(name) || new TextEncoder().encode(name).length > 256 ||
             x == null || y == null || z == null) return null;
-        const slotChoices = new Map(this.choices().map(choice => [choice.value, choice.target]));
+        const slotChoices = this.bindingTargets();
         const bindings: [string, NestedPropBinding][] = [];
         for (const slot of review.slots) {
             const target = slotChoices.get(this.bindings().get(slot) ?? '');
@@ -79,9 +91,11 @@ export class NestedPropEditor {
     });
 
     protected chooseAsset(assetId: string): void {
+        if (this.pending() || assetId === this.selected()) return;
+        const asset = this.available().find(item => item.asset_id === assetId);
+        if (assetId && !asset) return;
         this.selected.set(assetId);
         this.bindings.set(new Map());
-        const asset = this.available().find(item => item.asset_id === assetId);
         this.name.set(asset?.name ?? '');
         if (asset?.asset_id && asset.fingerprint) {
             this.reviewRequested.emit({assetId: asset.asset_id, fingerprint: asset.fingerprint});
@@ -95,6 +109,8 @@ export class NestedPropEditor {
     }
 
     protected assign(slot: string, value: string): void {
+        if (this.pending() || !this.currentReview()?.slots.includes(slot) ||
+            value && !this.bindingTargets().has(value)) return;
         this.bindings.update(current => new Map(current).set(slot, value));
     }
 

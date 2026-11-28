@@ -14,6 +14,7 @@ pub(super) struct CameraObstructionStep<'a> {
 pub(super) struct CameraObjects {
 	default: Option<RuntimeEntityHandle>,
 	override_camera: Option<RuntimeEntityHandle>,
+	pub(super) sequence_camera: Option<RuntimeEntityHandle>,
 	pub(super) active: Option<RuntimeEntityHandle>,
 	unavailable: bool,
 }
@@ -29,11 +30,12 @@ impl CameraObjects {
 			active: default.clone(),
 			default,
 			override_camera: None,
+			sequence_camera: None,
 			unavailable: false,
 		}
 	}
 
-	fn projection(
+	pub(super) fn projection(
 		handle: &RuntimeEntityHandle,
 		world: &RuntimeWorld,
 		lifecycle: &RuntimeLifecycle,
@@ -81,10 +83,15 @@ impl CameraObjects {
 		if override_projection.is_none() {
 			self.override_camera = None;
 		}
-		let resolved = override_projection.take().or_else(|| {
-			let handle = self.default.as_ref()?;
+		let sequence_projection = self.sequence_camera.as_ref().and_then(|handle| {
 			Self::projection(handle, world, lifecycle).map(|scene| (handle.clone(), scene))
 		});
+		let resolved = sequence_projection
+			.or_else(|| override_projection.take())
+			.or_else(|| {
+				let handle = self.default.as_ref()?;
+				Self::projection(handle, world, lifecycle).map(|scene| (handle.clone(), scene))
+			});
 		let next = resolved.as_ref().map(|(handle, _)| handle);
 		let unavailable = self.default.is_some() && next.is_none();
 		let changed = self.active.as_ref() != next || self.unavailable != unavailable;

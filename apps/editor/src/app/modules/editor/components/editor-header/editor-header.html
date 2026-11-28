@@ -1,5 +1,15 @@
 <header>
     <div class="editor-menus">
+        <div class="navigation-history" role="group" aria-label="Editor navigation">
+            <button type="button" aria-label="Back" title="Back (Alt+Left)" aria-keyshortcuts="Alt+ArrowLeft"
+                    [disabled]="!canGoBack()" (click)="backRequested.emit()">
+                <editor-icon name="arrowLeft"/>
+            </button>
+            <button type="button" aria-label="Forward" title="Forward (Alt+Right)" aria-keyshortcuts="Alt+ArrowRight"
+                    [disabled]="!canGoForward()" (click)="forwardRequested.emit()">
+                <editor-icon name="arrowRight"/>
+            </button>
+        </div>
         <editor-file-menu
                 (exitRequested)="exitRequested.emit()"
                 (openProjectRequested)="openProjectRequested.emit()"
@@ -13,6 +23,9 @@
 
         <button #gameTrigger class="game-trigger" popovertarget="editor-game-menu" type="button">Game</button>
         <div #gameMenu class="game-menu" id="editor-game-menu" popover>
+            <button (click)="gameMenu.hidePopover(); gameTrigger.focus(); newSceneRequested.emit()"
+                    [disabled]="!canCreateScene()" aria-haspopup="dialog" type="button">New Scene…
+            </button>
             <button
                     (click)="gameMenu.hidePopover(); gameTrigger.focus(); sceneInformationRequested.emit()"
                     [disabled]="opening() || !editorService.snapshot()"
@@ -21,9 +34,13 @@
                     type="button"
             >Scene Information…
             </button>
+            <button (click)="gameMenu.hidePopover(); gameTrigger.focus(); sceneFlowRequested.emit()"
+                    [disabled]="opening() || !editorService.snapshot()"
+                    aria-haspopup="dialog" type="button">Scene Flow…
+            </button>
             <button
                     (click)="gameMenu.hidePopover(); gameTrigger.focus(); objectActionRequested.emit('edit_lights')"
-                    [disabled]="opening() || !availableObjectActions().includes('edit_lights')"
+                    [disabled]="opening() || !objectActionsEnabled() || !availableObjectActions().includes('edit_lights')"
                     aria-haspopup="dialog"
                     type="button"
             >Scene Lighting…
@@ -33,7 +50,7 @@
                 [disabled]="opening() || !canOpenControls()"
                 (click)="controlsTrigger.focus(); controlsRequested.emit()">Controls</button>
         <button #objectsTrigger (click)="openObjects(objectsTrigger)" (keydown)="openObjectsFromKeyboard($event, objectsTrigger)" [attr.aria-expanded]="contextMenu.request()?.owner === objectsTrigger"
-                [disabled]="opening() || !availableObjectActions().length"
+                [disabled]="opening() || !objectActionsEnabled() || !availableObjectActions().length"
                 aria-haspopup="menu"
                 class="objects-trigger"
                 type="button">Objects <span aria-hidden="true">▾</span></button>

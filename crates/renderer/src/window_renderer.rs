@@ -8,7 +8,10 @@ use std::{
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use crate::vulkan::*;
+use crate::{
+	EditorShadingMode,
+	vulkan::{mesh::EditorTopologyBudget, *},
+};
 
 mod targets;
 
@@ -59,6 +62,7 @@ pub struct WindowRenderer {
 	lighting: LightingUniform,
 	editor_visuals: crate::EditorVisuals,
 	sky: Option<SkyGradient>,
+	editor_topology: Option<EditorTopologyBudget>,
 	external_resources_retained: AtomicBool,
 }
 
@@ -67,6 +71,24 @@ impl WindowRenderer {
 		window: Arc<W>,
 		width: u32,
 		height: u32,
+	) -> Result<Self, String> {
+		Self::create(window, width, height, None)
+	}
+
+	/// Retain mesh data for editor wireframe draws and static surface picking.
+	pub fn new_editor<W: HasDisplayHandle + HasWindowHandle + 'static>(
+		window: Arc<W>,
+		width: u32,
+		height: u32,
+	) -> Result<Self, String> {
+		Self::create(window, width, height, Some(EditorTopologyBudget::default()))
+	}
+
+	fn create<W: HasDisplayHandle + HasWindowHandle + 'static>(
+		window: Arc<W>,
+		width: u32,
+		height: u32,
+		editor_topology: Option<EditorTopologyBudget>,
 	) -> Result<Self, String> {
 		let display = window.display_handle().map_err(|e| e.to_string())?.as_raw();
 		let handle = window.window_handle().map_err(|e| e.to_string())?.as_raw();
@@ -105,6 +127,7 @@ impl WindowRenderer {
 			lighting: LightingUniform::default(),
 			editor_visuals: crate::EditorVisuals::default(),
 			sky: None,
+			editor_topology,
 			external_resources_retained: AtomicBool::new(false),
 		};
 		renderer.prepare()?;
@@ -137,13 +160,30 @@ impl WindowRenderer {
 		meshes: &[crate::MeshUpload<'_>],
 		textures: &[crate::Rgba8Upload<'_>],
 	) -> Result<crate::UploadedBatch, String> {
-		crate::vulkan::upload_batch::upload(
+		let textures: Vec<_> = textures.iter().copied().map(Into::into).collect();
+		self.upload_batch_with_color_space(meshes, &textures)
+	}
+
+	/// Upload a bounded group with explicit color space for each texture.
+	pub fn upload_batch_with_color_space(
+		&self,
+		meshes: &[crate::MeshUpload<'_>],
+		textures: &[crate::Rgba8UploadWithColorSpace<'_>],
+	) -> Result<crate::UploadedBatch, String> {
+		let mut uploaded = crate::vulkan::upload_batch::upload(
 			self.resources.instance.raw(),
 			&self.resources.device,
 			&self.resources.material_layout,
 			meshes,
 			textures,
-		)
+		)?;
+		if let Some(budget) = &self.editor_topology {
+			for (mesh, input) in uploaded.meshes.iter_mut().zip(meshes) {
+				mesh.retain_editor_topology(budget, input.indices);
+				mesh.retain_editor_pick_geometry(budget, input.vertices, input.indices);
+			}
+		}
+		Ok(uploaded)
 	}
 	/// Exact instrumented allocation sizes, including alignment and staging,
 	/// with driver-owned presentation memory explicitly excluded.
@@ -177,13 +217,41 @@ impl WindowRenderer {
 			.map_err(|e| e.to_string())
 	}
 	/// Validated CPU state; upload occurs after the previous frame completes.
+	/// The active directional map's clip transform, for culling shadow casters.
+	pub fn directional_shadow_view_projection(
+		&self,
+		camera: &CameraUniform,
+		shading: Option<EditorShadingMode>,
+	) -> Option<glam::Mat4> {
+		if !self
+			.resources
+			.pipelines
+			.as_ref()
+			.is_some_and(VulkanMaterialPipelines::has_shadows)
+		{
+			return None;
+		}
+		self.resources
+			.camera
+			.shadow_map()?
+			.uniform(camera, &self.lighting, shading)
+			.map(|shadow| shadow.view_projection())
+	}
+
 	pub fn set_lights(&mut self, lights: &[Light]) -> Result<(), String> {
-		self.lighting = LightingUniform::from_lights(lights)?;
+		let mut lighting = LightingUniform::from_lights(lights)?;
+		lighting.retain_fog(&self.lighting);
+		self.lighting = lighting;
 		Ok(())
 	}
 
 	pub fn set_ambient(&mut self, ambient: [f32; 3]) -> Result<(), String> {
 		self.lighting.set_ambient(ambient)
+	}
+
+	/// Configure height and distance fog for the active scene.
+	pub fn set_fog(&mut self, fog: Option<Fog>) -> Result<(), String> {
+		self.lighting.set_fog(fog)
 	}
 
 	/// Active scene background. An absent sky uses the existing color clear.
@@ -234,7 +302,7 @@ impl WindowRenderer {
 		camera: &CameraUniform,
 		objects: &[RenderObject<'_>],
 	) -> Result<DrawStatus, String> {
-		self.draw_region(camera, objects, None)
+		self.draw_region(camera, objects, None, None, true)
 	}
 
 	/// Render into physical [x, y, width, height]. Screen-space geometry uses content-local coordinates.
@@ -244,7 +312,30 @@ impl WindowRenderer {
 		objects: &[RenderObject<'_>],
 		pixels: [u32; 4],
 	) -> Result<DrawStatus, String> {
-		self.draw_region(camera, objects, Some(pixels))
+		self.draw_region(camera, objects, Some(pixels), None, true)
+	}
+
+	/// Draw editor geometry and overlays in physical [x, y, width, height].
+	pub fn draw_editor_in_rect(
+		&mut self,
+		camera: &CameraUniform,
+		objects: &[RenderObject<'_>],
+		pixels: [u32; 4],
+		mode: EditorShadingMode,
+	) -> Result<DrawStatus, String> {
+		self.draw_region(camera, objects, Some(pixels), Some(mode), true)
+	}
+
+	/// Draw a Prop preview with a per-draw normal detail toggle.
+	pub fn draw_prop_preview_in_rect(
+		&mut self,
+		camera: &CameraUniform,
+		objects: &[RenderObject<'_>],
+		pixels: [u32; 4],
+		shading: EditorShadingMode,
+		normal_maps: bool,
+	) -> Result<DrawStatus, String> {
+		self.draw_region(camera, objects, Some(pixels), Some(shading), normal_maps)
 	}
 
 	fn draw_region(
@@ -252,11 +343,33 @@ impl WindowRenderer {
 		camera: &CameraUniform,
 		objects: &[RenderObject<'_>],
 		pixels: Option<[u32; 4]>,
+		shading: Option<EditorShadingMode>,
+		normal_maps: bool,
 	) -> Result<DrawStatus, String> {
 		let Some(extent) = self.prepare()? else {
 			return Ok(DrawStatus::Suspended);
 		};
 		let resources = &mut **self.resources;
+		let wireframe = shading == Some(EditorShadingMode::Wireframe);
+		let markers = shading.is_some() && objects.iter().any(RenderObject::shows_vertex_markers);
+		if wireframe {
+			for object in objects {
+				object
+					.mesh()
+					.prepare_editor_edges(resources.instance.raw(), &resources.device);
+			}
+		}
+		let pipelines = resources.pipelines.as_mut().expect("prepared pipelines");
+		pipelines.prepare_editor_geometry(
+			resources.device.raw(),
+			resources.camera.descriptor_set_layout(),
+			resources.material_layout.raw(),
+			wireframe
+				&& objects
+				.iter()
+				.any(|object| object.mesh().editor_edges().is_some()),
+			markers,
+		)?;
 		let region = validated_region(
 			pixels.unwrap_or([0, 0, extent[0], extent[1]]),
 			extent,
@@ -310,14 +423,16 @@ impl WindowRenderer {
 				visuals: &self.editor_visuals,
 			})
 		};
-		targets.frame.set_lighting(self.lighting);
+		let mut lighting = self.lighting;
+		lighting.set_fog_camera(camera);
+		targets.frame.set_lighting(lighting);
 		let result = targets.frame.draw_with_editor(
 			&resources.device,
 			FrameTargets {
 				swapchain: &targets.swapchain,
 				depth_buffer: &targets.depth,
 			},
-			resources.pipelines.as_ref().expect("prepared pipelines"),
+			pipelines,
 			&resources.camera,
 			objects,
 			crate::vulkan::frame::FrameView {
@@ -325,6 +440,9 @@ impl WindowRenderer {
 				region,
 				editor,
 				sky,
+				shading,
+				vertex_markers: markers,
+				normal_maps,
 			},
 		);
 		finish_draw(&mut self.dirty, result)
@@ -335,12 +453,17 @@ impl WindowRenderer {
 		vertices: &[Vertex],
 		indices: &[u32],
 	) -> Result<VulkanMesh, VulkanMeshError> {
-		VulkanMesh::new(
+		let mut mesh = VulkanMesh::new(
 			self.resources.instance.raw(),
 			&self.resources.device,
 			vertices,
 			indices,
-		)
+		)?;
+		if let Some(budget) = &self.editor_topology {
+			mesh.retain_editor_topology(budget, indices);
+			mesh.retain_editor_pick_geometry(budget, vertices, indices);
+		}
+		Ok(mesh)
 	}
 
 	pub fn upload_skinned_mesh(
@@ -349,13 +472,17 @@ impl WindowRenderer {
 		indices: &[u32],
 		influences: &[crate::vulkan::mesh::SkinInfluence],
 	) -> Result<VulkanMesh, VulkanMeshError> {
-		VulkanMesh::new_skinned(
+		let mut mesh = VulkanMesh::new_skinned(
 			self.resources.instance.raw(),
 			&self.resources.device,
 			vertices,
 			indices,
 			influences,
-		)
+		)?;
+		if let Some(budget) = &self.editor_topology {
+			mesh.retain_editor_topology(budget, indices);
+		}
+		Ok(mesh)
 	}
 
 	pub fn upload_rgba8(
@@ -372,6 +499,37 @@ impl WindowRenderer {
 			height,
 			pixels,
 		)
+	}
+
+	/// Upload color or data without changing the established sRGB upload path.
+	pub fn upload_rgba8_with_color_space(
+		&self,
+		width: u32,
+		height: u32,
+		pixels: &[u8],
+		color_space: TextureColorSpace,
+	) -> Result<VulkanTexture, VulkanTextureError> {
+		VulkanTexture::from_rgba8_with_color_space(
+			self.resources.instance.raw(),
+			&self.resources.device,
+			Arc::clone(&self.resources.material_layout),
+			width,
+			height,
+			pixels,
+			color_space,
+		)
+	}
+
+	/// Wait for the current target's submitted draw to release its mesh and
+	/// texture references. The presentation engine retains the swapchain image.
+	pub fn wait_for_scene_draw(&self) -> Result<(), String> {
+		if let Some(targets) = &self.resources.targets {
+			targets
+				.frame
+				.wait_complete()
+				.map_err(|error| error.to_string())?;
+		}
+		Ok(())
 	}
 
 	/// Call before releasing external meshes/textures that may still be in flight.

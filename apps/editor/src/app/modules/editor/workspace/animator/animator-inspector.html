@@ -68,6 +68,35 @@
             @if (rootMotionIssue(); as issue) {
                 <p role="status">{{ issue }}</p>
             }
+            @if (ankleJoints().length || footIkDraft().joint) {
+                <fieldset [disabled]="!available()">
+                    <legend>Foot IK</legend>
+                    <label>Foot joint
+                        <select #footJoint [value]="footIkDraft().joint"
+                                (change)="updateFootIk('joint', footJoint.value)">
+                            <option value="" [selected]="!footIkDraft().joint">Off</option>
+                            @for (joint of ankleJoints(); track joint.id) {
+                                <option [value]="joint.id"
+                                        [selected]="footIkDraft().joint === joint.id">{{ joint.name }}
+                                </option>
+                            }
+                        </select>
+                    </label>
+                    @if (footIkDraft().joint) {
+                        <label>Probe reach (mm)
+                            <input #reach type="text" inputmode="numeric" [value]="footIkDraft().reach"
+                                   (input)="updateFootIk('reach', reach.value)">
+                        </label>
+                        <label>Sole offset (mm)
+                            <input #offset type="text" inputmode="numeric" [value]="footIkDraft().offset"
+                                   (input)="updateFootIk('offset', offset.value)">
+                        </label>
+                    }
+                    @if (footIkIssue(); as issue) {
+                        <p role="status">{{ issue }}</p>
+                    }
+                </fieldset>
+            }
         }
         @if (plan().issue; as issue) {
             <p role="status">{{ issue }}</p>
@@ -75,7 +104,8 @@
         @if (legacyActive()) {
             <p>Disable the Animation component before enabling an Animator on this actor.</p>
         }
-        <button type="button" (click)="assign()" [disabled]="!available() || !plan().binding || legacyActive() || !!rootMotionIssue()">
+        <button type="button" (click)="assign()"
+                [disabled]="!available() || !plan().binding || legacyActive() || !!rootMotionIssue() || !!footIkIssue()">
             {{ actor().animator ? 'Apply Animator Binding' : 'Attach Animator' }}
         </button>
     }

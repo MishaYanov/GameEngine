@@ -1,11 +1,13 @@
 //! Typed component adapters over the existing single entity backing store.
 mod audio_source;
 mod entity;
+mod fog;
 mod interactable;
 mod light;
 mod native_behavior;
 mod particle_emitter;
 mod player_controller;
+mod projectile;
 mod scene_validation;
 mod script;
 mod sky;
@@ -19,21 +21,26 @@ pub use audio_source::{
 	AudioEventBinding, AudioSourceBus, AudioSourceComponent, AudioSourcePlayback,
 	AudioSourceSettings, AudioSourceSpatial, LegacyCombatCue,
 };
+pub use fog::SceneFog;
 pub use interactable::{
 	InteractableComponent, InteractableSettings, MAX_INTERACTION_REACH, interaction_reachable,
 };
 pub use light::{LightComponent, LightSettings};
 pub use native_behavior::{NativeBehaviorComponent, NativeBehaviorSpec};
 pub use particle_emitter::{
-	MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterComponent, ParticleEmitterSettings,
+	MAX_ENABLED_PARTICLE_EMITTERS, ParticleBurstSettings, ParticleEmitterComponent,
+	ParticleEmitterSettings,
 };
+pub(crate) use particle_emitter::MAX_PARTICLES_PER_EMITTER;
 pub use player_controller::{
 	InputActionsRef, PlayerControllerComponent, PlayerControllerSettings, PlayerMovementSpace,
 };
+pub use projectile::{ProjectileLauncherSettings, ProjectileSettings};
 pub use scene_validation::{validate_scene_components, validate_scene_components_with_slots};
 pub use script::{
-	MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptDescriptor, ScriptField, ScriptIssue,
-	ScriptProperty, ScriptReference, ScriptReferenceField, ScriptReferenceKind, ScriptSettings,
+	MAX_RUST_SCRIPT_BYTES, MAX_SCRIPTS_PER_OBJECT, ScriptComponent, ScriptDescriptor, ScriptField,
+	ScriptIssue, ScriptProperty, ScriptReference, ScriptReferenceField, ScriptReferenceKind,
+	ScriptSettings, project_script_asset, project_script_id,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 pub use sky::{

@@ -126,3 +126,8 @@ changes. It accepts only the identified core decisions and does not certify unre
 
 These documents belong to the Engine Developer space. Documentation-site tests validate generated pages, navigation,
 and links; runtime, compiler, filesystem failure, device, and performance acceptance require their own tests.
+
+## Verified source asset reuse
+
+[ADR 0015](0015-verified-asset-reuse.md) records project-local copies of pinned shared sources and the evidence needed
+for a persistent derived cache.

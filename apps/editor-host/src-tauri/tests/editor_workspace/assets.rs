@@ -1,6 +1,86 @@
 use super::*;
 
 #[test]
+fn adding_a_skinned_glb_places_one_playable_character_and_checks_its_catalog_pin() {
+	use runtime::{
+		animation::AnimationPlayback, asset_catalog::CATALOG_FILE, assets::project_assets,
+	};
+
+	let fixture = Fixture::new();
+	let relative = "models/two-joint.glb";
+	let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+		.join("../../game/assets/characters/two-joint.glb");
+	fs::copy(source, fixture.0.join(relative)).unwrap();
+	let mut catalog = project_assets::migrate_catalog(&fixture.0).unwrap();
+	let model = catalog.by_path(relative).unwrap().clone();
+	let mut workspace = fixture.open();
+	let before = workspace.backend.session().authored_document();
+	let revision = workspace.backend.session().revision();
+	let position = [2., 1., -3.];
+	workspace
+		.import_model(relative, position, revision)
+		.unwrap();
+
+	let placed = workspace.backend.session().authored_document();
+	assert_eq!(placed.entities.len(), before.entities.len() + 1);
+	let character = placed.entities.last().unwrap();
+	let key = character.key.clone();
+	assert_eq!(workspace.backend.session().selection(), &[key.clone()]);
+	assert_eq!(character.transform.position, position);
+	assert_eq!(character.asset_id.as_ref(), Some(&model.id));
+	assert!(character.renderable);
+	assert!(character.parent.is_none());
+	let animation = character.animation.as_ref().unwrap();
+	assert!(animation.enabled);
+	assert_eq!(animation.settings.source.asset_id, model.id);
+	assert_eq!(animation.settings.source.expected_sha256, model.fingerprint);
+	assert_eq!(
+		animation.settings.playback,
+		AnimationPlayback::SingleClip {
+			clip_index: 0,
+			looping: true
+		}
+	);
+	assert!(workspace
+		.import_model(relative, position, revision)
+		.is_err());
+	assert_eq!(workspace.backend.session().authored_document(), placed);
+
+	run(&mut workspace, Command::Undo);
+	assert_eq!(workspace.backend.session().authored_document(), before);
+	run(&mut workspace, Command::Redo);
+	assert_eq!(workspace.backend.session().authored_document(), placed);
+	workspace
+		.save(workspace.backend.session().revision())
+		.unwrap();
+	let mut reopened = fixture.open();
+	assert_eq!(reopened.backend.session().authored_document(), placed);
+	run(&mut reopened, Command::StartPlay);
+	let animations = reopened.backend.session().animations().unwrap();
+	assert!(animations.pose(&key).is_some());
+	assert!(reopened
+		.import_model(relative, position, reopened.backend.session().revision())
+		.is_err());
+	run(&mut reopened, Command::StopPlay);
+
+	let entry = catalog
+		.assets
+		.iter_mut()
+		.find(|asset| asset.id == model.id)
+		.unwrap();
+	entry.fingerprint = "0".repeat(64);
+	fs::write(fixture.0.join(CATALOG_FILE), catalog.to_json().unwrap()).unwrap();
+	let revision = reopened.backend.session().revision();
+	let error = reopened
+		.import_model(relative, position, revision)
+		.err()
+		.unwrap();
+	assert!(error.contains("Reimport the model"), "{error}");
+	assert_eq!(reopened.backend.session().revision(), revision);
+	assert_eq!(reopened.backend.session().authored_document(), placed);
+}
+
+#[test]
 fn prefab_save_replaces_file_load_is_one_undo_and_stale_request_preserves_it() {
 	let fixture = Fixture::new();
 	let mut w = fixture.open();

@@ -103,7 +103,9 @@ fn compile_player() -> Result<PathBuf, String> {
 	let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.parent()
 		.ok_or("Missing engine workspace")?;
-	let target = workspace.join("target");
+	let target = std::env::var_os("CARGO_TARGET_DIR")
+		.filter(|path| !path.is_empty())
+		.map_or_else(|| workspace.join("target"), |path| workspace.join(path));
 	let output = Command::new("cargo")
 		.current_dir(workspace)
 		.args([

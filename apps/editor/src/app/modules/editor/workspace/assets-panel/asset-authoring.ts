@@ -1,22 +1,34 @@
 import {afterNextRender, Component, computed, DestroyRef, effect, inject, Injector, input, signal} from '@angular/core';
 import {form, FormField} from '@angular/forms/signals';
-import type {ModelAsset} from '../../../../core/editor/editor.models';
+import type {ModelAsset, ProjectAssetFile} from '../../../../core/editor/editor.models';
 import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {SceneEditingService} from '../scene-editing.service';
 
-type FileAction = 'import' | 'import-audio' | 'move' | 'prefab';
+type FileAction = 'import' | 'import-audio' | 'import-sprite' | 'move' | 'prefab' | 'rust-script';
+
+const SCRIPT_TEMPLATE = `use engine_script_sdk::Script;
+
+#[derive(Default)]
+struct Behavior;
+
+impl Script for Behavior {}
+
+engine_script_sdk::export_script!(Behavior);
+`;
 
 @Component({
     selector: 'editor-asset-authoring',
-    imports: [EditorDialog, FormField],
+    imports: [EditorDialog, EditorIcon, FormField],
     templateUrl: './asset-authoring.html',
     styleUrls: ['../game-settings/settings.scss', './asset-authoring.scss'],
 })
 export class AssetAuthoring {
     readonly opening = input(false);
     readonly selected = input<ModelAsset | null>(null);
+    readonly selectedScript = input<ProjectAssetFile | null>(null);
     protected readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService, {optional: true});
     private readonly editing = inject(SceneEditingService, {optional: true});
@@ -29,6 +41,8 @@ export class AssetAuthoring {
     protected readonly mode = signal<FileAction>('import');
     protected readonly draft = signal({path: ''});
     protected readonly fields = form(this.draft);
+    protected readonly scriptText = signal(SCRIPT_TEMPLATE);
+    protected readonly scriptReplacement = signal<{ id: string; fingerprint: string } | null>(null);
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         this.editor.snapshot()?.mode === 'edit' && !this.opening() && !this.pending() &&
         (this.editing?.ready() ?? (!this.editor.busy() && !this.editor.snapshot()?.transaction)));
@@ -45,6 +59,10 @@ export class AssetAuthoring {
         switch (this.mode()) {
             case 'import': return 'Import External GLB';
             case 'import-audio': return 'Import Audio Clip';
+            case 'import-sprite':
+                return 'Import Particle Sprite';
+            case 'rust-script':
+                return this.scriptReplacement() ? 'Edit Rust Script' : 'Create Rust Script';
             case 'move': return 'Move Asset';
             case 'prefab': return 'Save Gameplay Prefab';
         }
@@ -53,6 +71,8 @@ export class AssetAuthoring {
         const mode = this.mode();
         const kind = this.selected()?.kind;
         if (mode === 'prefab' || (mode === 'move' && kind === 'prefab')) return '.json';
+        if (mode === 'import-sprite') return '.png';
+        if (mode === 'rust-script') return '.rs';
         return mode === 'import-audio' || (mode === 'move' && kind === 'audio_clip') ? '.wav' : '.glb';
     });
     protected readonly validPath = computed(() => {
@@ -76,17 +96,44 @@ export class AssetAuthoring {
         });
     }
 
-    protected async chooseImport(format: 'glb' | 'wav' = 'glb', opener?: HTMLButtonElement): Promise<void> {
+    protected createScript(): void {
+        this.scriptText.set(SCRIPT_TEMPLATE);
+        this.scriptReplacement.set(null);
+        this.show('rust-script', 'behavior.rs');
+    }
+
+    protected async editScript(): Promise<void> {
+        const scope = this.scope();
+        const id = this.selectedScript()?.asset_id;
+        if (!scope || !id || !this.available()) return;
+        this.pending.set('Opening Rust script…');
+        this.error.set(null);
+        try {
+            const source = await this.editor.openRustScript(id, scope);
+            if (!this.currentScope(scope) || this.editor.playing()) return;
+            this.scriptText.set(source.source);
+            this.scriptReplacement.set({id, fingerprint: source.fingerprint});
+            this.show('rust-script', source.path, true);
+        } catch (error) {
+            if (this.currentScope(scope)) this.error.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            this.pending.set(null);
+        }
+    }
+
+    protected async chooseImport(format: 'glb' | 'wav' | 'png' = 'glb', opener?: HTMLButtonElement): Promise<void> {
         const scope = this.scope();
         if (!this.available() || !scope) return;
         const generation = scope.workspaceGeneration;
-        this.pending.set(format === 'wav' ? 'Choosing a PCM WAV source…' : 'Choosing a GLB source…');
+        this.pending.set(`Choosing a ${format.toUpperCase()} source…`);
         this.error.set(null);
         try {
-            const source = await (format === 'wav' ? this.editor.chooseExternalWav(scope) : this.editor.chooseExternalGlb(scope));
+            const source = await (format === 'png' ? this.editor.chooseParticlePng(scope)
+                : format === 'wav' ? this.editor.chooseExternalWav(scope) : this.editor.chooseExternalGlb(scope));
             if (!source || !this.currentScope(scope) || this.editor.playing()) return;
             this.source = source;
-            this.show(format === 'wav' ? 'import-audio' : 'import', source.split(/[\\/]/).at(-1) ?? `asset.${format}`, true);
+            const mode = format === 'png' ? 'import-sprite' : format === 'wav' ? 'import-audio' : 'import';
+            this.show(mode, source.split(/[\\/]/).at(-1) ?? `asset.${format}`, true);
         } catch (error) {
             if (generation === this.editor.workspaceGeneration()) this.error.set(String(error instanceof Error ? error.message : error));
         } finally {
@@ -131,6 +178,8 @@ export class AssetAuthoring {
                 }
                 if (mode === 'import') await this.editor.importExternalGlb(this.source, path, scope);
                 else if (mode === 'import-audio') await this.editor.importExternalWav(this.source, path, scope);
+                else if (mode === 'import-sprite') await this.editor.importParticleSprite(this.source, path, scope);
+                else if (mode === 'rust-script') await this.editor.saveRustScript(path, this.scriptText(), this.scriptReplacement(), scope);
                 else if (context.asset?.asset_id) await this.editor.moveAsset(context.asset.asset_id, path, scope);
                 else return;
             }
@@ -138,7 +187,8 @@ export class AssetAuthoring {
             await this.editor.assets(true);
             if (context.generation !== this.editor.workspaceGeneration()) return;
             this.status.set(mode === 'prefab' ? 'Gameplay prefab saved.' : mode === 'move' ? 'Asset moved.'
-                : mode === 'import-audio' ? 'Audio Clip imported.' : 'External GLB imported.');
+                : mode === 'import-audio' ? 'Audio Clip imported.' : mode === 'import-sprite' ? 'Particle sprite imported.'
+                    : mode === 'rust-script' ? 'Rust script saved.' : 'External GLB imported.');
             this.open.set(false);
         });
     }

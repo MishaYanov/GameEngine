@@ -15,6 +15,7 @@ use model_bounds::ModelBounds;
 mod operations;
 mod prefab;
 mod runtime_lifecycle;
+mod streaming;
 use crate::camera_input::CameraIntent;
 use crate::command::{
 	EditorCommandDto as Command, EditorCommandRequest, EditorSnapshotDto, PlayStatusDto,
@@ -563,6 +564,12 @@ impl EditorSession {
 				self.apply_play_transforms(&run_id, scene_revision, keys)?;
 			}
 			Command::SetPaused { paused } => self.set_paused(paused)?,
+			Command::RequestSceneRoute { route_id } => self.test_manual_scene_route(&route_id)?,
+			Command::RetrySceneRoute {
+				run_id,
+				scene_generation,
+				attempt_id,
+			} => self.retry_failed_scene_route(&run_id, scene_generation, attempt_id)?,
 			Command::SetPlayInput { movement } => self.set_play_input(movement)?,
 			Command::SetCharacterInput {
 				key,

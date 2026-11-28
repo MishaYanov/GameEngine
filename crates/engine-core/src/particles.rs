@@ -2,22 +2,29 @@
 
 use crate::{
 	EntityKey,
-	components::{MAX_ENABLED_PARTICLE_EMITTERS, ParticleEmitterSettings},
+	asset_catalog::AssetId,
+	components::{
+		MAX_ENABLED_PARTICLE_EMITTERS, MAX_PARTICLES_PER_EMITTER, ParticleBurstSettings,
+		ParticleEmitterSettings,
+	},
 	scene_data::EntityData,
 	world::RuntimeWorld,
 };
 use glam::{EulerRot, Quat, Vec3};
-use std::collections::{BTreeMap, HashMap};
+use std::{
+	collections::{BTreeMap, HashMap},
+	sync::Arc,
+};
 
 pub const MAX_PARTICLES: usize = 2048;
-const MAX_PARTICLES_PER_EMITTER: usize = 192;
 
 /// A renderer-independent sample. Size is the billboard diameter in world units.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParticleSample {
 	pub position: [f32; 3],
 	pub size: f32,
 	pub color: [f32; 3],
+	pub sprite_asset_id: Option<Arc<AssetId>>,
 }
 
 #[derive(Clone)]
@@ -28,7 +35,8 @@ struct Particle {
 }
 
 impl Particle {
-	fn sample(&self, settings: &ParticleEmitterSettings, fixed_hz: u32) -> ParticleSample {
+	fn sample(&self, emitter: &Emitter, fixed_hz: u32) -> ParticleSample {
+		let settings = &emitter.settings;
 		let age = self.age_steps as f32 / fixed_hz as f32;
 		let normalized_age = (age / settings.lifetime_seconds).min(1.0);
 		let acceleration = Vec3::Y * (0.5 * settings.gravity * age * age);
@@ -36,6 +44,7 @@ impl Particle {
 			position: (self.origin + self.velocity * age + acceleration).to_array(),
 			size: settings.size * (1.0 - 0.75 * normalized_age),
 			color: settings.color,
+			sprite_asset_id: emitter.sprite_asset_id.clone(),
 		}
 	}
 }
@@ -43,17 +52,19 @@ impl Particle {
 #[derive(Clone)]
 struct Emitter {
 	settings: ParticleEmitterSettings,
+	sprite_asset_id: Option<Arc<AssetId>>,
 	random_state: u32,
 	birth_credit: f64,
 	particles: Vec<Particle>,
 }
 
 impl Emitter {
-	fn new(settings: ParticleEmitterSettings) -> Self {
+	fn new(settings: &ParticleEmitterSettings) -> Self {
 		Self {
 			random_state: settings.seed,
 			birth_credit: 0.0,
-			settings,
+			settings: settings.clone(),
+			sprite_asset_id: settings.sprite_asset_id.clone().map(Arc::new),
 			particles: Vec::new(),
 		}
 	}
@@ -109,6 +120,7 @@ impl Emitter {
 #[derive(Clone, Default)]
 pub(crate) struct ParticleBank {
 	emitters: BTreeMap<EntityKey, Emitter>,
+	retired: Vec<Emitter>,
 }
 
 impl ParticleBank {
@@ -126,7 +138,7 @@ impl ParticleBank {
 				.filter(|emitter| emitter.enabled)
 			{
 				self.emitters
-					.insert(entity.key.clone(), Emitter::new(emitter.settings));
+					.insert(entity.key.clone(), Emitter::new(&emitter.settings));
 			}
 		}
 	}
@@ -149,34 +161,75 @@ impl ParticleBank {
 	}
 
 	pub(crate) fn needs_tick(&self) -> bool {
-		self.emitters
-			.values()
-			.any(|emitter| emitter.settings.rate_per_second > 0.0 || !emitter.particles.is_empty())
-	}
-
-	pub(crate) fn samples(&self, fixed_hz: u32) -> impl Iterator<Item = ParticleSample> + '_ {
-		self.emitters.values().flat_map(move |emitter| {
-			emitter
-				.particles
-				.iter()
-				.map(move |particle| particle.sample(&emitter.settings, fixed_hz))
+		!self.retired.is_empty()
+			|| self.emitters.values().any(|emitter| {
+			emitter.settings.rate_per_second > 0.0 || !emitter.particles.is_empty()
 		})
 	}
 
+	pub(crate) fn samples(&self, fixed_hz: u32) -> impl Iterator<Item=ParticleSample> + '_ {
+		self.emitters
+			.values()
+			.chain(&self.retired)
+			.flat_map(move |emitter| {
+				emitter
+					.particles
+					.iter()
+					.map(move |particle| particle.sample(emitter, fixed_hz))
+			})
+	}
+
+	/// Emit once in world space. Surviving particles count against the scene budget.
+	pub(crate) fn burst(
+		&mut self,
+		position: [f32; 3],
+		burst: &ParticleBurstSettings,
+	) -> Result<bool, String> {
+		burst.validate()?;
+		let origin = Vec3::from_array(position);
+		if !origin.is_finite() {
+			return Err("Particle burst position must be finite".into());
+		}
+		let count = usize::from(burst.count).min(MAX_PARTICLES - self.particle_count());
+		if count == 0 {
+			return Ok(false);
+		}
+		let mut emitter = Emitter::new(&burst.settings);
+		emitter.particles.reserve_exact(count);
+		emitter.emit(count, origin, Quat::IDENTITY);
+		self.retired.push(emitter);
+		Ok(true)
+	}
+
+	fn particle_count(&self) -> usize {
+		self.emitters
+			.values()
+			.chain(&self.retired)
+			.map(|emitter| emitter.particles.len())
+			.sum()
+	}
+
 	pub(crate) fn step(&mut self, world: &RuntimeWorld, fixed_hz: u32) -> bool {
-		let had_particles = self
+		let had_particles = !self.retired.is_empty()
+			|| self
 			.emitters
 			.values()
 			.any(|emitter| !emitter.particles.is_empty());
-		self.emitters.retain(|key, emitter| {
+		self.retired.retain_mut(|emitter| {
 			emitter.age(fixed_hz);
-			world.entity_index(key).is_some()
+			!emitter.particles.is_empty()
 		});
-		let mut active: usize = self
-			.emitters
-			.values()
-			.map(|emitter| emitter.particles.len())
-			.sum();
+		for (_, mut emitter) in self.emitters.extract_if(.., |key, emitter| {
+			emitter.age(fixed_hz);
+			world.entity_index(key).is_none()
+		}) {
+			if emitter.settings.linger_on_despawn && !emitter.particles.is_empty() {
+				// Retired groups never add births. Keep their motion/texture settings.
+				emitter.birth_credit = 0.0;
+				self.retired.push(emitter);
+			}
+		}
+		let mut active = self.particle_count();
 		let mut rotations = BirthRotations::default();
 		for (key, emitter) in &mut self.emitters {
 			let births = emitter.accepted_births(fixed_hz, MAX_PARTICLES - active);

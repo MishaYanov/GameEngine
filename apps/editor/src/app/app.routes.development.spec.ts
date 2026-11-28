@@ -29,7 +29,7 @@ describe('Development startup', () => {
         const harness = await RouterTestingHarness.create('/');
         expect(TestBed.inject(Router).url).toBe('/setup');
         expect(harness.routeNativeElement?.querySelector('h1')?.textContent).toContain(
-            'Create your project',
+            'Open or create a project',
         );
     });
 

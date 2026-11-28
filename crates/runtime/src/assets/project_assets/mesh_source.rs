@@ -23,6 +23,27 @@ struct MeshExtras {
 	extras: serde_json::Value,
 }
 
+/// A Character reimport must preserve the IDs exposed to saved animation settings.
+pub(super) fn check_character_reimport(
+	root: &Path,
+	previous: &PersistentAsset,
+	bytes: &[u8],
+) -> Result<(), String> {
+	let path = asset_path(root, &previous.path, true)?;
+	let old_bytes = read(&path, MAX_SOURCE)?;
+	if fingerprint(&old_bytes) != previous.fingerprint {
+		return Err("The current model changed on disk before reimport".into());
+	}
+	if let Ok(old) = bridge::animation_asset::decode(&old_bytes)
+		&& old.character.is_some()
+	{
+		let candidate = bridge::animation_asset::decode(bytes)
+			.map_err(|error| format!("Invalid Character reimport: {error}"))?;
+		candidate.require_compatible_character(&old)?;
+	}
+	Ok(())
+}
+
 pub(super) fn signatures(
 	path: &Path,
 	asset_root: &Path,

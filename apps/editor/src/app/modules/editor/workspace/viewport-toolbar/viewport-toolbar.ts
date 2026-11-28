@@ -1,4 +1,4 @@
-import {Component, computed, inject, input, signal} from '@angular/core';
+import {Component, computed, inject, input, output, signal} from '@angular/core';
 import {EDITOR_ACTIONS, VIEWPORT_TOOL_ACTION_IDS} from '../../../../core/editor/editor-actions';
 import {editorShortcutHelp, editorShortcutLabel, NATIVE_SCENE_NAVIGATION} from '../../../../core/editor/editor-keymap';
 import {EditorService} from '../../../../core/editor/editor.service';
@@ -11,26 +11,50 @@ import type {
     ViewportProjection,
     ViewportSpace
 } from '../../../../core/editor/viewport-editor.models';
+import {EditorIcon, type EditorIconName} from '../../../../shared/icons/editor-icon';
 import {SceneEditingService} from '../scene-editing.service';
+
+const TOOL_ICONS = {
+    hand: 'hand',
+    move: 'move',
+    rotate: 'rotate',
+    scale: 'scale'
+} as const satisfies Record<string, EditorIconName>;
 
 @Component({
     selector: 'editor-viewport-toolbar',
+    imports: [EditorIcon],
     templateUrl: './viewport-toolbar.html',
     styleUrl: './viewport-toolbar.scss',
 })
 export class ViewportToolbar {
     readonly opening = input(false);
+    readonly maximized = input(false);
+    readonly maximizeRequested = output<void>();
     protected readonly viewport = inject(ViewportEditorService);
     protected readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService);
     protected readonly settings = this.viewport.settings;
     protected readonly help = signal(false);
+    protected readonly optionsOpen = signal(false);
+    protected readonly shadingLabel = computed(() => {
+        switch (this.settings().shading) {
+            case 'lit':
+                return 'Lit';
+            case 'unlit':
+                return 'Unlit';
+            case 'wireframe':
+                return 'Wireframe';
+        }
+    });
     protected readonly available = computed(() => this.viewport.nativeAvailable && !!this.editor.snapshot() &&
         !this.opening() && this.settings().view === 'scene' && !this.viewport.authoringGesture());
     protected readonly authoringAvailable = computed(() => this.available() && !this.editor.playing());
+    protected readonly displayAvailable = computed(() => this.available() && this.viewport.pending() === 0);
     protected readonly tools = VIEWPORT_TOOL_ACTION_IDS.map(id => ({
         ...EDITOR_ACTIONS[id],
-        shortcut: editorShortcutLabel(id)
+        shortcut: editorShortcutLabel(id),
+        icon: TOOL_ICONS[EDITOR_ACTIONS[id].command.tool]
     }));
     protected readonly frame = EDITOR_ACTIONS['scene.frame'].command;
     protected readonly zoomIn = EDITOR_ACTIONS['scene.zoom-in'].command;
@@ -74,6 +98,20 @@ export class ViewportToolbar {
             type: 'set_projection',
             projection: value as ViewportProjection
         });
+    }
+
+    protected setShading(select: HTMLSelectElement): void {
+        const shading = select.value;
+        select.value = this.settings().shading;
+        if (this.displayAvailable() && (shading === 'lit' || shading === 'unlit' || shading === 'wireframe')) {
+            this.dispatch({type: 'set_shading', shading});
+        }
+    }
+
+    protected toggleVertices(): void {
+        if (this.displayAvailable()) {
+            this.dispatch({type: 'set_show_vertices', visible: !this.settings().show_vertices});
+        }
     }
 
     protected orient(value: string): void {

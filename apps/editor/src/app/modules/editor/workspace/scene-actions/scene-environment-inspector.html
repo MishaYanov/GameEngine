@@ -1,6 +1,6 @@
 <fieldset [disabled]="!editable() || busy()">
     <legend>Scene Environment</legend>
-    <div class="ambient" role="group" aria-label="Ambient light (linear RGB)">
+    <div class="channels" role="group" aria-label="Ambient light (linear RGB)">
         @for (channel of channels; track channel.key) {
             <label>Ambient {{ channel.label.toLowerCase() }}
                 <input inputmode="decimal" [formField]="fields.ambient[channel.key]"/>
@@ -12,7 +12,32 @@
     @if (candidate().error; as message) {
         <small role="status">{{ message }}</small>
     }
-    @if (error(); as message) {
-        <p role="alert">{{ message }}</p>
-    }
 </fieldset>
+@if (fogSupported()) {
+    <fieldset [disabled]="!editable() || busy()">
+        <legend>Atmospheric Fog</legend>
+        <label><input type="checkbox" [formField]="fogFields.enabled"/> Enable height fog</label>
+        @if (fogFields.enabled().value()) {
+            <div class="channels" role="group" aria-label="Fog color (linear RGB)">
+                @for (channel of channels; track channel.key) {
+                    <label>Fog {{ channel.label.toLowerCase() }}
+                        <input inputmode="decimal" [formField]="fogFields.color[channel.key]"/>
+                    </label>
+                }
+            </div>
+            <div class="fog-settings">
+                <label>Density<input inputmode="decimal" [formField]="fogFields.density"/></label>
+                <label>Base height (m)<input inputmode="decimal" [formField]="fogFields.baseHeight"/></label>
+                <label>Height falloff<input inputmode="decimal" [formField]="fogFields.heightFalloff"/></label>
+                <label>Start distance (m)<input inputmode="decimal" [formField]="fogFields.startDistance"/></label>
+            </div>
+        }
+        <button type="button" [disabled]="!canApplyFog()" (click)="applyFog()">Apply Fog</button>
+        @if (fogCandidate().error; as message) {
+            <small role="status">{{ message }}</small>
+        }
+    </fieldset>
+}
+@if (error(); as message) {
+    <p role="alert">{{ message }}</p>
+}

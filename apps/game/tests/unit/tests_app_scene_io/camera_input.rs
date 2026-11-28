@@ -37,6 +37,10 @@ fn generic_hud_uses_module_status_and_follow_camera_ignores_debug_camera_input_w
 		scene_id: SceneId::new("race").unwrap(),
 		paused: true,
 		pending_scene_id: None,
+		failed_scene_id: None,
+		failed_scene_attempt_id: None,
+		sequence: None,
+		resident_regions: Vec::new(),
 		gameplay: Some(GameplayStatus {
 			objective: "Win the race".into(),
 			detail: Some("Lap three".into()),

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use bridge::normal_tangents::{self, GENERATED_TANGENT_BYTES_PER_CORNER, NormalVertex};
 use gltf::{
 	accessor::{DataType, Dimensions},
 	mesh::Mode,
@@ -7,7 +8,8 @@ use gltf::{
 use renderer::vulkan::Vertex;
 
 use super::{
-	GltfLoaderError, IMPORT_LIMIT, ImportedPrimitive, charge, rejected, resources::ImageResource,
+	GltfLoaderError, IMPORT_LIMIT, ImportedNormalMap, ImportedPrimitive, charge, rejected,
+	resources::ImageResource,
 };
 use crate::assets::{MaterialData, MeshData};
 
@@ -69,6 +71,10 @@ pub(super) fn import_mesh_checked(
 				.checked_add(index_bytes)
 				.ok_or_else(|| rejected("geometry size overflow"))?,
 		)?;
+		charge(
+			&mut budget,
+			normal_geometry_bytes(&primitive, vertices, indices, mesh.index())?,
+		)?;
 		parts.push(import_primitive(
 			mesh.index(),
 			primitive,
@@ -103,6 +109,10 @@ pub(super) fn validate_warm_accessor_ranges(
 			.pbr_metallic_roughness()
 			.base_color_texture()
 			.map_or(0, |texture| texture.tex_coord());
+		let normal_uv = primitive
+			.material()
+			.normal_texture()
+			.map(|info| info.tex_coord());
 		for (accessor, types, dimensions) in [
 			(
 				primitive.get(&gltf::Semantic::Positions),
@@ -118,6 +128,16 @@ pub(super) fn validate_warm_accessor_ranges(
 				primitive.get(&gltf::Semantic::TexCoords(uv)),
 				&[DataType::U8, DataType::U16, DataType::F32][..],
 				Dimensions::Vec2,
+			),
+			(
+				normal_uv.and_then(|uv| primitive.get(&gltf::Semantic::TexCoords(uv))),
+				&[DataType::U8, DataType::U16, DataType::F32][..],
+				Dimensions::Vec2,
+			),
+			(
+				normal_uv.and_then(|_| primitive.get(&gltf::Semantic::Tangents)),
+				&[DataType::F32][..],
+				Dimensions::Vec4,
 			),
 			(
 				primitive.indices(),
@@ -217,9 +237,56 @@ pub(in crate::assets) fn preflight_meshes(
 				})
 				.ok_or_else(|| rejected("decoded geometry size overflow"))?;
 			charge(&mut budget, bytes)?;
+			charge(
+				&mut budget,
+				normal_geometry_bytes(&primitive, vertices, indices, mesh.index())?,
+			)?;
 		}
 	}
 	Ok(IMPORT_LIMIT - budget)
+}
+
+fn normal_geometry_bytes(
+	primitive: &gltf::Primitive<'_>,
+	vertices: usize,
+	indices: usize,
+	mesh: usize,
+) -> Result<usize, GltfLoaderError> {
+	let Some(info) = primitive.material().normal_texture() else {
+		return Ok(0);
+	};
+	let invalid = |message| {
+		rejected(format!(
+			"mesh {mesh}, primitive {}: {message}",
+			primitive.index()
+		))
+	};
+	normal_tangents::validate_normal_texture(&info).map_err(invalid)?;
+	let uv = primitive.get(&gltf::Semantic::TexCoords(info.tex_coord()));
+	if uv.is_none_or(|uv| uv.count() != vertices || !normal_tangents::valid_normal_uv(&uv)) {
+		return Err(invalid(
+			"normal texture requires a valid declared TEXCOORD set with the POSITION count",
+		));
+	}
+	let tangent = primitive.get(&gltf::Semantic::Tangents);
+	if tangent.as_ref().is_some_and(|value| {
+		value.count() != vertices
+			|| value.dimensions() != Dimensions::Vec4
+			|| value.data_type() != DataType::F32
+			|| value.normalized()
+	}) {
+		return Err(invalid(
+			"TANGENT requires one non-normalized float VEC4 per POSITION",
+		));
+	}
+	let bytes = vertices.checked_mul(64).and_then(|bytes| {
+		if tangent.is_none() || primitive.get(&gltf::Semantic::Normals).is_none() {
+			bytes.checked_add(indices.checked_mul(GENERATED_TANGENT_BYTES_PER_CORNER)?)
+		} else {
+			Some(bytes)
+		}
+	});
+	bytes.ok_or_else(|| invalid("normal geometry size overflow"))
 }
 
 fn import_primitive(
@@ -303,7 +370,7 @@ fn import_primitive(
 		.ok_or(GltfLoaderError::MissingPositions)?
 		.collect();
 
-	let indices: Vec<u32> = match reader.read_indices() {
+	let mut indices: Vec<u32> = match reader.read_indices() {
 		Some(indices) => indices.into_u32().collect(),
 		None => {
 			let count = u32::try_from(positions.len())
@@ -373,7 +440,7 @@ fn import_primitive(
 			"NORMAL must contain one finite nonzero vector per position",
 		));
 	}
-	let vertices: Vec<Vertex> = positions
+	let mut vertices: Vec<Vertex> = positions
 		.into_iter()
 		.zip(tex_coords)
 		.enumerate()
@@ -385,6 +452,73 @@ fn import_primitive(
 			}))
 		})
 		.collect();
+	let normal_map = if let Some(info) = material.normal_texture() {
+		normal_tangents::report_normal_mip_fallback(&info);
+		let image_index = info.texture().source().index();
+		let Some(ImageResource::Decoded(image)) = images.get(image_index) else {
+			return Err(GltfLoaderError::InvalidImageReference(image_index));
+		};
+		if shared_images.insert(image_index) {
+			charge(budget, image.pixels().len())?;
+		}
+		let normal_uvs: Vec<_> = reader
+			.read_tex_coords(info.tex_coord())
+			.ok_or_else(|| {
+				rejected(format!(
+					"mesh {mesh_index}, primitive {primitive_index}: missing normal TEXCOORD_{}",
+					info.tex_coord()
+				))
+			})?
+			.into_f32()
+			.collect();
+		if normal_uvs.len() != vertices.len() || normal_uvs.iter().flatten().any(|v| !v.is_finite())
+		{
+			return Err(rejected(format!(
+				"mesh {mesh_index}, primitive {primitive_index}: invalid normal texture coordinates"
+			)));
+		}
+		match reader.read_tangents().filter(|_| normals.is_some()) {
+			Some(tangents) => {
+				for ((vertex, uv), tangent) in vertices.iter_mut().zip(normal_uvs).zip(tangents) {
+					if tangent.into_iter().any(|v| !v.is_finite()) || tangent[3].abs() != 1.0 {
+						return Err(rejected(format!(
+							"mesh {mesh_index}, primitive {primitive_index}: nonfinite TANGENT or invalid handedness"
+						)));
+					}
+					*vertex = vertex.with_normal_map(
+						normal_tangents::normal_tangent(tangent, vertex.normal),
+						uv,
+					);
+				}
+			}
+			None => {
+				let geometry: Vec<_> = vertices
+					.iter()
+					.zip(&normal_uvs)
+					.map(|(vertex, &uv)| NormalVertex {
+						position: vertex.position,
+						normal: normals.as_ref().map(|_| vertex.normal),
+						uv,
+					})
+					.collect();
+				vertices = normal_tangents::generate(&geometry, &mut indices)
+					.into_iter()
+					.map(|frame| {
+						vertices[frame.source]
+							.with_normal(frame.normal)
+							.with_normal_map(frame.tangent, normal_uvs[frame.source])
+					})
+					.collect();
+			}
+		}
+		Some(ImportedNormalMap {
+			image_index,
+			image: image.clone(),
+			scale: info.scale(),
+		})
+	} else {
+		None
+	};
 
 	engine_logger::debug!(
 		"Imported primitive {}: {} vertices, {} indices, {} triangles",
@@ -398,13 +532,29 @@ fn import_primitive(
 		mesh_index,
 		primitive_index,
 		base_color_image_index,
+		normal_map,
 		mesh: MeshData::new(vertices, indices),
+		surface: material_surface(&material),
 		material: MaterialData {
 			base_color_image,
 			base_color_factor,
 			double_sided: material.double_sided(),
 		},
 	})
+}
+
+fn material_surface(material: &gltf::Material<'_>) -> renderer::vulkan::MaterialSurface {
+	let alpha_cutoff = (material.alpha_mode() == gltf::material::AlphaMode::Mask)
+		.then(|| material.alpha_cutoff().unwrap_or(0.5));
+	let emissive_factor = if material.emissive_texture().is_none() {
+		material.emissive_factor()
+	} else {
+		[0.0; 3]
+	};
+	renderer::vulkan::MaterialSurface {
+		alpha_cutoff,
+		emissive_factor,
+	}
 }
 
 #[cfg(test)]

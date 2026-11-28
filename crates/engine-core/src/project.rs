@@ -2,7 +2,16 @@
 //! no engine policy depends on demo roles, keyboard mappings, or editor layout.
 mod behavior;
 mod physics_layers;
+mod region_navigation;
+mod scene_flow;
+mod world_regions;
+pub use region_navigation::{RegionNavigationStep, RegionNavigator, RegionPath};
+pub use scene_flow::{
+	MAX_SCENE_ROUTES, SceneRoute, SceneRouteActivation, SceneRouteCondition, SceneRouteId,
+	SceneRoutePreload,
+};
 use crate::project_format::SizeBudget;
+pub use world_regions::{RegionBounds, WorldLod, WorldRegion};
 pub use behavior::{
 	BehaviorDefinition, BehaviorSettings, BehaviorSpace, BehaviorSpec, ResolvedBehavior,
 	SceneBehavior,
@@ -88,6 +97,14 @@ pub struct ProjectData {
 	/// Native modules own the typed schema. Core bounds the generic payload.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub gameplay_settings: Option<serde_json::Value>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub scene_routes: Vec<SceneRoute>,
+	#[serde(default, skip_serializing_if = "crate::sequence::SequenceLibrary::is_empty")]
+	pub sequences: crate::sequence::SequenceLibrary,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub world_regions: Vec<WorldRegion>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub world_lods: Vec<WorldLod>,
 }
 
 fn default_hz() -> u32 {
@@ -133,6 +150,10 @@ impl ProjectData {
 			physics_layers: None,
 			gameplay_module: None,
 			gameplay_settings: None,
+			scene_routes: Vec::new(),
+			sequences: Default::default(),
+			world_regions: Vec::new(),
+			world_lods: Vec::new(),
 		};
 		project.validate_scene(scene)?;
 		Ok(project)

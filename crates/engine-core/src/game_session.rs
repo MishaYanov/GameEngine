@@ -1,10 +1,21 @@
 use crate::camera_input::{CameraInputOwner, CameraIntent};
 use crate::game_progress::{GameProgress, ProgressAction, ProgressState};
-use crate::project::ProjectData;
+use crate::project::{
+	ProjectData, SceneRoute, SceneRouteActivation, SceneRouteId, SceneRoutePreload,
+};
 use crate::scene_catalog::SceneId;
-use crate::simulation_session::{GameModuleFactory, SimulationSession, TickOutcome};
+use crate::simulation_session::{
+	GameModuleFactory, SimulationSession, TickOutcome, WorldRegionState,
+};
 use crate::{SceneData, command::PlayStatusDto};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
+
+const MAX_ARCHIVED_REGION_BYTES: usize = 4 * 1024 * 1024;
+
+struct ArchivedRegions {
+	snapshot: WorldRegionState,
+	bytes: usize,
+}
 
 pub struct GameSession {
 	animation_resolver: Option<crate::animation::AnimationResolver>,
@@ -18,7 +29,46 @@ pub struct GameSession {
 	identity: Arc<String>,
 	progress: ProgressState,
 	scene_generation: u64,
-	pending_scene: Option<SceneId>,
+	next_attempt_id: u64,
+	pending_transition: Option<PendingTransition>,
+	failed_transition: Option<SceneTransitionAttempt>,
+	region_archive: HashMap<SceneId, ArchivedRegions>,
+}
+
+/// Copyable work identity for one scene-transition attempt. Hosts retain a
+/// token while preparing data and must submit the same token for adoption.
+#[derive(Clone, Debug)]
+pub struct SceneTransitionAttempt {
+	id: u64,
+	owner: Arc<String>,
+	source_generation: u64,
+	scene_id: SceneId,
+	route_id: Option<SceneRouteId>,
+}
+
+impl SceneTransitionAttempt {
+	pub fn id(&self) -> u64 {
+		self.id
+	}
+
+	pub fn scene_id(&self) -> &SceneId {
+		&self.scene_id
+	}
+
+	pub fn route_id(&self) -> Option<&SceneRouteId> {
+		self.route_id.as_ref()
+	}
+
+	fn matches(&self, other: &Self) -> bool {
+		Arc::ptr_eq(&self.owner, &other.owner)
+			&& self.id == other.id
+			&& self.source_generation == other.source_generation
+	}
+}
+
+struct PendingTransition {
+	attempt: SceneTransitionAttempt,
+	previous_pause: Option<bool>,
 }
 
 pub struct PreparedScene {
@@ -26,12 +76,26 @@ pub struct PreparedScene {
 	owner: Arc<String>,
 	expected_generation: u64,
 	restore_guard: Option<(u64, u64)>,
+	attempt: Option<SceneTransitionAttempt>,
 	simulation: SimulationSession,
 }
 
 impl PreparedScene {
 	pub fn scene_id(&self) -> &SceneId {
 		self.simulation.scene_id()
+	}
+
+	/// The immutable document actually used by the candidate world.
+	pub fn world_data(&self) -> Arc<SceneData> {
+		self.simulation.document()
+	}
+
+	/// Apply a same-world checkpoint before a prepared run is installed.
+	pub fn restore_region_state(&mut self, snapshot: WorldRegionState) -> Result<(), String> {
+		if self.new_run.is_none() {
+			return Err("Region checkpoints require a prepared run replacement".into());
+		}
+		self.simulation.restore_region_state(snapshot)
 	}
 }
 
@@ -79,13 +143,20 @@ impl GameSession {
 	}
 
 	pub fn status(&self) -> PlayStatusDto {
+		let failed = self.failed_transition();
 		PlayStatusDto {
 			play_session_id: self.play_session_id.clone(),
 			run_id: self.run_id().to_owned(),
 			scene_generation: self.scene_generation,
 			scene_id: self.active.scene_id().clone(),
 			paused: self.active.paused(),
-			pending_scene_id: self.pending_scene.clone(),
+			pending_scene_id: self.pending_scene().cloned(),
+			failed_scene_id: failed.map(|attempt| attempt.scene_id().clone()),
+			failed_scene_attempt_id: failed
+				.filter(|attempt| attempt.route_id().is_some())
+				.map(SceneTransitionAttempt::id),
+			sequence: self.active.sequence_presentation(),
+			resident_regions: self.active.resident_regions(),
 			gameplay: self.active.gameplay_status(self.progress.view()),
 		}
 	}
@@ -100,19 +171,22 @@ impl GameSession {
 		self.progress.apply_batch(actions)
 	}
 	pub fn tick(&mut self, elapsed: f64) -> Result<TickOutcome, String> {
+		if self.pending_route().is_some() {
+			self.active.set_paused(true);
+		}
 		let outcome = self.active.tick_with_progress(
 			elapsed,
 			&mut self.progress,
-			self.pending_scene.is_some(),
+			self.pending_transition.is_some(),
 		)?;
 		if let Some(scene_id) = &outcome.requested_scene {
-			self.pending_scene = Some(scene_id.clone());
+			self.begin_transition(scene_id.clone(), outcome.requested_route.clone())?;
 			engine_logger::debug!(target: "engine_core::play", "Runtime scene transition requested: tick={}, generation={}", outcome.tick, self.scene_generation);
 		}
 		Ok(outcome)
 	}
 	pub fn needs_tick(&self) -> bool {
-		self.active.needs_tick_with_progress(self.progress.view())
+		self.pending_route().is_none() && self.active.needs_tick_with_progress(self.progress.view())
 	}
 	pub fn active(&self) -> &SimulationSession {
 		&self.active
@@ -129,22 +203,144 @@ impl GameSession {
 		self.scene_generation
 	}
 
-	/// The outstanding request stays available if a host cannot prepare its destination.
+	/// The outstanding destination stays available for synchronous hosts.
 	pub fn pending_scene(&self) -> Option<&SceneId> {
-		self.pending_scene.as_ref()
+		self.pending_transition()
+			.map(SceneTransitionAttempt::scene_id)
+	}
+
+	pub fn pending_transition(&self) -> Option<&SceneTransitionAttempt> {
+		self.pending_transition
+			.as_ref()
+			.map(|pending| &pending.attempt)
+	}
+
+	pub fn failed_transition(&self) -> Option<&SceneTransitionAttempt> {
+		self.failed_transition.as_ref()
+	}
+
+	pub fn pending_route(&self) -> Option<&SceneRoute> {
+		self.project
+			.scene_route(self.pending_transition()?.route_id()?)
+	}
+
+	pub fn approach_route(&self) -> Option<&SceneRoute> {
+		self.project
+			.scene_routes
+			.iter()
+			.filter_map(|route| {
+				let distance = self.preload_distance(route, false)?;
+				Some((route, distance))
+			})
+			.min_by(|(a, a_distance), (b, b_distance)| {
+				b.priority
+					.cmp(&a.priority)
+					.then_with(|| a_distance.total_cmp(b_distance))
+					.then_with(|| a.id.as_str().cmp(b.id.as_str()))
+			})
+			.map(|(route, _)| route)
+	}
+
+	pub fn should_retain_preload(&self, route_id: &SceneRouteId) -> bool {
+		self.project
+			.scene_route(route_id)
+			.is_some_and(|route| self.preload_distance(route, true).is_some())
+	}
+
+	/// Request a route through an explicit host action. Sensor routes require a
+	/// currently committed overlap; sequence routes come from the fixed step.
+	pub fn request_route(
+		&mut self,
+		route_id: &SceneRouteId,
+	) -> Result<SceneTransitionAttempt, String> {
+		let route = self
+			.project
+			.scene_route(route_id)
+			.ok_or("Unknown scene route")?;
+		self.validate_live_route(route)?;
+		match &route.activate {
+			SceneRouteActivation::Manual => {}
+			SceneRouteActivation::SequenceCompleted { .. } => {
+				return Err("This scene route waits for sequence completion".into());
+			}
+			_ if self.active.route_overlaps(&route.activate) => {}
+			_ => return Err("The player is outside the scene route trigger".into()),
+		}
+		self.begin_transition(route.to.clone(), Some(route.id.clone()))
+	}
+
+	pub fn cancel_transition(&mut self, attempt: &SceneTransitionAttempt) -> Result<(), String> {
+		if self
+			.failed_transition
+			.as_ref()
+			.is_some_and(|failed| failed.matches(attempt))
+		{
+			self.failed_transition = None;
+			return Ok(());
+		}
+		self.clear_transition(attempt)
+	}
+
+	pub fn fail_transition(&mut self, attempt: &SceneTransitionAttempt) -> Result<(), String> {
+		self.clear_transition(attempt)?;
+		self.failed_transition = Some(attempt.clone());
+		Ok(())
+	}
+
+	pub fn retry_transition(
+		&mut self,
+		attempt: &SceneTransitionAttempt,
+	) -> Result<SceneTransitionAttempt, String> {
+		if self
+			.failed_transition
+			.as_ref()
+			.is_none_or(|failed| !failed.matches(attempt))
+		{
+			return Err("Scene transition is no longer available to retry".into());
+		}
+		if let Some(route_id) = attempt.route_id()
+			&& let Some(route) = self.project.scene_route(route_id)
+		{
+			self.validate_live_route(route)?;
+		}
+		self.begin_transition(attempt.scene_id.clone(), attempt.route_id.clone())
 	}
 
 	pub fn prepare_pending_scene(&self, document: Arc<SceneData>) -> Result<PreparedScene, String> {
-		let scene_id = self
-			.pending_scene()
+		let attempt = self
+			.pending_transition()
 			.ok_or("No runtime scene request is pending")?;
-		self.prepare_scene(scene_id.clone(), document)
+		self.prepare_transition(attempt, document)
+	}
+
+	pub fn prepare_transition(
+		&self,
+		attempt: &SceneTransitionAttempt,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.current_transition(attempt)?;
+		let mut prepared = self.prepare_scene_candidate(attempt.scene_id.clone(), document)?;
+		prepared.attempt = Some(attempt.clone());
+		Ok(prepared)
 	}
 
 	pub fn prepare_scene(
 		&self,
 		scene_id: SceneId,
 		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		if let Some(attempt) = self.pending_transition()
+			&& attempt.scene_id() == &scene_id
+		{
+			return self.prepare_transition(attempt, document);
+		}
+		self.prepare_scene_candidate(scene_id, document)
+	}
+
+	fn prepare_scene_candidate(
+		&self,
+		scene_id: SceneId,
+		mut document: Arc<SceneData>,
 	) -> Result<PreparedScene, String> {
 		if self.active.scene_id() == &scene_id {
 			return Err("Cannot prepare active scene".into());
@@ -154,6 +350,12 @@ impl GameSession {
 			.checked_add(1)
 			.ok_or_else(|| "Scene generation counter is exhausted".to_string())?;
 
+		self.project
+			.validate_scene_routes_for(&scene_id, &document)?;
+		let route = self.pending_route().filter(|route| route.to == scene_id);
+		if let Some(route) = route {
+			document = route.prepare_arrival(document)?;
+		}
 		let mut simulation = SimulationSession::with_shared_project_for_scene(
 			Arc::clone(&self.project),
 			scene_id,
@@ -161,6 +363,9 @@ impl GameSession {
 			self.factory.as_ref(),
 		)?;
 
+		if let Some(archived) = self.region_archive.get(simulation.scene_id()) {
+			simulation.restore_region_state(archived.snapshot.clone())?;
+		}
 		simulation.set_paused(self.active.paused());
 		if let Some(resolver) = &self.animation_resolver {
 			simulation.set_animation_resolver(Arc::clone(resolver))?;
@@ -179,11 +384,17 @@ impl GameSession {
 		}
 		simulation.require_control_graph_ready()?;
 
+		self.validate_route_conditions(&simulation, self.progress.view())?;
+		if let Some(instance) = route.and_then(|route| route.start_sequence.as_ref()) {
+			simulation.queue_sequence(instance)?;
+		}
+
 		Ok(PreparedScene {
 			new_run: None,
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,
 			restore_guard: None,
+			attempt: None,
 			simulation,
 		})
 	}
@@ -194,6 +405,7 @@ impl GameSession {
 		document: Arc<SceneData>,
 		factory: Arc<dyn GameModuleFactory>,
 	) -> Result<Self, String> {
+		project.validate_scene_routes_for(&scene_id, &document)?;
 		let progress = factory.create_progress()?;
 		let active = SimulationSession::with_shared_project_for_scene(
 			Arc::clone(&project),
@@ -202,7 +414,7 @@ impl GameSession {
 			factory.as_ref(),
 		)?;
 
-		Ok(Self {
+		let session = Self {
 			animation_resolver: None,
 			animator_resolver: None,
 			input_actions_resolver: None,
@@ -214,8 +426,13 @@ impl GameSession {
 			identity: Arc::new(uuid::Uuid::new_v4().to_string()),
 			progress,
 			scene_generation: 0,
-			pending_scene: None,
-		})
+			next_attempt_id: 0,
+			pending_transition: None,
+			failed_transition: None,
+			region_archive: HashMap::new(),
+		};
+		session.validate_route_conditions(&session.active, session.progress.view())?;
+		Ok(session)
 	}
 
 	pub fn prepare_new_game(
@@ -275,6 +492,7 @@ impl GameSession {
 			owner: Arc::clone(&self.identity),
 			expected_generation: self.scene_generation,
 			restore_guard,
+			attempt: None,
 			simulation: next.active,
 			new_run: Some((restored_progress.unwrap_or(next.progress), next.identity)),
 		})
@@ -350,20 +568,174 @@ impl GameSession {
 				.ok_or_else(|| "Scene generation counter is exhausted".to_string())?
 		};
 
+		if let Some(attempt) = &prepared.attempt {
+			self.current_transition(attempt)?;
+			if let Some(route) = self.pending_route() {
+				self.validate_live_route(route)?;
+			}
+		} else if !restarted && self.pending_route().is_some() {
+			return Err("Prepared scene is missing the active transition attempt".into());
+		}
+		let from = self.active.scene_id().clone();
+		let to = prepared.scene_id().clone();
+		let archived = if restarted {
+			None
+		} else {
+			self.prepare_region_archive(&from, &to)?
+		};
 		if !restarted {
-			prepared.simulation.set_paused(self.active.paused());
+			let paused = self
+				.pending_transition
+				.as_ref()
+				.and_then(|pending| pending.previous_pause)
+				.unwrap_or_else(|| self.active.paused());
+			prepared.simulation.set_paused(paused);
 		}
 		prepared.simulation.clear_input();
 		if let Some((progress, identity)) = prepared.new_run {
 			self.progress = progress;
 			self.identity = identity;
+			self.region_archive.clear();
+		} else {
+			// The new simulation already owns its restored copy. Release its
+			// archived copy only when the replacement is accepted.
+			self.region_archive.remove(&to);
+			if let Some(archived) = archived {
+				self.region_archive.insert(from, archived);
+			}
 		}
 
 		self.active = prepared.simulation;
 		self.scene_generation = next_generation;
-		self.pending_scene = None;
+		self.pending_transition = None;
+		self.failed_transition = None;
 		engine_logger::info!(target: "engine_core::play", "Runtime scene committed: restarted={restarted}, generation={next_generation}");
 
+		Ok(())
+	}
+
+	fn prepare_region_archive(
+		&self,
+		from: &SceneId,
+		to: &SceneId,
+	) -> Result<Option<ArchivedRegions>, String> {
+		if self.project.regions_for(from).next().is_none() {
+			return Ok(None);
+		}
+		let snapshot = self.active.capture_region_state()?;
+		if snapshot.is_empty() {
+			return Ok(None);
+		}
+		let bytes = snapshot.to_json()?.len();
+		let other_worlds = self
+			.region_archive
+			.iter()
+			.filter(|(scene, _)| *scene != to)
+			.map(|(_, archived)| archived.bytes)
+			.sum::<usize>();
+		if other_worlds + bytes > MAX_ARCHIVED_REGION_BYTES {
+			return Err("Scene change would exceed the run's region archive budget".into());
+		}
+		Ok(Some(ArchivedRegions { snapshot, bytes }))
+	}
+
+	fn preload_distance(&self, route: &SceneRoute, retain: bool) -> Option<f32> {
+		if self.active.scene_id() != &route.from || self.validate_live_route(route).is_err() {
+			return None;
+		}
+		match route.preload.as_ref()? {
+			SceneRoutePreload::Approach {
+				distance,
+				release_distance,
+			} => {
+				let threshold = if retain { *release_distance } else { *distance };
+				let measured = self.active.route_distance(&route.activate)?;
+				(measured <= threshold).then_some(measured)
+			}
+			SceneRoutePreload::WhenSequenceStarts { instance } => {
+				(self.active.active_sequence() == Some(instance)).then_some(0.0)
+			}
+		}
+	}
+
+	fn validate_live_route(&self, route: &SceneRoute) -> Result<(), String> {
+		if self.active.scene_id() != &route.from {
+			return Err("Scene route belongs to a different source scene".into());
+		}
+		if !self
+			.active
+			.route_condition_satisfied(route, self.progress.view())
+		{
+			return Err(format!(
+				"Scene route {:?} is currently locked",
+				route.id.as_str()
+			));
+		}
+		Ok(())
+	}
+
+	fn validate_route_conditions(
+		&self,
+		simulation: &SimulationSession,
+		progress: crate::game_progress::ProgressView<'_>,
+	) -> Result<(), String> {
+		for route in self
+			.project
+			.scene_routes
+			.iter()
+			.filter(|route| &route.from == simulation.scene_id())
+		{
+			simulation.validate_route_condition(route, progress)?;
+		}
+		Ok(())
+	}
+
+	fn begin_transition(
+		&mut self,
+		scene_id: SceneId,
+		route_id: Option<SceneRouteId>,
+	) -> Result<SceneTransitionAttempt, String> {
+		if self.pending_transition.is_some() {
+			return Err("Another scene transition is pending".into());
+		}
+		self.next_attempt_id = self
+			.next_attempt_id
+			.checked_add(1)
+			.ok_or("Scene transition attempt counter exhausted")?;
+		let previous_pause = route_id.as_ref().map(|_| self.active.paused());
+		if previous_pause.is_some() {
+			self.active.set_paused(true);
+		}
+		let attempt = SceneTransitionAttempt {
+			id: self.next_attempt_id,
+			owner: Arc::clone(&self.identity),
+			source_generation: self.scene_generation,
+			scene_id,
+			route_id,
+		};
+		self.failed_transition = None;
+		self.pending_transition = Some(PendingTransition {
+			attempt: attempt.clone(),
+			previous_pause,
+		});
+		Ok(attempt)
+	}
+
+	fn current_transition(
+		&self,
+		attempt: &SceneTransitionAttempt,
+	) -> Result<&PendingTransition, String> {
+		self.pending_transition
+			.as_ref()
+			.filter(|pending| pending.attempt.matches(attempt))
+			.ok_or_else(|| "Scene transition attempt is no longer active".into())
+	}
+
+	fn clear_transition(&mut self, attempt: &SceneTransitionAttempt) -> Result<(), String> {
+		if let Some(paused) = self.current_transition(attempt)?.previous_pause {
+			self.active.set_paused(paused);
+		}
+		self.pending_transition = None;
 		Ok(())
 	}
 }

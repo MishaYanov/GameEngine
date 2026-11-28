@@ -54,7 +54,7 @@ impl ToolService for LiveAdapter {
 fn manifest() -> Value {
 	serde_json::from_str(include_str!(concat!(
 		env!("CARGO_MANIFEST_DIR"),
-		"/../../agent-profiles/game-development-support/bundle.json"
+	"/profiles/game-development-support.json"
 	)))
 	.unwrap()
 }

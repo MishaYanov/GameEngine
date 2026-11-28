@@ -1,0 +1,369 @@
+<editor-dialog title="Scene Flow" icon="graph" preferenceKey="scene-flow" closeLabel="Discard draft"
+               [(open)]="open" [config]="dialogConfig" [renderFields]="false" [closeBlocked]="pending()">
+    @if (open()) {
+        @if (gameStatus(); as status) {
+            <p role="status">Runtime scene {{ sceneLabel(status.scene_id) }}
+                @if (status.pending_scene_id; as destination) {
+                    · Transition pending to {{ sceneLabel(destination) }}
+                }
+            </p>
+            @if (status.failed_scene_id; as failed) {
+                <div class="actions">
+                    <span role="status">Could not load {{ sceneLabel(failed) }}</span>
+                    @if (status.failed_scene_attempt_id !== undefined) {
+                        <button type="button" (click)="retryRoute(status)"
+                                [disabled]="pending() || opening() || !!status.pending_scene_id">Retry Transition
+                        </button>
+                    }
+                </div>
+            }
+        }
+        <div class="actions flow-navigation" role="group" aria-label="Scene Flow sections">
+            <button type="button" [attr.aria-pressed]="view() === 'routes'" (click)="view.set('routes')">Routes</button>
+            <button type="button" [attr.aria-pressed]="view() === 'timelines'" (click)="view.set('timelines')">
+                Timelines
+            </button>
+            <button type="button" [attr.aria-pressed]="view() === 'regions'" (click)="view.set('regions')">World
+                Regions
+            </button>
+        </div>
+
+        @switch (view()) {
+            @case ('routes') {
+                <editor-route-overview [routes]="draft().routes" [scenes]="scenes()" [selected]="routeIndex()"
+                                       (routeSelected)="routeIndex.set($event)"/>
+                <div class="flow-layout">
+                    <section class="listing" aria-label="Scene routes">
+                        @for (entry of draft().routes; track $index) {
+                            <button type="button" [attr.aria-pressed]="routeIndex() === $index"
+                                    (click)="routeIndex.set($index)">
+                                <strong>{{ entry.id || 'New route' }}</strong>
+                                <span>{{ sceneLabel(entry.from) }} → {{ sceneLabel(entry.to) }}</span>
+                            </button>
+                        } @empty {
+                            <p>No scene routes.</p>
+                        }
+                        <button type="button"
+                                [disabled]="pending() || playing() || worldScenes().length < 2 || draft().routes.length >= 256"
+                                (click)="addRoute()">Add Route
+                        </button>
+                    </section>
+                    @if (route(); as item) {
+                        @let routeFields = fields.routes[routeIndex()];
+                        <fieldset [disabled]="pending() || playing()" class="edit-grid">
+                            <legend>Route settings</legend>
+                            <label>Route ID <input [formField]="routeFields.id" autocomplete="off"></label>
+                            <label>Priority <input type="number" [formField]="routeFields.priority"></label>
+                            <editor-search-picker label="From scene" placeholder="Find a scene…"
+                                                  [options]="worldSceneOptions()" [value]="routeFields.from().value()"
+                                                  [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="routeFields.from().value.set($event)"/>
+                            <editor-search-picker label="To scene" placeholder="Find a scene…"
+                                                  [options]="worldSceneOptions()" [value]="routeFields.to().value()"
+                                                  [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="routeFields.to().value.set($event)"/>
+                            <label>Activation
+                                <select [formField]="routeFields.activation">
+                                    <option value="enter_sensor">Enter sensor</option>
+                                    <option value="interact_in_sensor">Interact while inside sensor</option>
+                                    <option value="sequence_completed">Timeline finishes or is skipped</option>
+                                    <option value="manual">Requested by gameplay</option>
+                                </select>
+                            </label>
+                            <label>Required gameplay flag
+                                <input [formField]="routeFields.condition" placeholder="Optional">
+                            </label>
+                            @if (item.activation === 'enter_sensor' || item.activation === 'interact_in_sensor') {
+                                <label>Source sensor
+                                    <input [formField]="routeFields.sensor"
+                                           [attr.list]="objectList(item.from, 'sensors')">
+                                </label>
+                                <label>Activating actor
+                                    <input [formField]="routeFields.actor"
+                                           [attr.list]="objectList(item.from, 'entities')"
+                                           placeholder="Local player">
+                                </label>
+                                @if (item.activation === 'interact_in_sensor') {
+                                    <label>Interaction action ID <input [formField]="routeFields.action"></label>
+                                }
+                            } @else if (item.activation === 'sequence_completed') {
+                                <editor-search-picker label="Completed instance" placeholder="Find a Timeline instance…"
+                                                      [options]="sourceTimelineOptions()"
+                                                      [value]="routeFields.completion().value()" [clearable]="true"
+                                                      [disabled]="pending() || playing()"
+                                                      (picked)="routeFields.completion().value.set($event)"/>
+                            }
+                            <label>Arrival marker
+                                <input [formField]="routeFields.arrival" [attr.list]="objectList(item.to, 'entities')">
+                            </label>
+                            <label>Arrival actor
+                                <input [formField]="routeFields.arrivalActor"
+                                       [attr.list]="objectList(item.to, 'entities')"
+                                       placeholder="Local player">
+                            </label>
+                            <editor-search-picker label="Timeline on arrival" placeholder="Find a Timeline instance…"
+                                                  [options]="destinationTimelineOptions()"
+                                                  [value]="routeFields.startSequence().value()" [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="routeFields.startSequence().value.set($event)"/>
+                            <label>Preload
+                                <select [formField]="routeFields.preload">
+                                    <option value="none">On activation</option>
+                                    <option value="approach">Near the source sensor</option>
+                                    <option value="when_sequence_starts">When a Timeline starts</option>
+                                </select>
+                            </label>
+                            @switch (item.preload) {
+                                @case ('approach') {
+                                    <label>Preload distance <input [formField]="routeFields.distance" type="number"
+                                                                   step="any"></label>
+                                    <label>Release distance <input [formField]="routeFields.release" type="number"
+                                                                   step="any"></label>
+                                }
+                                @case ('when_sequence_starts') {
+                                    <editor-search-picker label="Preload Timeline instance"
+                                                          placeholder="Find a Timeline instance…"
+                                                          [options]="sourceTimelineOptions()"
+                                                          [value]="routeFields.preloadSequence().value()"
+                                                          [clearable]="true"
+                                                          [disabled]="pending() || playing()"
+                                                          (picked)="routeFields.preloadSequence().value.set($event)"/>
+                                }
+                            }
+                            @if (item.from !== sceneId() || item.to !== sceneId()) {
+                                <p class="wide hint">Object pickers show the open scene. For other scenes, enter the
+                                    object key.</p>
+                            }
+                            <div class="wide actions">
+                                @if (item.startSequence) {
+                                    <button type="button" (click)="openTimeline(item.to, item.startSequence)">Open
+                                        Arrival Timeline
+                                    </button>
+                                } @else if (item.activation === 'sequence_completed' && item.completion) {
+                                    <button type="button" (click)="openTimeline(item.from, item.completion)">Open
+                                        Activation Timeline
+                                    </button>
+                                }
+                                <button type="button" (click)="remove('routes')">Remove Route</button>
+                            </div>
+                        </fieldset>
+                        @if (playing() && item.activation === 'manual') {
+                            <button type="button" [disabled]="!canTestRoute()" (click)="testRoute()">Test Route</button>
+                        }
+                    }
+                </div>
+            }
+            @case ('timelines') {
+                <div class="flow-layout">
+                    <section class="listing" aria-label="Timeline assets">
+                        @for (entry of draft().timelines; track $index) {
+                            <button type="button" [attr.aria-pressed]="timelineIndex() === $index"
+                                    (click)="timelineIndex.set($index)">{{ entry.id || 'New Timeline' }}
+                            </button>
+                        } @empty {
+                            <p>No Timeline assets.</p>
+                        }
+                        <button type="button" [disabled]="pending() || playing() || draft().timelines.length >= 64"
+                                (click)="addTimeline()">Add Timeline
+                        </button>
+                    </section>
+                    @if (timeline(); as asset) {
+                        @let timelineFields = fields.timelines[timelineIndex()];
+                        <fieldset [disabled]="pending() || playing()" class="edit-grid">
+                            <legend>Timeline tracks</legend>
+                            <label>Timeline ID <input [formField]="timelineFields.id"></label>
+                            <label>Duration (ms) <input [formField]="timelineFields.duration" type="number"></label>
+                            @for (cue of asset.cues; track $index; let index = $index) {
+                                @let cueFields = timelineFields.cues[index];
+                                <fieldset class="edit-grid wide">
+                                    <legend>Cue {{ index + 1 }}</legend>
+                                    <label>Time (ms) <input [formField]="cueFields.at" type="number"></label>
+                                    <label>Cue type
+                                        <select [formField]="cueFields.kind">
+                                            <option value="camera_cut">Camera cut</option>
+                                            <option value="play_clip">Imported actor clip</option>
+                                            <option value="audio">Audio source</option>
+                                            <option value="subtitle">Subtitle</option>
+                                        </select>
+                                    </label>
+                                    @if (cue.kind === 'subtitle') {
+                                        <label>Subtitle <input [formField]="cueFields.subtitle"></label>
+                                        <label>Subtitle duration (ms)
+                                            <input [formField]="cueFields.subtitleDuration" type="number">
+                                        </label>
+                                    } @else {
+                                        <label>Role ID <input [formField]="cueFields.role"></label>
+                                        @if (cue.kind === 'play_clip') {
+                                            <label>Clip index <input [formField]="cueFields.clip" type="number"></label>
+                                        }
+                                    }
+                                    <button type="button" (click)="removeCue(index)">Remove Cue {{ index + 1 }}</button>
+                                </fieldset>
+                            }
+                            <div class="wide actions">
+                                <button type="button" [disabled]="asset.cues.length >= 256" (click)="addCue()">Add Cue
+                                </button>
+                                <button type="button" (click)="remove('timelines')">Remove Timeline</button>
+                            </div>
+                        </fieldset>
+                    }
+                    <section class="listing" aria-label="Timeline instances">
+                        @for (entry of draft().instances; track $index) {
+                            <button type="button" [attr.aria-pressed]="instanceIndex() === $index"
+                                    (click)="instanceIndex.set($index)">
+                                <strong>{{ entry.id || 'New instance' }}</strong>
+                                <span>{{ sceneLabel(entry.scene) }}</span>
+                            </button>
+                        } @empty {
+                            <p>No scene instances.</p>
+                        }
+                        <button type="button" (click)="addInstance()"
+                                [disabled]="pending() || playing() || !draft().timelines.length || draft().instances.length >= 256">
+                            Add Scene Instance
+                        </button>
+                    </section>
+                    @if (instance(); as binding) {
+                        @let instanceFields = fields.instances[instanceIndex()];
+                        <fieldset [disabled]="pending() || playing()" class="edit-grid">
+                            <legend>Scene bindings</legend>
+                            <label>Instance ID <input [formField]="instanceFields.id"></label>
+                            <editor-search-picker label="Scene" placeholder="Find a scene…"
+                                                  [options]="worldSceneOptions()"
+                                                  [value]="instanceFields.scene().value()" [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="instanceFields.scene().value.set($event)"/>
+                            <editor-search-picker label="Timeline" placeholder="Find a Timeline…"
+                                                  [options]="timelineOptions()" [value]="instanceFields.asset().value()"
+                                                  [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="instanceFields.asset().value.set($event)"/>
+                            <label class="check">
+                                <input type="checkbox" [formField]="instanceFields.once">
+                                Play once per scene entry
+                            </label>
+                            <label>Entry sensor
+                                <input [formField]="instanceFields.sensor"
+                                       [attr.list]="objectList(binding.scene, 'sensors')"
+                                       placeholder="Optional">
+                            </label>
+                            <label>Triggering actor
+                                <input [formField]="instanceFields.actor"
+                                       [attr.list]="objectList(binding.scene, 'entities')"
+                                       placeholder="Required with an entry sensor">
+                            </label>
+                            @for (role of instanceRoles(); track role) {
+                                <label>{{ role }} object
+                                    <input #target [value]="bindingValue(role)"
+                                           [attr.list]="roleList(binding.scene, role)"
+                                           maxlength="128" (input)="bindRole(role, target.value)">
+                                </label>
+                            }
+                            @if (binding.scene !== sceneId()) {
+                                <p class="wide hint">Enter object keys when editing bindings for a different scene.</p>
+                            }
+                            <div class="wide actions">
+                                <button type="button" (click)="remove('instances')">Remove Instance</button>
+                            </div>
+                        </fieldset>
+                    }
+                </div>
+            }
+            @case ('regions') {
+                @if (regionFootprint().length) {
+                    <div class="region-map" aria-label="Top-down world region bounds" role="group">
+                        @for (cell of regionFootprint(); track cell.index) {
+                            <button type="button" class="region-cell" [class.resident]="cell.resident"
+                                    [attr.aria-pressed]="regionIndex() === cell.index"
+                                    [attr.aria-label]="sceneLabel(cell.scene) + (playing() ? cell.resident ? ', loaded' : ', inactive' : '')"
+                                    [title]="sceneLabel(cell.scene)"
+                                    [style.left.%]="cell.left" [style.top.%]="cell.top"
+                                    [style.width.%]="cell.width" [style.height.%]="cell.height"
+                                    (click)="regionIndex.set(cell.index)">{{ sceneLabel(cell.scene) }}
+                            </button>
+                        }
+                    </div>
+                    @if (gameStatus(); as status) {
+                        <p role="status">Active regions: {{ status.resident_regions?.length ?? 0 }}
+                            @let bytes = worldGpuAssetBytes();
+                            @if (bytes !== null) {
+                                · GPU scene assets: {{ (bytes / 1048576).toFixed(1) }} MiB
+                            }
+                        </p>
+                    }
+                }
+                <div class="flow-layout">
+                    <section class="listing" aria-label="World regions">
+                        @for (entry of draft().regions; track $index) {
+                            <button type="button" [attr.aria-pressed]="regionIndex() === $index"
+                                    (click)="regionIndex.set($index)">
+                                <strong>{{ sceneLabel(entry.scene) }}</strong>
+                                <span>In {{ sceneLabel(entry.world) }}</span>
+                            </button>
+                        } @empty {
+                            <p>No streamed regions.</p>
+                        }
+                        <button type="button" (click)="addRegion()"
+                                [disabled]="pending() || playing() || scenes().length < 2 || draft().regions.length >= 256">
+                            Add Region
+                        </button>
+                    </section>
+                    @if (region()) {
+                        @let regionFields = fields.regions[regionIndex()];
+                        <fieldset [disabled]="pending() || playing()" class="edit-grid">
+                            <legend>World region</legend>
+                            <editor-search-picker label="Persistent world" placeholder="Find a scene…"
+                                                  [options]="worldSceneOptions()" [value]="regionFields.world().value()"
+                                                  [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="regionFields.world().value.set($event)"/>
+                            <editor-search-picker label="Region scene" placeholder="Find a scene…"
+                                                  [options]="sceneOptions()" [value]="regionFields.scene().value()"
+                                                  [clearable]="true"
+                                                  [disabled]="pending() || playing()"
+                                                  (picked)="regionFields.scene().value.set($event)"/>
+                            <fieldset class="coordinates wide">
+                                <legend>Minimum world coordinates</legend>
+                                <label>X <input [formField]="regionFields.minX" type="number" step="any"></label>
+                                <label>Y <input [formField]="regionFields.minY" type="number" step="any"></label>
+                                <label>Z <input [formField]="regionFields.minZ" type="number" step="any"></label>
+                            </fieldset>
+                            <fieldset class="coordinates wide">
+                                <legend>Maximum world coordinates</legend>
+                                <label>X <input [formField]="regionFields.maxX" type="number" step="any"></label>
+                                <label>Y <input [formField]="regionFields.maxY" type="number" step="any"></label>
+                                <label>Z <input [formField]="regionFields.maxZ" type="number" step="any"></label>
+                            </fieldset>
+                            <label>Preload distance <input [formField]="regionFields.distance" type="number" step="any"></label>
+                            <label>Release distance <input [formField]="regionFields.release" type="number" step="any"></label>
+                            <div class="wide actions">
+                                <button type="button" (click)="remove('regions')">Remove Region</button>
+                            </div>
+                        </fieldset>
+                    }
+                </div>
+            }
+        }
+
+        @for (list of entityLists(); track list.kind) {
+            <datalist [id]="'scene-flow-' + list.kind">
+                @for (entity of list.entries; track entity.key) {
+                    <option [value]="entity.key">{{ entity.name }}</option>
+                }
+            </datalist>
+        }
+        @if ((error() ?? validation()); as failure) {
+            <p class="error" role="alert">{{ failure }}</p>
+        }
+        @if (playing()) {
+            <p class="hint">Stop Play to edit Scene Flow.</p>
+        } @else if (changed()) {
+            <p class="hint">Apply changes, then use Save All to keep them with the project.</p>
+        }
+    }
+    <button dialog-actions type="button"
+            [disabled]="pending() || playing() || !changed() || !!validation() || opening()"
+            (click)="apply()">Apply Scene Flow
+    </button>
+</editor-dialog>

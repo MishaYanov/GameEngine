@@ -1,6 +1,7 @@
 mod support;
 
 use engine_core::{
+	asset_catalog::AssetId,
 	command::{EditorCommandDto, EditorCommandRequest},
 	components::{
 		ComponentId, NO_MESH_PATH, NativeBehaviorComponent, NativeBehaviorSpec,
@@ -130,7 +131,7 @@ fn per_emitter_and_scene_limits_drop_excess_births() {
 		lifetime_seconds: 10.0,
 		..Default::default()
 	};
-	let mut single = simulator(vec![emitter("single", [0.; 3], settings)]);
+	let mut single = simulator(vec![emitter("single", [0.; 3], settings.clone())]);
 	for _ in 0..180 {
 		single.tick(STEP).unwrap();
 	}
@@ -142,7 +143,7 @@ fn per_emitter_and_scene_limits_drop_excess_births() {
 				emitter(
 					&format!("emitter-{index:02}"),
 					[index as f32 * 10000., 0., 0.],
-					settings,
+					settings.clone(),
 				)
 			})
 			.collect(),
@@ -162,6 +163,39 @@ fn per_emitter_and_scene_limits_drop_excess_births() {
 
 #[test]
 fn a_spawned_emitter_begins_at_its_placement_and_retires_with_its_owner() {
+	let mut run = spawn_short_lived_emitter(ParticleEmitterSettings::default());
+	assert!(run.tick(STEP).unwrap().particles_changed);
+	assert_eq!(run.particles().next().unwrap().position, [2., 3., 4.]);
+	let expired = run.tick(STEP).unwrap();
+	assert!(expired.particles_changed && expired.changes.topology_changed);
+	assert_eq!(run.particles().count(), 0);
+}
+
+#[test]
+fn an_opted_in_sprite_trail_finishes_after_its_owner_despawns() {
+	let sprite = AssetId::generate();
+	let mut run = spawn_short_lived_emitter(ParticleEmitterSettings {
+		lifetime_seconds: 0.1,
+		linger_on_despawn: true,
+		sprite_asset_id: Some(sprite.clone()),
+		..Default::default()
+	});
+	run.tick(STEP).unwrap();
+	let original = run.particles().next().unwrap();
+	assert_eq!(original.position, [2., 3., 4.]);
+	assert_eq!(original.sprite_asset_id.as_deref(), Some(&sprite));
+	assert!(run.tick(STEP).unwrap().changes.topology_changed);
+	let tail: Vec<_> = run.particles().collect();
+	assert_eq!(tail.len(), 1);
+	assert_eq!(tail[0].sprite_asset_id.as_deref(), Some(&sprite));
+	assert!(tail[0].size < original.size);
+	for _ in 0..6 {
+		run.tick(STEP).unwrap();
+	}
+	assert_eq!(run.particles().count(), 0);
+}
+
+fn spawn_short_lived_emitter(settings: ParticleEmitterSettings) -> SimulationSession {
 	let mut spawner =
 		EntityData::new(key("spawner"), "Spawner", NO_MESH_PATH).with_renderable(false);
 	spawner.native_behaviors.push(NativeBehaviorComponent {
@@ -186,7 +220,7 @@ fn a_spawned_emitter_begins_at_its_placement_and_retires_with_its_owner() {
 			[0.; 3],
 			ParticleEmitterSettings {
 				rate_per_second: 60.,
-				..Default::default()
+				..settings
 			},
 		)],
 		gameplay: None,
@@ -197,11 +231,7 @@ fn a_spawned_emitter_begins_at_its_placement_and_retires_with_its_owner() {
 		.prepare_runtime_spawn(&prefab, &"a".repeat(64), request.position, Some(request.id))
 		.unwrap();
 	run.commit_runtime_spawn(prepared).unwrap();
-	assert!(run.tick(STEP).unwrap().particles_changed);
-	assert_eq!(run.particles().next().unwrap().position, [2., 3., 4.]);
-	let expired = run.tick(STEP).unwrap();
-	assert!(expired.particles_changed && expired.changes.topology_changed);
-	assert_eq!(run.particles().count(), 0);
+	run
 }
 
 #[test]

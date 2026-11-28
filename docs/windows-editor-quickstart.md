@@ -15,6 +15,14 @@ elsewhere.
 ```powershell
 Set-Location 'D:\Coding\Game Engine'
 
+$buildCache = 'D:\BuildCache\Game Engine'
+$cargoTarget = Join-Path $buildCache 'cargo-target'
+$env:CARGO_HOME = Join-Path $buildCache 'cargo-home'
+$env:npm_config_cache = Join-Path $buildCache 'npm-cache'
+$env:TEMP = Join-Path $buildCache 'temp'
+$env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+
 npm.cmd ci --prefix apps/editor
 if ($LASTEXITCODE -ne 0) { throw 'Editor dependency install failed.' }
 
@@ -22,12 +30,15 @@ npm.cmd ci --prefix apps/admin-dashboard
 if ($LASTEXITCODE -ne 0) { throw 'Dashboard dependency install failed.' }
 
 $out = "D:\Builds\Game Engine\$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-.\apps\editor-host\build-windows-release.ps1 -OutputDirectory $out
+.\apps\editor-host\build-windows-release.ps1 -OutputDirectory $out -CargoTargetDirectory $cargoTarget
 ```
 
 The script prints the installer path and the portable Editor folder. It builds the Editor and Player from the same
 checkout and includes the editable Cinder Oath sample. The optional Admin Dashboard is also inside the installer. The
-example puts the deliverables outside Cargo’s `target` folder so `cargo clean` leaves them available.
+example puts installer output, Cargo targets, Cargo's dependency cache, npm's cache, and temporary build files on
+`D:`. Changing `CARGO_HOME` selects a separate dependency cache, so populate it before using `-Offline`.
+Build tools must already be available on `PATH`. The installer and portable Editor are separate from the Cargo
+target directory, so cleaning that target directory leaves the packaged files available.
 
 | Output                            | Use it to                                                                                             |
 |-----------------------------------|-------------------------------------------------------------------------------------------------------|

@@ -375,8 +375,8 @@ Their extension points are described where they affect present responsibilities.
 
 ## Support agent
 
-The Game Development Support profile is maintained in
-`agent-profiles/game-development-support/SKILL.md` with Codex UI metadata beside it.
+The [Game Development Support skill](../../.agents/skills/game-development-support/SKILL.md)
+has its Codex UI metadata beside it.
 It connects viewport decisions to the first finishable game, reviews the smallest
 useful next feature, and explains how to use real engine capabilities.
 

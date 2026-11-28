@@ -72,8 +72,12 @@ describe('Behavior workspace', () => {
         await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
         expect(root.textContent).toContain('Receives local input from the project action profile.');
-        const target = control<HTMLSelectElement>(root, 'Target object', 'select');
-        expect([...target.options].map(option => option.value)).toEqual(['', 'entity:guard', 'entity:friend']);
+        const target = root.querySelector<HTMLInputElement>('input[placeholder="Find an object or Prop slot…"]')!;
+        const results = '[aria-label="Target object results"] [role="option"] > span';
+        expect(target.value).toBe('Friend');
+        target.click();
+        await fixture.whenStable();
+        expect([...root.querySelectorAll(results)].map(option => option.textContent?.trim())).toEqual(['Guard', 'Friend']);
         const speed = control<HTMLInputElement>(root, 'Speed', 'input');
         speed.value = '5';
         speed.dispatchEvent(new Event('input', {bubbles: true}));
@@ -108,12 +112,15 @@ describe('Behavior workspace', () => {
         expect(await session.open('behavior-workspace', prop, script.id)).toBe(true);
         const fixture = TestBed.createComponent(BehaviorWorkspace);
         await fixture.whenStable();
-        const target = control<HTMLSelectElement>(fixture.nativeElement, 'Target object', 'select');
-        expect([...target.options].map(option => option.value)).toContain('slot:outer-target');
-        target.value = 'slot:outer-target';
-        target.dispatchEvent(new Event('change', {bubbles: true}));
-        await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
+        const target = root.querySelector<HTMLInputElement>('input[placeholder="Find an object or Prop slot…"]')!;
+        target.click();
+        await fixture.whenStable();
+        const slot = [...root.querySelectorAll<HTMLElement>('[aria-label="Target object results"] [role="option"]')]
+            .find(option => option.querySelector('span')?.textContent === 'outer-target')!;
+        slot.click();
+        await fixture.whenStable();
+        expect(target.value).toBe('outer-target');
         const apply = [...root.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Apply Component')!;
         apply.click();
         await fixture.whenStable();

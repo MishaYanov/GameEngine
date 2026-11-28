@@ -157,11 +157,13 @@ describe('EditorContextMenu', () => {
         await fixture.whenStable();
         expect(host.ownerDocument.activeElement).toBe(item('Move to Root'));
         const row = item('More');
-        const reveal = vi.fn();
-        Object.defineProperty(row, 'scrollIntoView', {value: reveal, configurable: true});
+        const panel = row.closest<HTMLElement>('[role="menu"]')!;
+        panel.getBoundingClientRect = () => new DOMRect(0, 0, 260, 120);
+        row.getBoundingClientRect = () => new DOMRect(0, 110, 260, 26);
         await key('End');
         expect(host.ownerDocument.activeElement).toBe(row);
-        expect(reveal).toHaveBeenCalledWith({block: 'nearest', inline: 'nearest'});
+        expect(panel.scrollTop).toBe(16);
+        expect(host.scrollTop).toBe(0);
     });
 
     it('uses the closest nested trigger and leaves an empty menu to the browser', async () => {
@@ -170,6 +172,17 @@ describe('EditorContextMenu', () => {
         expect(service.request()?.owner.id).toBe('inner');
         service.close(false);
         expect((await context(host.querySelector<HTMLElement>('#empty')!)).defaultPrevented).toBe(false);
+        expect(service.request()).toBeNull();
+    });
+
+    it('keeps a fixed toolbar menu open through unrelated tree scrolling', async () => {
+        const {host, context, service} = await setup();
+        await context();
+        host.querySelector('#outer')!.dispatchEvent(new Event('scroll'));
+        expect(service.request()?.owner.id).toBe('target');
+
+        await context(host.querySelector('#inner')!);
+        host.querySelector('#outer')!.dispatchEvent(new Event('scroll'));
         expect(service.request()).toBeNull();
     });
 

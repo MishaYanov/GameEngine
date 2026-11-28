@@ -23,6 +23,34 @@ header {
   flex: none;
 }
 
+.navigation-history {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline-end: var(--space-1);
+  border-inline-end: var(--border-width) solid var(--color-pane-edge);
+}
+
+.navigation-history button {
+  display: grid;
+  place-items: center;
+  inline-size: var(--layout-subject-control-height);
+  min-block-size: var(--layout-subject-control-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.navigation-history button:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+.navigation-history button:disabled {
+  color: var(--color-text-disabled);
+}
+
 .game-trigger,
 .controls-trigger,
 .objects-trigger,

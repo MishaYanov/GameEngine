@@ -34,7 +34,9 @@ impl Fixture {
 		fs::create_dir_all(&help).unwrap();
 		fs::write(
 			root.join("agent/bundle.json"),
-			include_bytes!("../../../agent-profiles/game-development-support/bundle.json"),
+			include_bytes!(
+				"../../../crates/authoring-agent/profiles/game-development-support.json"
+			),
 		)
 		.unwrap();
 		fs::write(

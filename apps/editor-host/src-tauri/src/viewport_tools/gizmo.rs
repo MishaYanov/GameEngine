@@ -1,6 +1,12 @@
 use super::camera::validate_pixel;
 use super::*;
 
+const MOVE_PLANES: [(usize, usize); 3] = [(0, 1), (1, 2), (2, 0)];
+const MIN_AXIS_SPAN_PIXELS: f32 = 4.0;
+const MIN_PLANE_WIDTH_PIXELS: f32 = 2.0;
+const MOVE_CENTER_FRACTION: f32 = 0.085;
+const SCALE_CENTER_FRACTION: f32 = 0.065;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handle {
 	Axis(usize),
@@ -24,6 +30,27 @@ pub struct Gizmo {
 	pub axes: [Vec3; 3],
 	pub size: f32,
 }
+
+struct ProjectedHandles {
+	axes: [Option<Vec2>; 3],
+	planes: [Option<[Vec2; 4]>; 3],
+	rotation_rings: [bool; 3],
+}
+
+impl ProjectedHandles {
+	fn includes(&self, handle: Handle) -> bool {
+		match handle {
+			Handle::Axis(axis) => self.axes[axis].is_some(),
+			Handle::Plane(a, b) => MOVE_PLANES
+				.iter()
+				.zip(&self.planes)
+				.any(|(&axes, plane)| axes == (a, b) && plane.is_some()),
+			Handle::Rotate(axis) => self.rotation_rings[axis],
+			Handle::Screen | Handle::UniformScale => true,
+		}
+	}
+}
+
 impl Gizmo {
 	pub fn new(pivot: Vec3, basis: Quat, world_size: f32) -> Self {
 		let basis = if basis.is_finite() && basis.length_squared() > EPSILON {
@@ -69,49 +96,155 @@ impl Gizmo {
 					axis,
 					handle: Handle::Axis(axis),
 				});
-				let a = self.axes[(axis + 1) % 3] * self.size * 0.045;
-				let b = self.axes[(axis + 2) % 3] * self.size * 0.045;
+				let handle = Handle::Axis(axis);
+				let half_width = self.size * 0.065;
+				let (side_a, side_b) = (
+					self.axes[(axis + 1) % 3] * half_width,
+					self.axes[(axis + 2) % 3] * half_width,
+				);
+				let sides = [side_a, side_b, -side_a, -side_b];
 				if tool == ViewportTool::Scale {
-					for (start, finish) in [
-						(end - a - b, end + a - b),
-						(end + a - b, end + a + b),
-						(end + a + b, end - a + b),
-						(end - a + b, end - a - b),
-					] {
-						segments.push(GizmoSegment {
-							a: start,
-							b: finish,
-							axis,
-							handle: Handle::Axis(axis),
-						});
-					}
+					let along = self.axes[axis] * half_width;
+					let face = [
+						side_a + side_b,
+						side_b - side_a,
+						-side_a - side_b,
+						side_a - side_b,
+					];
+					let near = face.map(|corner| end - along + corner);
+					let far = face.map(|corner| end + along + corner);
+					segments.extend(outline(near, handle, [axis; 4]));
+					segments.extend(outline(far, handle, [axis; 4]));
+					segments.extend((0..4).map(|index| GizmoSegment {
+						a: near[index],
+						b: far[index],
+						axis,
+						handle,
+					}));
 				} else {
-					let base = end - self.axes[axis] * self.size * 0.14;
-					for side in [a, -a, b, -b] {
-						segments.push(GizmoSegment {
-							a: end,
-							b: base + side,
-							axis,
-							handle: Handle::Axis(axis),
-						});
-					}
+					let base = end - self.axes[axis] * self.size * 0.19;
+					let corners = sides.map(|side| base + side);
+					segments.extend(outline(corners, handle, [axis; 4]));
+					segments.extend(corners.map(|corner| GizmoSegment {
+						a: end,
+						b: corner,
+						axis,
+						handle,
+					}));
 				}
 			}
 		}
 		if tool == ViewportTool::Move {
-			for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-				let corners = self.plane_corners(a, b);
-				for index in 0..4 {
-					segments.push(GizmoSegment {
-						a: corners[index],
-						b: corners[(index + 1) % 4],
-						axis: a,
-						handle: Handle::Plane(a, b),
-					});
-				}
+			for (a, b) in MOVE_PLANES {
+				segments.extend(outline(
+					self.plane_corners(a, b),
+					Handle::Plane(a, b),
+					[a, b, a, b],
+				));
 			}
 		}
 		segments
+	}
+
+	/// Draw the handles available to pointer gestures in this view.
+	pub fn visible_segments(
+		&self,
+		camera: &EditorCamera,
+		extent: [u32; 2],
+		projection: ViewportProjection,
+		tool: ViewportTool,
+	) -> Vec<GizmoSegment> {
+		let Ok(matrix) = camera.view_projection(extent, projection) else {
+			return Vec::new();
+		};
+		let Some(center) = project(matrix, extent, self.pivot) else {
+			return Vec::new();
+		};
+		let handles = self.projected_handles(matrix, extent, center, tool);
+		let mut segments = self.visible_geometry(tool, &handles);
+		if let Some((handle, corners)) = self.center_handle(camera, tool) {
+			if projected_quad(matrix, extent, corners).is_some() {
+				segments.extend(outline(corners, handle, [0; 4]));
+			}
+		}
+		segments
+	}
+
+	fn visible_geometry(
+		&self,
+		tool: ViewportTool,
+		handles: &ProjectedHandles,
+	) -> Vec<GizmoSegment> {
+		let mut segments = self.segments(tool);
+		segments.retain(|segment| handles.includes(segment.handle));
+		segments
+	}
+
+	fn center_handle(
+		&self,
+		camera: &EditorCamera,
+		tool: ViewportTool,
+	) -> Option<(Handle, [Vec3; 4])> {
+		let right = camera.right();
+		let up = camera.up();
+		let (handle, corners, fraction) = match tool {
+			ViewportTool::Move => (
+				Handle::Screen,
+				[right, up, -right, -up],
+				MOVE_CENTER_FRACTION,
+			),
+			ViewportTool::Scale => (
+				Handle::UniformScale,
+				[right + up, up - right, -right - up, right - up],
+				SCALE_CENTER_FRACTION,
+			),
+			_ => return None,
+		};
+		Some((
+			handle,
+			corners.map(|corner| self.pivot + corner * self.size * fraction),
+		))
+	}
+
+	fn axis_projection(
+		&self,
+		matrix: Mat4,
+		extent: [u32; 2],
+		center: Vec2,
+		axis: usize,
+	) -> Option<Vec2> {
+		let end = project(matrix, extent, self.pivot + self.axes[axis] * self.size)?;
+		let span = end - center;
+		(span.length_squared() >= MIN_AXIS_SPAN_PIXELS * MIN_AXIS_SPAN_PIXELS).then_some(span)
+	}
+
+	fn projected_handles(
+		&self,
+		matrix: Mat4,
+		extent: [u32; 2],
+		center: Vec2,
+		tool: ViewportTool,
+	) -> ProjectedHandles {
+		let axes = std::array::from_fn(|axis| self.axis_projection(matrix, extent, center, axis));
+		let planes = if tool == ViewportTool::Move {
+			MOVE_PLANES.map(|(a, b)| projected_quad(matrix, extent, self.plane_corners(a, b)))
+		} else {
+			[None; 3]
+		};
+		let rotation_rings = std::array::from_fn(|axis| {
+			if tool != ViewportTool::Rotate {
+				return false;
+			}
+			let a = self.axes[(axis + 1) % 3];
+			let b = self.axes[(axis + 2) % 3];
+			let corners = [a, b, -a, -b].map(|direction| self.pivot + direction * self.size);
+			projected_quad(matrix, extent, corners).is_some()
+		});
+		ProjectedHandles {
+			axes,
+			planes,
+			rotation_rings,
+		}
 	}
 
 	fn plane_corners(&self, a: usize, b: usize) -> [Vec3; 4] {
@@ -135,28 +268,22 @@ impl Gizmo {
 		let cursor = Vec2::new(pixel[0] as f32, pixel[1] as f32);
 		let center = project(matrix, extent, self.pivot)?;
 		let radius = physical_radius.clamp(2.0, 64.0);
-		if center.distance(cursor) < radius * 0.75 && tool != ViewportTool::Rotate {
-			return Some(if tool == ViewportTool::Scale {
-				Handle::UniformScale
-			} else {
-				Handle::Screen
-			});
-		}
-		if tool == ViewportTool::Move {
-			for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-				let projected = self
-					.plane_corners(a, b)
-					.map(|point| project(matrix, extent, point));
-				if let [Some(p0), Some(p1), Some(p2), Some(p3)] = projected {
-					if point_in_quad(cursor, [p0, p1, p2, p3]) {
-						return Some(Handle::Plane(a, b));
-					}
+		if let Some((handle, corners)) = self.center_handle(camera, tool) {
+			if let Some(points) = projected_quad(matrix, extent, corners) {
+				let near_edge = (0..4).any(|index| {
+					segment_distance(cursor, points[index], points[(index + 1) % 4]) < radius * 0.25
+				});
+				if point_in_quad(cursor, points) || near_edge {
+					return Some(handle);
 				}
 			}
 		}
+		let handles = self.projected_handles(matrix, extent, center, tool);
 		let mut best = radius;
 		let mut hit = None;
-		for segment in self.segments(tool) {
+		let mut arrow_stroke = None;
+		let mut nearest_arrow = radius * 0.4;
+		for segment in self.visible_geometry(tool, &handles) {
 			let (Some(a), Some(b)) = (
 				project(matrix, extent, segment.a),
 				project(matrix, extent, segment.b),
@@ -164,13 +291,53 @@ impl Gizmo {
 				continue;
 			};
 			let distance = segment_distance(cursor, a, b);
+			if tool == ViewportTool::Move
+				&& matches!(segment.handle, Handle::Axis(_))
+				&& distance < nearest_arrow
+			{
+				nearest_arrow = distance;
+				arrow_stroke = Some(segment.handle);
+			}
 			if distance < best {
 				best = distance;
 				hit = Some(segment.handle);
 			}
 		}
-		hit
+		// A visible arrow stroke wins a click where it overlaps a plane's fill.
+		arrow_stroke
+			.or_else(|| {
+				MOVE_PLANES
+					.into_iter()
+					.zip(handles.planes)
+					.find_map(|((a, b), points)| {
+						points
+							.filter(|points| point_in_quad(cursor, *points))
+							.map(|_| Handle::Plane(a, b))
+					})
+			})
+			.or(hit)
 	}
+}
+
+fn outline(corners: [Vec3; 4], handle: Handle, axes: [usize; 4]) -> [GizmoSegment; 4] {
+	std::array::from_fn(|index| GizmoSegment {
+		a: corners[index],
+		b: corners[(index + 1) % 4],
+		axis: axes[index],
+		handle,
+	})
+}
+
+fn projected_quad(matrix: Mat4, extent: [u32; 2], corners: [Vec3; 4]) -> Option<[Vec2; 4]> {
+	let [Some(p0), Some(p1), Some(p2), Some(p3)] =
+		corners.map(|point| project(matrix, extent, point))
+	else {
+		return None;
+	};
+	let side = p1 - p0;
+	let other = p3 - p0;
+	let width = side.perp_dot(other).abs() / side.length().max(other.length());
+	(width >= MIN_PLANE_WIDTH_PIXELS).then_some([p0, p1, p2, p3])
 }
 
 fn segment_distance(point: Vec2, a: Vec2, b: Vec2) -> f32 {
@@ -183,16 +350,14 @@ fn segment_distance(point: Vec2, a: Vec2, b: Vec2) -> f32 {
 fn point_in_quad(point: Vec2, points: [Vec2; 4]) -> bool {
 	let mut positive = false;
 	let mut negative = false;
-	let mut area = 0.0;
 	for index in 0..4 {
 		let a = points[index];
 		let b = points[(index + 1) % 4];
 		let cross = (b - a).perp_dot(point - a);
 		positive |= cross > 0.01;
 		negative |= cross < -0.01;
-		area += a.perp_dot(b);
 	}
-	area.abs() > 1.0 && !(positive && negative)
+	!(positive && negative)
 }
 
 #[derive(Debug, Clone)]
@@ -257,19 +422,13 @@ impl GizmoDrag {
 		if !valid {
 			return Err("The handle does not match the active tool".into());
 		}
-		let axis = match handle {
-			Handle::Axis(axis) | Handle::Rotate(axis) => Some(axis),
-			_ => None,
+		let view_projection = camera.view_projection(extent, projection)?;
+		let screen_axis = if let Handle::Axis(axis) = handle {
+			project(view_projection, extent, gizmo.pivot)
+				.and_then(|center| gizmo.axis_projection(view_projection, extent, center, axis))
+		} else {
+			None
 		};
-		let screen_axis = axis.and_then(|axis| {
-			let start = camera.project(gizmo.pivot, extent, projection)?;
-			let end = camera.project(
-				gizmo.pivot + gizmo.axes[axis] * gizmo.size,
-				extent,
-				projection,
-			)?;
-			(end.distance_squared(start) > 1.0).then_some(end - start)
-		});
 		if matches!(handle, Handle::Axis(_)) && screen_axis.is_none() {
 			return Err(
 				"This axis points into the camera; rotate the view or use a plane handle".into(),
@@ -280,16 +439,15 @@ impl GizmoDrag {
 			Handle::Rotate(axis) => gizmo.axes[axis],
 			_ => camera.forward(),
 		};
-		let start_plane = camera
-			.ray(pixel, extent, projection)?
-			.plane(gizmo.pivot, plane_normal);
-		if matches!(
-			handle,
-			Handle::Plane(_, _) | Handle::Screen | Handle::Rotate(_)
-		) && start_plane.is_none()
-		{
-			return Err("The selected handle plane is edge-on to the camera".into());
-		}
+		let start_plane = match handle {
+			Handle::Plane(_, _) | Handle::Screen | Handle::Rotate(_) => Some(
+				camera
+					.ray(pixel, extent, projection)?
+					.plane(gizmo.pivot, plane_normal)
+					.ok_or("The selected handle plane is edge-on to the camera")?,
+			),
+			_ => None,
+		};
 		if matches!(handle, Handle::Rotate(_))
 			&& start_plane.is_some_and(|point| point.distance_squared(gizmo.pivot) < EPSILON)
 		{
@@ -304,7 +462,7 @@ impl GizmoDrag {
 			handle,
 			settings: settings.clone(),
 			targets,
-			inverse_view_projection: camera.view_projection(extent, projection)?.inverse(),
+			inverse_view_projection: view_projection.inverse(),
 			screen_axis,
 			plane_normal,
 			start_plane,
@@ -316,6 +474,10 @@ impl GizmoDrag {
 
 	pub fn tool(&self) -> ViewportTool {
 		self.tool
+	}
+
+	pub fn handle(&self) -> Handle {
+		self.handle
 	}
 
 	/// Total world-space displacement from the press point. Apply this to captured

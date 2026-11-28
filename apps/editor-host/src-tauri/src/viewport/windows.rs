@@ -5,15 +5,18 @@ mod mailbox;
 mod native_window;
 mod play;
 mod prop_preview;
+mod world_regions;
 
 use crate::viewport_interaction::{GameCameraCapture, ViewportInteraction};
 use bridge::editor::{
-	ViewportInputDto, ViewportModifiersDto, ViewportSceneLoadDto, ViewportSceneLoadStage,
+	ViewportContextMenuDto, ViewportInputDto, ViewportModifiersDto, ViewportSceneLoadDto,
+	ViewportSceneLoadStage,
 };
+use bridge::viewport::ViewportShading;
 pub(super) use mailbox::Control;
-use native_window::KeyboardFocusHook;
+use native_window::{GameCursorClip, KeyboardFocusHook};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle};
-use renderer::{vulkan::CameraUniform, DrawStatus, WindowRenderer};
+use renderer::{vulkan::CameraUniform, DrawStatus, EditorShadingMode, WindowRenderer};
 use runtime::camera_input::{
 	normalize_mouse, normalize_wheel, CameraInputPreferences, CameraIntent, WheelSample,
 };
@@ -89,6 +92,7 @@ enum PlayInstall<'a> {
 	Transition {
 		generation: u64,
 		target: &'a SceneId,
+		attempt_id: Option<u64>,
 		run_id: &'a str,
 		scene_generation: u64,
 	},
@@ -100,10 +104,16 @@ impl PlayInstall<'_> {
 			Self::Transition {
 				generation,
 				target,
+				attempt_id,
 				run_id,
 				scene_generation,
 			} => Ok(workspace.generation == *generation
 				&& workspace.backend.pending_play_scene() == Some(*target)
+				&& workspace
+				.backend
+				.pending_scene_transition()
+				.map(|attempt| attempt.id())
+				== *attempt_id
 				&& workspace
 					.backend
 					.session()
@@ -228,6 +238,8 @@ struct RenderPacket {
 	animation_preview: Option<(runtime::EntityKey, Arc<runtime::animation::AnimationPose>)>,
 	document: Option<Arc<runtime::SceneData>>,
 	game_camera: Option<Camera>,
+	editor_shading: Option<EditorShadingMode>,
+	marked_entities: Vec<runtime::EntityKey>,
 	revision: u64,
 	generation: u64,
 	scene_id: Option<runtime::scene_catalog::SceneId>,
@@ -235,6 +247,14 @@ struct RenderPacket {
 	change_cursor: u64,
 	asset_root: PathBuf,
 	lights_changed: bool,
+}
+
+fn editor_shading_mode(shading: ViewportShading) -> EditorShadingMode {
+	match shading {
+		ViewportShading::Lit => EditorShadingMode::Lit,
+		ViewportShading::Unlit => EditorShadingMode::Unlit,
+		ViewportShading::Wireframe => EditorShadingMode::Wireframe,
+	}
 }
 
 fn publish_scene_load(
@@ -322,6 +342,11 @@ struct AuthoredLoad {
 	)>,
 }
 
+struct NativeGameCameraCapture {
+	clip: GameCursorClip,
+	camera: GameCameraCapture,
+}
+
 struct Worker {
 	particle_samples: Vec<runtime::particle_draw::ParticleSample>,
 	scene_audio: runtime::scene_audio::NativeSceneAudio,
@@ -329,6 +354,7 @@ struct Worker {
 	authored_load: Option<AuthoredLoad>,
 	last_authored_present: Option<(u64, SceneId)>,
 	play_load: Option<(u64, String, u64, SceneLoadTiming)>,
+	world_streaming: Option<(u64, runtime::world_streaming::WorldStreaming)>,
 	gpu: Option<GpuState>,
 	prop_navigation: Option<prop_preview::PropNavigation>,
 	focus_hook: Option<KeyboardFocusHook>,
@@ -344,7 +370,7 @@ struct Worker {
 	last_editor_revision: u64,
 	game_keyboard_active: bool,
 	game_focus_pending: bool,
-	game_camera_capture: Option<GameCameraCapture>,
+	game_camera_capture: Option<NativeGameCameraCapture>,
 	bounds: ViewportBoundsDto,
 	attached: bool,
 	parent_visible: bool,
@@ -384,6 +410,7 @@ impl Worker {
 			authored_load: None,
 			last_authored_present: None,
 			play_load: None,
+			world_streaming: None,
 			gpu: None,
 			prop_navigation: None,
 			focus_hook: None,
@@ -465,6 +492,14 @@ impl Worker {
 		}
 	}
 	fn publish_editor(&mut self, force: bool) {
+		let world_gpu_asset_bytes = self.world_streaming.as_ref().and_then(|(generation, _)| {
+			self.gpu
+				.as_ref()
+				.filter(|gpu| gpu.generation == *generation)
+				.map(|gpu| gpu.assets.gpu_logical_bytes() as u64)
+		});
+		self.interaction
+			.update_world_gpu_asset_bytes(world_gpu_asset_bytes);
 		let current = self.interaction.state();
 		if let Ok(mut state) = self.editor_state.lock() {
 			*state = current.clone();
@@ -558,19 +593,16 @@ impl Worker {
 				workspace,
 				self.camera_surface_focused(),
 				|| {
-					window
-						.set_cursor_grab(CursorGrabMode::Locked)
-						.or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-						.map_err(|err| {
-							format!("Could not capture the Game camera. Click the viewport to retry: {err}")
-						})
+					GameCursorClip::acquire(self.hwnd, window).map_err(|error| {
+						format!("Could not capture the Game camera. Click the viewport to retry: {error}")
+					})
 				},
 			)
 		};
 		match result {
-			Ok(Some(capture)) => {
+			Ok(Some((camera, clip))) => {
 				self.pending_motion = None;
-				self.game_camera_capture = Some(capture);
+				self.game_camera_capture = Some(NativeGameCameraCapture { clip, camera });
 				self.interaction.clear_error();
 				window.set_cursor_visible(false);
 			}
@@ -579,31 +611,28 @@ impl Worker {
 		}
 	}
 	fn release_game_camera(&mut self) {
-		let Some(capture) = self.game_camera_capture.take() else {
+		let Some(NativeGameCameraCapture { clip, camera }) = self.game_camera_capture.take() else {
 			return;
 		};
-		if let Ok(mut slot) = self.shared.lock() {
-			if let Some(workspace) = slot.as_mut().filter(|w| capture.current(w)) {
-				self.interaction.clear_play_input(workspace);
-			}
-		}
+		drop(clip);
 		if let Some(window) = &self.window {
-			let result = window.set_cursor_grab(CursorGrabMode::None);
 			window.set_cursor_visible(true);
-			if let Err(error) = result {
-				self.interaction
-					.report(format!("Could not release the Game camera cursor: {error}"));
-			}
 		}
+		let mut slot = self.shared.lock().ok();
+		camera.release(
+			&mut self.interaction,
+			slot.as_mut().and_then(|slot| slot.as_mut()),
+		);
 	}
 	fn refresh_game_camera(&mut self) {
 		let Some(capture) = self.game_camera_capture.as_ref() else {
 			return;
 		};
 		if !self.camera_surface_focused()
+			|| !capture.clip.is_current()
 			|| !self.shared.lock().is_ok_and(|slot| {
 				slot.as_ref()
-					.is_some_and(|workspace| capture.current(workspace))
+					.is_some_and(|workspace| capture.camera.accepts_input(workspace))
 			}) {
 			self.release_game_camera();
 		}
@@ -624,7 +653,7 @@ impl Worker {
 			self.camera_surface_focused()
 				&& slot
 					.as_mut()
-					.is_some_and(|workspace| capture.submit(workspace, intent).is_ok())
+				.is_some_and(|workspace| capture.camera.submit(workspace, intent).is_ok())
 		});
 		if !accepted {
 			self.release_game_camera();
@@ -825,6 +854,23 @@ impl Worker {
 		if extent.contains(&0) && !matches!(kind, "focused" | "blurred") {
 			return;
 		}
+		// The Game pane can lose native pointer ownership before the queued
+		// blur reaches the interaction controller.
+		if matches!(kind, "pointer_down" | "pointer_up")
+			&& self.interaction.game_keyboard_active()
+			&& !self.camera_surface_focused()
+		{
+			return;
+		}
+		let primary_button = match (kind, button.as_deref()) {
+			("pointer_down", Some("left")) => Some(true),
+			("pointer_up", Some("left")) => Some(false),
+			_ => None,
+		};
+		let game_capture = self
+			.game_camera_capture
+			.as_ref()
+			.filter(|_| primary_button.is_some() && self.camera_surface_focused());
 		let input = ViewportInputDto {
 			kind: kind.into(),
 			position,
@@ -843,7 +889,15 @@ impl Worker {
 		let before = self.interaction.revision();
 		if let Ok(mut workspace) = self.shared.lock() {
 			if let Some(workspace) = workspace.as_mut() {
-				if let Err(error) = self.interaction.input(&input, workspace, extent, self.dpi) {
+				let result = self.interaction.input(&input, workspace, extent, self.dpi);
+				let result =
+					match (result, game_capture, primary_button) {
+						(Ok(()), Some(capture), Some(pressed)) => capture
+							.camera
+							.set_primary_button(&mut self.interaction, workspace, pressed),
+						(result, _, _) => result,
+					};
+				if let Err(error) = result {
 					let _ = self.interaction.cancel(workspace);
 					self.interaction.report(error);
 				}
@@ -851,9 +905,27 @@ impl Worker {
 		}
 		self.dirty |= before != self.interaction.revision()
 			|| kind == "pointer_move" && self.interaction.captured()
-			|| matches!(kind, "key_down" | "key_up") && self.interaction.game_keyboard_active();
+			|| matches!(kind, "key_down" | "key_up" | "pointer_down" | "pointer_up")
+			&& self.interaction.game_keyboard_active();
 		self.update_capture();
 		self.publish_editor(kind != "pointer_move");
+		if let Some(click) = self
+			.interaction
+			.take_context_click()
+			.filter(|_| self.active() && !self.failed)
+		{
+			self.release_keyboard_focus();
+			let [x, y] = click.normalized;
+			let event = ViewportContextMenuDto {
+				workspace_generation: click.workspace_generation,
+				revision: click.revision,
+				scene_id: click.scene_id,
+				client_x: self.bounds.x + self.bounds.width * x,
+				client_y: self.bounds.y + self.bounds.height * y,
+				position: click.position,
+			};
+			let _ = self.parent.emit("editor://viewport-context-menu", event);
+		}
 	}
 	fn extent(&self) -> [u32; 2] {
 		[
@@ -1163,7 +1235,9 @@ impl ApplicationHandler<Wake> for Worker {
 			}
 			WindowEvent::CursorMoved { position, .. } => {
 				self.cursor = [position.x, position.y];
-				if !self.interaction.is_flying() && self.game_camera_capture.is_none() {
+				if (!self.interaction.is_flying() || self.interaction.tracking_context_press())
+					&& self.game_camera_capture.is_none()
+				{
 					self.pending_motion = Some(self.cursor);
 				}
 			}
@@ -1190,7 +1264,9 @@ impl ApplicationHandler<Wake> for Worker {
 				}
 				self.flush_fly_motion();
 				if state == ElementState::Pressed
-					&& matches!(button.as_str(), "left" | "middle" | "right")
+					&& (matches!(button.as_str(), "left" | "middle" | "right")
+					|| self.interaction.game_keyboard_active()
+					&& matches!(button.as_str(), "back" | "forward"))
 					&& !self.interaction.preview_active()
 					&& (if self.prop_navigation.is_some() {
 						self.raw_input_surface().0.is_some()
@@ -1314,7 +1390,13 @@ impl ApplicationHandler<Wake> for Worker {
 			.ok()
 			.and_then(|workspace| {
 				workspace.as_ref().map(|workspace| {
-					self.gpu_matches(workspace) && workspace.backend.session().needs_tick()
+					self.gpu_matches(workspace)
+						&& (workspace.backend.session().needs_tick()
+						|| workspace
+						.backend
+						.pending_scene_transition()
+						.is_some_and(|attempt| attempt.route_id().is_some())
+						|| self.needs_world_streaming_poll(workspace))
 				})
 			})
 			.unwrap_or(false);

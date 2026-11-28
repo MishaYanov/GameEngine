@@ -49,18 +49,24 @@ Keep the manifest, scenes, models and asset dependencies together in an installe
 
 ## Player scene switching
 
-The selected gameplay module can request a scene transition. Cinder Oath moves from the introduction into
-the vault after the introduction finishes or the player skips it. The destination comes from the project catalog.
+Scenes can switch through [authored routes](../../editor-workspace.md#connect-scenes-with-scene-flow) or by request
+from the selected gameplay module. Cinder Oath uses its module to move from the introduction into the vault when
+the introduction finishes or the player skips it.
 
-The switch resolves the catalog path canonically inside the asset root, parses the document and prepares a CPU
-simulation candidate. A separate AssetManager and GPU scene/camera are then built. The old scene stays installed
-until those steps and `renderer.wait_idle()` succeed. Commit rejects foreign/stale candidates, clears prior movement,
-resets the native movement target/selection, and suppresses held input until release. After commit, the caller replaces
-the rendered scene/assets/camera without intervening fallible operations and resets frame scheduling.
+For an authored route, the Player reads and parses the catalog destination on a bounded worker. A route can start
+this preparation near a sensor or when a Timeline starts. After activation, the Player can show a waiting frame
+while it polls for a completed read. While the route is pending, press **F7** to cancel. After a failure, press
+**F8** to retry from the installed source scene.
 
-A failed preparation preserves the installed scene and reports an update error. Switching builds a fresh runtime
-world for the destination and retains the run's game-owned progress. The manifest's startup scene and the authored
-documents keep their existing values.
+The native thread prepares a new simulation and assembles the destination GPU scene and camera. Both scenes share
+one AssetManager and resource budget while the candidate is prepared. The Player commits only after preparation
+and the required GPU wait succeed. It then prunes unused assets and switches the runtime camera, input state,
+and audio mix. A failed preparation leaves the source installed. A successful switch starts the destination
+world with the existing game-owned run progress.
+
+Additive regions use a different lifecycle. Nearby region scenes attach static props and colliders to a persistent
+world. Distant regions can unload when the runtime no longer needs them. The world keeps its simulation, camera
+and run state as the player moves across those boundaries.
 
 ## Play and restart Cinder Oath
 

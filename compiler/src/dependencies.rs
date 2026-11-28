@@ -4,6 +4,7 @@ use super::{
 	Arc, Digest, PackageAsset, Path, PathBuf, ProjectData, Read, Sha256, checked_asset_path, fs, io,
 };
 use engine_core::{
+	animation::{AnimationAsset, AnimationSourceRef},
 	asset_catalog::{AssetCatalog, AssetId, AssetKind},
 	scene_data::{EntityData, SceneData},
 };
@@ -38,6 +39,7 @@ struct Closure<'a> {
 	ids: HashSet<AssetId>,
 	models: HashMap<PathBuf, usize>,
 	animations: HashMap<AssetId, Arc<engine_core::animation::AnimationAsset>>,
+	particle_sprites: HashSet<AssetId>,
 	animation_bytes: usize,
 	prefabs: HashSet<PathBuf>,
 	prefab_stack: HashSet<PathBuf>,
@@ -71,6 +73,7 @@ impl<'a> Closure<'a> {
 			ids: HashSet::new(),
 			models: HashMap::new(),
 			animations: HashMap::new(),
+			particle_sprites: HashSet::new(),
 			animation_bytes: 0,
 			prefabs: HashSet::new(),
 			prefab_stack: HashSet::new(),
@@ -97,7 +100,7 @@ impl<'a> Closure<'a> {
 		let total = self.generated_bytes - prior + bytes.len() as u64;
 		if bytes.len() > 16 * 1024 * 1024 || total > 512 * 1024 * 1024 {
 			return Err(
-				"Resolved JSON output exceeds its 16 MiB file or 512 MiB aggregate budget".into(),
+				"Generated asset output exceeds its 16 MiB file or 512 MiB aggregate budget".into(),
 			);
 		}
 		self.generated_bytes = total;
@@ -141,6 +144,10 @@ impl<'a> Closure<'a> {
 			.unwrap_or("")
 			.to_ascii_lowercase();
 		let audio_clip = kind == Some(AssetKind::AudioClip);
+		let rust_script = kind == Some(AssetKind::RustScript);
+		if rust_script && (extension != "rs" || metadata.len() > engine_core::components::MAX_RUST_SCRIPT_BYTES as u64) {
+			return Err(format!("Rust script {} requires source within 64 KiB", relative.display()));
+		}
 		if kind == Some(AssetKind::SkyPanorama)
 			&& (extension != "png"
 				|| metadata.len() > engine_core::components::MAX_SKY_PANORAMA_FILE_BYTES as u64)
@@ -195,7 +202,7 @@ impl<'a> Closure<'a> {
 				relative.display()
 			));
 		}
-		if !audio_clip
+		if !audio_clip && !rust_script
 			&& !["gltf", "glb", "bin", "png", "jpg", "jpeg", "json"].contains(&extension.as_str())
 		{
 			return Err(format!(
@@ -279,6 +286,14 @@ impl<'a> Closure<'a> {
 	}
 
 	fn entity(&mut self, entity: &EntityData) -> Result<(), String> {
+		for attachment in &entity.scripts {
+			if let Some(id) = engine_core::components::project_script_asset(&attachment.settings.script_id) {
+				self.record_expected(&id, AssetKind::RustScript)?;
+			}
+		}
+		if let Some(sprite) = entity.particle_emitter.as_ref().and_then(|emitter| emitter.settings.sprite_asset_id.as_ref()) {
+			self.record_particle_sprite(sprite)?;
+		}
 		if let Some(image) = entity
 			.sky
 			.as_ref()
@@ -345,11 +360,24 @@ impl<'a> Closure<'a> {
 			.iter()
 			.filter(|component| component.enabled)
 		{
-			if let engine_core::components::NativeBehaviorSpec::TimedSpawner {
-				prefab_path, ..
-			} = &component.behavior
-			{
-				self.prefab_dependency(prefab_path)?;
+			use engine_core::components::NativeBehaviorSpec;
+			match &component.behavior {
+				NativeBehaviorSpec::TimedSpawner { prefab_path, .. } => {
+					self.prefab_dependency(prefab_path)?;
+				}
+				NativeBehaviorSpec::ProjectileLauncher { settings } => {
+					self.projectile_dependency(&settings.prefab_path)?;
+				}
+				NativeBehaviorSpec::Projectile { settings } => {
+					if let Some(sprite_id) = settings
+						.impact
+						.as_ref()
+						.and_then(|burst| burst.settings.sprite_asset_id.as_ref())
+					{
+						self.record_particle_sprite(sprite_id)?;
+					}
+				}
+				_ => {}
 			}
 		}
 		if !entity.has_mesh_component() {
@@ -408,18 +436,7 @@ impl<'a> Closure<'a> {
 		if source.kind != AssetKind::Model {
 			return Err("Animation source must be a model asset".into());
 		}
-		let asset = if let Some(asset) = self.animations.get(id) {
-			Arc::clone(asset)
-		} else {
-			let asset = bridge::animation_asset::load(self.root, &component.settings.source)?;
-			self.animation_bytes = self
-				.animation_bytes
-				.checked_add(asset.retained_bytes())
-				.filter(|bytes| *bytes <= 128 * 1024 * 1024)
-				.ok_or("Export animation preparation exceeds 128 MiB")?;
-			self.animations.insert(id.clone(), Arc::clone(&asset));
-			asset
-		};
+		let asset = self.animation_asset(&component.settings.source)?;
 		asset.validate_settings(&component.settings)?;
 		let mesh = if entity.mesh_id.is_some() {
 			self.catalog
@@ -440,6 +457,25 @@ impl<'a> Closure<'a> {
 		}
 		self.record(id)?;
 		Ok(())
+	}
+
+	fn animation_asset(
+		&mut self,
+		source: &AnimationSourceRef,
+	) -> Result<Arc<AnimationAsset>, String> {
+		if let Some(asset) = self.animations.get(&source.asset_id) {
+			asset.validate_source(source)?;
+			return Ok(Arc::clone(asset));
+		}
+		let asset = bridge::animation_asset::load(self.root, source)?;
+		self.animation_bytes = self
+			.animation_bytes
+			.checked_add(asset.retained_bytes())
+			.filter(|bytes| *bytes <= 128 * 1024 * 1024)
+			.ok_or("Export animation preparation exceeds 128 MiB")?;
+		self.animations
+			.insert(source.asset_id.clone(), Arc::clone(&asset));
+		Ok(asset)
 	}
 }
 
@@ -540,7 +576,7 @@ pub(super) fn prepare(project: &ProjectData, root: &Path) -> Result<DependencySn
 	let source_files: Vec<_> = closure.files.values().cloned().collect();
 	for (relative, bytes) in &closure.generated_files {
 		if bytes.len() > 16 * 1024 * 1024 {
-			return Err("Generated JSON exceeds the 16 MiB package limit".into());
+			return Err("Generated asset exceeds the 16 MiB package limit".into());
 		}
 		closure.files.insert(
 			relative.clone(),

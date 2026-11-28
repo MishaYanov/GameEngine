@@ -1,7 +1,7 @@
 //! Bounded, opt-in native capture using the headless version 4 replay shape.
 
 use runtime::{
-	InputState, Key,
+	InputButton, InputState,
 	input::{GamepadSample, InputProfile, PhysicalGamepadSample},
 };
 use serde::Serialize;
@@ -19,10 +19,10 @@ const MAX_HELD_KEYS: u32 = 16;
 /// Stores only gameplay input accepted by the active Player input owner.
 pub(super) struct PlayTrace {
 	path: PathBuf,
-	keys: Vec<ProfileKey>,
+	controls: Vec<TraceBinding>,
 	jump: bool,
 	interact: bool,
-	keyboard: u32,
+	held_controls: u64,
 	gamepad: GamepadSample,
 	named_keys: Vec<String>,
 	physical: PhysicalGamepadSample,
@@ -47,7 +47,7 @@ impl PlayTrace {
 		check_new_output(&path)?;
 
 		let movement = authored.movement;
-		let mut keys: Vec<ProfileKey> = Vec::new();
+		let mut controls: Vec<TraceBinding> = Vec::new();
 		for key in [
 			movement.negative_x,
 			movement.positive_x,
@@ -57,7 +57,8 @@ impl PlayTrace {
 		.into_iter()
 		.chain(authored.actions.iter().map(|binding| binding.key))
 		{
-			if keys.iter().any(|entry| entry.key == key) {
+			let button = key.into();
+			if controls.iter().any(|entry| entry.button == button) {
 				continue;
 			}
 			let code = key.physical_code();
@@ -65,20 +66,30 @@ impl PlayTrace {
 			if code.len() > 32
 				|| !bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
 				|| !bytes.all(|byte| byte.is_ascii_alphanumeric())
-				|| keys.iter().any(|entry| entry.code == code)
+				|| controls.iter().any(|entry| entry.code == code)
 			{
 				return Err("A bound key has no distinct replay-compatible physical code".into());
 			}
-			keys.push(ProfileKey { key, code });
+			controls.push(TraceBinding { button, code });
 		}
-		keys.sort_unstable_by(|left, right| left.code.cmp(&right.code));
+		for binding in &authored.mouse_actions {
+			let code = binding
+				.button
+				.input_code()
+				.ok_or("A mouse button has no replay-compatible physical code")?;
+			controls.push(TraceBinding {
+				button: binding.button.into(),
+				code: code.to_owned(),
+			});
+		}
+		controls.sort_unstable_by(|left, right| left.code.cmp(&right.code));
 		let has_action = |name| authored.actions.iter().any(|binding| binding.id == name);
 		let mut trace = Self {
 			path,
-			keys,
+			controls,
 			jump: has_action("jump"),
 			interact: has_action("interact"),
-			keyboard: 0,
+			held_controls: 0,
 			gamepad: GamepadSample::default(),
 			named_keys: Vec::new(),
 			physical: PhysicalGamepadSample::default(),
@@ -100,14 +111,14 @@ impl PlayTrace {
 		if self.full || self.paused {
 			return;
 		}
-		let keyboard = self
-			.keys
+		let held = self
+			.controls
 			.iter()
 			.enumerate()
-			.fold(0u32, |mask, (index, entry)| {
-				mask | (u32::from(input.is_held(entry.key)) << index)
+			.fold(0u64, |mask, (index, entry)| {
+				mask | (u64::from(input.is_held(entry.button)) << index)
 			});
-		if keyboard.count_ones() > MAX_HELD_KEYS {
+		if held.count_ones() > MAX_HELD_KEYS {
 			self.full = true;
 			return;
 		}
@@ -117,16 +128,16 @@ impl PlayTrace {
 		}
 		gamepad.jump &= self.jump;
 		gamepad.interact &= self.interact;
-		if keyboard == self.keyboard && gamepad == self.gamepad {
+		if held == self.held_controls && gamepad == self.gamepad {
 			return;
 		}
 		let mut actions = Vec::with_capacity(2);
-		if keyboard != self.keyboard {
+		if held != self.held_controls {
 			let keys = self
-				.keys
+				.controls
 				.iter()
 				.enumerate()
-				.filter(|(index, _)| keyboard & (1 << index) != 0)
+				.filter(|(index, _)| held & (1 << index) != 0)
 				.map(|(_, entry)| entry.code.clone())
 				.collect();
 			actions.push(TraceAction::KeyboardInput { keys });
@@ -135,7 +146,7 @@ impl PlayTrace {
 			actions.push(TraceAction::controller(gamepad));
 		}
 		if self.append(actions) {
-			self.keyboard = keyboard;
+			self.held_controls = held;
 			self.gamepad = gamepad;
 		}
 	}
@@ -186,7 +197,7 @@ impl PlayTrace {
 	pub(super) fn record_paused(&mut self, paused: bool) {
 		if self.paused != paused && self.append(vec![TraceAction::pause(paused)]) {
 			self.paused = paused;
-			self.keyboard = 0;
+			self.held_controls = 0;
 			self.gamepad = GamepadSample::default();
 			self.named_keys.clear();
 			self.physical = PhysicalGamepadSample::default();
@@ -199,7 +210,7 @@ impl PlayTrace {
 			return;
 		}
 		let mut actions = Vec::with_capacity(4);
-		if self.keyboard != 0 || !self.named_keys.is_empty() {
+		if self.held_controls != 0 || !self.named_keys.is_empty() {
 			actions.push(TraceAction::KeyboardInput { keys: Vec::new() });
 		}
 		if self.gamepad != GamepadSample::default() {
@@ -214,7 +225,7 @@ impl PlayTrace {
 		// pending button edges, including a complete press/release since the last tick.
 		actions.extend([TraceAction::pause(true), TraceAction::pause(false)]);
 		if self.append(actions) {
-			self.keyboard = 0;
+			self.held_controls = 0;
 			self.gamepad = GamepadSample::default();
 			self.named_keys.clear();
 			self.physical = PhysicalGamepadSample::default();
@@ -266,8 +277,8 @@ impl PlayTrace {
 	}
 }
 
-struct ProfileKey {
-	key: Key,
+struct TraceBinding {
+	button: InputButton,
 	code: String,
 }
 

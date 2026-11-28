@@ -15,5 +15,7 @@ members = [
     "crates/logger",
     "crates/renderer",
     "crates/runtime",
+    "crates/script-runtime",
+    "crates/script-sdk",
     "apps/headless",
 ]

@@ -18,6 +18,9 @@ import type {EntityKey, FolderId, FolderRecord} from '../../../../core/editor/ed
 import {allowsFolder, OBJECT_MENU_GROUPS, type ObjectMenuAction, type ObjectMenuEntry} from '../../../../core/editor/editor-object-menu';
 import {EditorPane} from '../../../../shared/components/pane/pane';
 import {Drawer} from '../../../../shared/components/drawer/drawer';
+import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import type {DialogSettings} from '../../../../shared/components/dialog/dialog-settings';
+import {EditorSearchPicker, type SearchPickerOption} from '../../../../shared/components/search-picker/search-picker';
 import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import type {Config} from '../../../../shared/models/config.model';
 import type {DrawerSettings} from '../../../../shared/components/drawer/drawer-settings';
@@ -69,6 +72,13 @@ interface FolderMenuContext extends CreationMenuContext {
     readonly id: FolderId;
 }
 
+interface HierarchyParenting {
+    readonly child: EntityKey;
+    readonly keys: readonly EntityKey[];
+    readonly context: string;
+    readonly mode: 'picker' | 'tree';
+}
+
 type HierarchyDrop = {readonly key: HierarchyKey | null; readonly valid: boolean};
 
 type HierarchyDragSession = {
@@ -84,9 +94,9 @@ let nextHierarchyId = 0;
 
 @Component({
     selector: 'scene-entities-panel',
-    imports: [EditorPane, Drawer, EditorIcon, EditorContextMenuTrigger, HierarchyFolderEditor],
+    imports: [EditorPane, Drawer, EditorIcon, EditorDialog, EditorSearchPicker, EditorContextMenuTrigger, HierarchyFolderEditor],
     templateUrl: './scene-entities-panel.html',
-    styleUrl: './scene-entities-panel.scss',
+    styleUrls: ['./scene-entities-panel.scss', './hierarchy-actions.scss'],
 })
 export class SceneEntitiesPanel {
     readonly scene = input.required<SceneEntitiesModel>();
@@ -99,6 +109,7 @@ export class SceneEntitiesPanel {
     readonly sceneLabel = input('Scene');
     readonly contextKey = input('');
     readonly actionError = input<string | null>(null);
+    readonly creationStatus = input<string | null>(null);
     readonly selectionRequested = output<EntityKey>();
     readonly selectionSetRequested = output<readonly EntityKey[]>();
     readonly usagesRequested = output<EntityKey>();
@@ -111,7 +122,23 @@ export class SceneEntitiesPanel {
     protected readonly selection = computed(() => new Set(this.selectedKeys()));
     protected readonly collapsed = signal<ReadonlySet<HierarchyKey>>(new Set());
     protected readonly focusKey = signal<HierarchyKey | null>(null);
-    protected readonly parentingChild = signal<EntityKey | null>(null);
+    private readonly parenting = signal<HierarchyParenting | null>(null);
+    protected readonly parentingChild = computed(() => this.parenting()?.child ?? null);
+    protected readonly parentPickerOpen = computed(() => this.parenting()?.mode === 'picker');
+    protected readonly parentChoice = signal<EntityKey | null>(null);
+    protected readonly parentingName = computed(() => {
+        const session = this.parenting();
+        if (!session) return '';
+        return session.keys.length > 1
+            ? `${session.keys.length} selected objects`
+            : this.forest().byKey.get(session.child)?.name ?? '';
+    });
+    protected readonly parentPickerConfig: Config<DialogSettings> = {
+        width: '29rem',
+        resizable: false,
+        expandable: false
+    };
+    protected readonly parentPickerHintId = this.treeId + '-parent-picker-help';
     protected readonly keepWorld = signal(true);
     protected readonly dropTarget = signal<HierarchyDrop | null>(null);
     protected readonly search = signal('');
@@ -153,10 +180,16 @@ export class SceneEntitiesPanel {
     });
     protected readonly activeId = computed(() => this.activeKey() ? this.rowId(this.activeKey()!) : null);
     protected readonly primary = computed(() => this.forest().byKey.get(this.selectedKeys()[0]) ?? null);
+    protected readonly hiddenSelection = computed(() => {
+        const selected = this.primary();
+        return selected && this.search().trim() && !this.rowIndices().has(entityHierarchyKey(selected.key)) ? selected : null;
+    });
     protected readonly totalHeight = computed(() => this.rows().length * this.rowHeight);
     protected readonly rows = computed(() => visibleHierarchyRows(this.forest(), this.collapsed(), this.search()));
     protected readonly canCollapseAll = computed(() =>
-        !this.disabled() && !this.search().trim() && this.rows().some(row => row.expanded),
+        !this.disabled() && (this.search().trim()
+            ? this.forest().rowChildren.size > 1
+            : this.rows().some(row => row.expanded)),
     );
     protected readonly canMoveSelection = computed(() =>
         this.canEditFolders() && this.canOrganize(this.selectedKeys()),
@@ -194,6 +227,45 @@ export class SceneEntitiesPanel {
     private readonly forbiddenParents = computed(() => {
         const source = this.draggedEntityKey() ?? this.parentingChild();
         return source ? hierarchySubtreeKeys(this.forest(), this.parentingKeys(source)) : new Set<EntityKey>();
+    });
+
+
+    protected readonly parentOptions = computed<readonly SearchPickerOption[]>(() => {
+        const session = this.parenting();
+        if (session?.mode !== 'picker') return [];
+        const forest = this.forest();
+        const excluded = this.forbiddenParents();
+        const roots = session.keys.filter(key => {
+            const parent = forest.parents.get(key);
+            return parent == null || !excluded.has(parent);
+        });
+        const firstParent = forest.parents.get(roots[0]);
+        const currentParent = roots.every(key => forest.parents.get(key) === firstParent) ? firstParent : undefined;
+        const stack = [...(forest.rowChildren.get(null) ?? [])].reverse();
+        const options: SearchPickerOption[] = [];
+        while (stack.length) {
+            const item = stack.pop()!;
+            const children = forest.rowChildren.get(item.key) ?? [];
+            for (let index = children.length - 1; index >= 0; index--) stack.push(children[index]);
+            if (item.kind === 'entity' && !excluded.has(item.entity.key) && item.entity.key !== currentParent) {
+                const parent = forest.rowParents.get(item.key);
+                const ancestor = parent ? forest.rowParents.get(parent) : null;
+                const parentName = parent ? forest.items.get(parent)?.name : 'Scene root';
+                const ancestorName = ancestor ? forest.items.get(ancestor)?.name : null;
+                const description = ancestorName ? `${ancestorName} / ${parentName}` : parentName;
+                options.push({id: item.entity.key, label: item.name, description});
+            }
+        }
+        return options;
+    });
+    protected readonly parentChoiceName = computed(() => {
+        const key = this.parentChoice();
+        return key === null || !this.canApplyParent() ? null : this.forest().byKey.get(key)?.name ?? null;
+    });
+    protected readonly canApplyParent = computed(() => {
+        const session = this.parenting();
+        const parent = this.parentChoice();
+        return session?.mode === 'picker' && parent !== null && this.canReparent(session.child, parent);
     });
 
     protected readonly drawerConfig: Config<DrawerSettings> = {width: '14rem', minWidth: '8rem'};
@@ -394,11 +466,8 @@ export class SceneEntitiesPanel {
                 }
                 this.previousRowParents = forest.rowParents;
                 if (this.selectionAnchor && !forest.byKey.has(this.selectionAnchor)) this.selectionAnchor = null;
-                if (disabled) {
-                    this.dragEnded();
-                    this.parentingChild.set(null);
-                    this.status.set(null);
-                }
+                const parenting = this.parenting();
+                if (disabled || parenting?.keys.some(key => !forest.byKey.has(key))) this.cancelParenting();
             });
         });
         afterRenderEffect(onCleanup => {
@@ -440,7 +509,7 @@ export class SceneEntitiesPanel {
     }
 
     protected choose(row: HierarchyRow, event?: MouseEvent | KeyboardEvent): void {
-        if (this.disabled()) return;
+        if (this.disabled() || this.parentPickerOpen()) return;
         this.focus(row.key);
         if (row.item.kind === 'folder') {
             if (!this.parentingChild()) this.setExpanded(row, !row.expanded);
@@ -468,11 +537,18 @@ export class SceneEntitiesPanel {
         const forest = this.forest();
         const active = this.activeKey();
         this.collapsed.set(new Set([...forest.rowChildren.keys()].filter(key => key !== null)));
-        if (active) {
-            const visible = this.rowIndices();
-            const target = visible.has(active) ? active :
-                hierarchyAncestors(forest, active).find(key => visible.has(key));
-            if (target) this.focus(target);
+        this.search.set('');
+        const visible = this.rowIndices();
+        const target = active && (visible.has(active) ? active :
+            hierarchyAncestors(forest, active).find(key => visible.has(key))) || this.activeKey();
+        if (!target) return;
+        if (this.tree()) {
+            this.focus(target);
+        } else {
+            const context = this.contextKey();
+            afterNextRender(() => {
+                if (context === this.contextKey() && this.rowIndices().has(target)) this.focus(target);
+            }, {injector: this.injector});
         }
     }
 
@@ -495,7 +571,7 @@ export class SceneEntitiesPanel {
     }
 
     protected keydown(event: KeyboardEvent): void {
-        if (this.disabled() || event.isComposing) return;
+        if (this.disabled() || this.parentPickerOpen() || event.isComposing) return;
         if (this.parentingChild() || this.dragSession()) event.stopPropagation();
         const rows = this.rows();
         const index = this.activeKey() ? this.rowIndices().get(this.activeKey()!) ?? 0 : 0;
@@ -571,16 +647,48 @@ export class SceneEntitiesPanel {
 
     protected beginParenting(key?: EntityKey): void {
         const child = key === undefined ? this.primary() : this.forest().byKey.get(key);
-        if (!child || this.disabled()) return;
+        if (!child || this.disabled() || !this.scene().projectOpen) return;
         this.folderEdit.set(null);
         this.dragEnded();
-        this.parentingChild.set(child.key);
+        this.parenting.set({
+            child: child.key,
+            keys: this.batchParentingEnabled() ? [...this.dragSelection(child.key)] : [child.key],
+            context: this.contextKey(),
+            mode: 'picker',
+        });
+        this.parentChoice.set(null);
         this.localError.set(null);
+        this.status.set(null);
         this.keepWorld.set(true);
-        const count = this.parentingKeys(child.key).length;
-        const description = count > 1 ? `${count} selected objects` : child.name;
-        this.status.set(`Choose a parent for ${description}, then press Enter. Escape cancels.`);
-        this.focus(entityHierarchyKey(child.key));
+    }
+
+    protected pickParent(key: EntityKey): void {
+        const session = this.parenting();
+        if (session?.mode === 'picker' && this.canReparent(session.child, key)) this.parentChoice.set(key);
+    }
+
+    protected applyParent(): void {
+        const session = this.parenting();
+        const parent = this.parentChoice();
+        if (session?.mode === 'picker' && parent !== null) this.requestReparent(session.child, parent);
+    }
+
+    protected pickParentInHierarchy(): void {
+        const session = this.parenting();
+        if (session?.mode !== 'picker' || session.context !== this.contextKey() || this.disabled()) return;
+        this.parenting.set({...session, mode: 'tree'});
+        this.status.set(`Choose a parent for ${this.parentingName()}, then press Enter. Escape cancels.`);
+    }
+
+    protected cancelParentPicker(): void {
+        if (this.parentPickerOpen()) this.cancelParenting();
+    }
+
+    protected parentPickerClosed(): void {
+        const session = this.parenting();
+        if (session?.mode === 'tree' && session.context === this.contextKey()) {
+            this.focus(entityHierarchyKey(session.child));
+        }
     }
 
     protected moveToRoot(): void {
@@ -593,14 +701,15 @@ export class SceneEntitiesPanel {
     }
 
     protected cancelParenting(): void {
-        this.parentingChild.set(null);
+        this.parenting.set(null);
+        this.parentChoice.set(null);
         this.dragEnded();
         this.localError.set(null);
         this.status.set(null);
     }
 
     protected canDrag(item: HierarchyItem): boolean {
-        if (this.disabled() || !this.scene().projectOpen) return false;
+        if (this.disabled() || this.parentPickerOpen() || !this.scene().projectOpen) return false;
         return item.kind === 'entity' ? this.forest().byKey.has(item.entity.key)
             : this.canEditFolders() && this.forest().folders.has(item.folder.id);
     }
@@ -611,7 +720,8 @@ export class SceneEntitiesPanel {
             return;
         }
         this.folderEdit.set(null);
-        this.parentingChild.set(null);
+        this.parenting.set(null);
+        this.parentChoice.set(null);
         this.keepWorld.set(true);
         this.localError.set(null);
         const context = this.contextKey();
@@ -867,18 +977,22 @@ export class SceneEntitiesPanel {
     }
 
     private canReparent(key: EntityKey, parent: EntityKey | null): boolean {
-        if (this.disabled()) return false;
+        const session = this.parenting();
+        if (this.disabled() || !this.scene().projectOpen ||
+            (session?.child === key && session.context !== this.contextKey())) return false;
         const forest = this.forest();
         const keys = this.parentingKeys(key);
-        if ((this.draggedEntityKey() === key || this.parentingChild() === key) &&
-            parent !== null && this.forbiddenParents().has(parent)) return false;
-        return keys.every(candidate => forest.byKey.has(candidate) &&
-            (forest.parents.get(candidate) === parent ||
-                canReparentEntity(forest, candidate, parent, () => false))) &&
-            keys.some(candidate => forest.parents.get(candidate) !== parent);
+        const changed = keys.find(candidate => forest.parents.get(candidate) !== parent);
+        if (changed === undefined || keys.some(candidate => !forest.byKey.has(candidate))) return false;
+        if (parent === null) return true;
+        const excluded = this.draggedEntityKey() === key || session?.child === key
+            ? this.forbiddenParents() : hierarchySubtreeKeys(forest, keys);
+        return canReparentEntity(forest, changed, parent, candidate => excluded.has(candidate));
     }
 
     private parentingKeys(key: EntityKey): readonly EntityKey[] {
+        const session = this.parenting();
+        if (session?.child === key) return session.keys;
         return this.batchParentingEnabled() ? this.dragSelection(key) : [key];
     }
 
@@ -889,10 +1003,12 @@ export class SceneEntitiesPanel {
             return;
         }
         this.localError.set(null);
-        const keepWorld = !this.parentingChild() || this.keepWorld();
-        this.parentingChild.set(null);
+        const keepWorld = this.parentingChild() !== key || this.keepWorld();
+        const keys = this.parentingKeys(key);
+        this.parenting.set(null);
+        this.parentChoice.set(null);
         this.reparentRequested.emit(this.batchParentingEnabled()
-            ? {key, parent, keys: this.parentingKeys(key), keepWorld}
+            ? {key, parent, keys, keepWorld}
             : {key, parent});
         this.status.set(keepWorld ? 'Parent change requested. The world pose will be preserved.'
             : 'Parent change requested. The local transform will be preserved.');

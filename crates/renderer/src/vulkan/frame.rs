@@ -87,6 +87,9 @@ pub(crate) struct FrameView<'a> {
 	pub region: vk::Rect2D,
 	pub editor: Option<FrameEditor<'a>>,
 	pub sky: Option<FrameSky<'a>>,
+	pub shading: Option<crate::EditorShadingMode>,
+	pub vertex_markers: bool,
+	pub normal_maps: bool,
 }
 
 pub(crate) struct FrameSky<'a> {
@@ -382,6 +385,9 @@ impl VulkanFrame {
 				region,
 				editor: None,
 				sky: None,
+				shading: None,
+				vertex_markers: false,
+				normal_maps: true,
 			},
 		)
 	}
@@ -450,6 +456,12 @@ impl VulkanFrame {
 
 		camera.update(view.uniform)?;
 		camera.update_lighting(&self.lighting)?;
+		let shadow = camera
+			.shadow_map()
+			.filter(|_| pipelines.has_shadows() && !objects.is_empty())
+			.and_then(|map| map.uniform(view.uniform, &self.lighting, view.shading))
+			.unwrap_or_default();
+		camera.update_shadow(&shadow)?;
 		unsafe {
 			self.device
 				.reset_fences(&[self.acquisition_fence, self.in_flight])?;
@@ -478,11 +490,12 @@ impl VulkanFrame {
 				.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())?;
 		}
 
-		self.record_draw_commands(
+		let mesh_metrics = self.record_draw_commands(
 			targets,
 			image_index,
 			pipelines,
-			camera.descriptor_set(),
+			camera,
+			shadow.enabled(),
 			objects,
 			&view,
 		)?;
@@ -515,33 +528,16 @@ impl VulkanFrame {
 			.editor
 			.as_ref()
 			.map_or((0, 0), |editor| editor.pass.draw_counts());
-		let instances = self.instances.as_ref().expect("live frame storage");
 		self.metrics = DrawMetrics {
-			skinned_draw_calls: objects
-				.iter()
-				.filter(|o| o.skin_palette().is_some())
-				.count() as u64,
 			skin_palette_matrices: self
 				.palettes
 				.as_ref()
 				.map_or(0, |p| p.matrix_count() as u64),
-			draw_calls: instances.batches.len() as u64 + editor_draws,
-			instances: objects.len() as u64,
-			triangles: instances
-				.batches
-				.iter()
-				.map(|batch| {
-					objects[batch.object].mesh().index_count() as u64 / 3 * batch.count as u64
-				})
-				.sum::<u64>()
-				+ editor_triangles,
-			instanced_draw_calls: instances
-				.batches
-				.iter()
-				.filter(|batch| batch.count > 1)
-				.count() as u64,
+			draw_calls: mesh_metrics.draw_calls + editor_draws,
+			triangles: mesh_metrics.triangles + editor_triangles,
 			gpu_time_ms: self.timer.as_ref().and_then(GpuTimer::last_ms),
 			gpu_timestamps_supported: self.timer.is_some(),
+			..mesh_metrics
 		};
 
 		crate::metrics::frame(&self.device, self.metrics);

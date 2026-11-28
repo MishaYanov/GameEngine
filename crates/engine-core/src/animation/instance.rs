@@ -2,7 +2,10 @@ use super::*;
 use crate::{EntityKey, runtime_lifecycle::RuntimeEntityHandle, world::RuntimeWorld};
 use glam::Mat4;
 use serde::Serialize;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	sync::Arc,
+};
 
 pub type PreparedAnimationBindings = BTreeMap<EntityKey, Arc<AnimationAsset>>;
 pub type AnimationResolver =
@@ -59,6 +62,7 @@ pub struct AnimationBank {
 	instances: BTreeMap<EntityKey, Instance>,
 	animators: AnimatorBank,
 	visual_matrices: Arc<BTreeMap<EntityKey, Mat4>>,
+	sequence_poses: Arc<BTreeMap<EntityKey, AnimationPose>>,
 	revision: u64,
 }
 
@@ -114,6 +118,7 @@ impl AnimationBank {
 				AnimationPlayback::SingleClip { clip_index, .. } => clip_index,
 				AnimationPlayback::Locomotion3 { idle, .. } => idle,
 			};
+			let clip_index = asset.resolve_clip_index(&component.settings.source, clip_index)?;
 			let local = if component.enabled {
 				sample_local(&asset, clip_index as usize, 0.)?
 			} else {
@@ -204,13 +209,79 @@ impl AnimationBank {
 			.iter()
 			.map(|(k, i)| (k, &i.pose))
 			.chain(self.animators.poses())
+			.map(|(key, ordinary)| (key, self.sequence_poses.get(key).unwrap_or(ordinary)))
 	}
 	pub fn pose(&self, key: &EntityKey) -> Option<&AnimationPose> {
+		self.sequence_poses
+			.get(key)
+			.or_else(|| self.ordinary_pose(key))
+	}
+	fn ordinary_pose(&self, key: &EntityKey) -> Option<&AnimationPose> {
 		self.instances.get(key).map(|i| &i.pose).or_else(|| {
 			self.animators
 				.poses()
 				.find_map(|(owner, pose)| (owner == key).then_some(pose))
 		})
+	}
+
+	pub(crate) fn require_sequence_clip(&self, key: &EntityKey, clip: u32) -> Result<(), String> {
+		self.ordinary_pose(key)
+			.and_then(|pose| pose.asset.clips.get(clip as usize))
+			.ok_or_else(|| {
+				format!(
+					"Sequence actor {} has no prepared skeletal clip {clip}",
+					key.as_str()
+				)
+			})?;
+		Ok(())
+	}
+
+	/// A cinematic samples a visual pose without mutating the underlying Animator.
+	pub(crate) fn set_sequence_poses<'a>(
+		&mut self,
+		world: &RuntimeWorld,
+		clips: impl Iterator<Item=(&'a EntityKey, u32, f64)>,
+	) -> Result<Vec<EntityKey>, String> {
+		let mut clips = clips.peekable();
+		if clips.peek().is_none() && self.sequence_poses.is_empty() {
+			return Ok(Vec::new());
+		}
+		let revision = self
+			.revision
+			.checked_add(1)
+			.ok_or("Animation revision overflow")?;
+		let mut poses = BTreeMap::new();
+		for (key, clip, seconds) in clips {
+			let index = world
+				.entity_index(key)
+				.ok_or("Sequence actor disappeared")?;
+			let original = self
+				.ordinary_pose(key)
+				.ok_or("Sequence actor has no skeletal animation")?;
+			let duration = original
+				.asset
+				.clips
+				.get(clip as usize)
+				.ok_or("Sequence clip disappeared")?
+				.duration_seconds;
+			let pose = sample_pose(
+				Arc::clone(&original.asset),
+				clip,
+				seconds.min(f64::from(duration)),
+				world.world_matrices()[index],
+				revision,
+			)?;
+			poses.insert(key.clone(), pose);
+		}
+		let changed = self
+			.sequence_poses
+			.keys()
+			.chain(poses.keys())
+			.cloned()
+			.collect::<BTreeSet<_>>();
+		self.sequence_poses = Arc::new(poses);
+		self.revision = revision;
+		Ok(changed.into_iter().collect())
 	}
 	pub fn prune(&mut self, world: &RuntimeWorld) {
 		self.instances
@@ -252,12 +323,22 @@ impl AnimationBank {
 	pub(crate) fn prepare_root_motion(
 		&mut self,
 		input: &AnimatorTick<'_>,
+		sequence_owns: impl Fn(&EntityKey) -> bool,
 	) -> Result<BTreeMap<EntityKey, RootMotionDelta>, String> {
-		self.animators.prepare_root_motion(input)
+		self.animators.prepare_root_motion(input, sequence_owns)
 	}
 
 	pub fn has_animators(&self) -> bool {
 		!self.animators.is_empty()
+	}
+
+	pub(crate) fn set_script_bool(
+		&mut self,
+		entity: &EntityKey,
+		parameter: String,
+		value: bool,
+	) -> Result<(), String> {
+		self.animators.set_script_bool(entity, parameter, value)
 	}
 
 	pub fn animator_inspection(&self) -> Vec<AnimatorInspection> {
@@ -277,6 +358,8 @@ impl AnimationBank {
 		world: &RuntimeWorld,
 		input: AnimatorTick<'_>,
 		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
+		sequence_owns: impl Fn(&EntityKey) -> bool,
+		foot_support: impl FnMut(&EntityKey, glam::Vec3, f32) -> Option<f32>,
 	) -> Result<Vec<EntityKey>, String> {
 		if self.animators.is_empty() {
 			return Ok(Vec::new());
@@ -285,7 +368,9 @@ impl AnimationBank {
 			.revision
 			.checked_add(1)
 			.ok_or("Animation revision overflow")?;
-		let changes = self.animators.step(world, input, revision, onsets)?;
+		let changes =
+			self.animators
+				.step(world, input, revision, onsets, sequence_owns, foot_support)?;
 		let matrices = self.animators.visual_matrices(world)?;
 		if matrices != *self.visual_matrices {
 			self.visual_matrices = Arc::new(matrices);
@@ -338,6 +423,9 @@ impl AnimationBank {
 			.checked_add(1)
 			.ok_or("Animation revision overflow")?;
 		for (key, instance) in &mut next {
+			if self.sequence_poses.contains_key(key) {
+				continue;
+			}
 			let index = world
 				.entity_index(key)
 				.ok_or("Animation owner disappeared")?;
@@ -360,7 +448,16 @@ impl AnimationBank {
 					clip_index,
 					looping,
 				} => {
-					let (clip, repeat) = instance.runtime_playback.unwrap_or((clip_index, looping));
+					let (clip, repeat) = match instance.runtime_playback {
+						Some(selection) => selection,
+						None => (
+							instance
+								.pose
+								.asset
+								.resolve_clip_index(&settings.source, clip_index)?,
+							looping,
+						),
+					};
 					(clip, instance.pose.mode, repeat)
 				}
 				AnimationPlayback::Locomotion3 { idle, walk, air } => {
@@ -394,7 +491,14 @@ impl AnimationBank {
 						MotionMode::Walk => walk,
 						MotionMode::Air => air,
 					};
-					(target, mode, true)
+					(
+						instance
+							.pose
+							.asset
+							.resolve_clip_index(&settings.source, target)?,
+						mode,
+						true,
+					)
 				}
 			};
 			let transition = target != instance.pose.clip_index || mode != instance.pose.mode;

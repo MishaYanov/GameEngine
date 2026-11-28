@@ -13,10 +13,26 @@ export interface GameActionBinding {
     readonly animation_parameter?: string | null;
 }
 
+export const GAME_MOUSE_BUTTONS = [
+    {button: 'left', label: 'Left button'},
+    {button: 'right', label: 'Right button'},
+    {button: 'middle', label: 'Middle button'},
+    {button: 'back', label: 'Back button'},
+    {button: 'forward', label: 'Forward button'},
+] as const;
+
+export type GameMouseButton = (typeof GAME_MOUSE_BUTTONS)[number]['button'];
+
+export interface GameMouseActionBinding {
+    readonly id: string;
+    readonly button: GameMouseButton;
+}
+
 export interface GameInputProfile {
     readonly schema_version: 1;
     readonly movement: Readonly<Record<MovementAxis, string>>;
     readonly actions?: readonly GameActionBinding[];
+    readonly mouse_actions?: readonly GameMouseActionBinding[];
 }
 
 export const DEFAULT_GAME_INPUT: GameInputProfile = {
@@ -71,6 +87,17 @@ export function validateGameInput(profile: GameInputProfile): string | null {
         if (action.animation_parameter && !/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(action.animation_parameter)) {
             return `The animation parameter for ${action.id} needs an identifier such as isJumping.`;
         }
+    }
+    const mouseActionIds = new Set<string>();
+    const mouseButtons = new Set<GameMouseButton>();
+    for (const {id, button} of profile.mouse_actions ?? []) {
+        if (!ids.has(id)) return `The mouse binding for ${id} needs a game action.`;
+        if (mouseActionIds.has(id)) return `Choose one mouse button for ${id}.`;
+        const option = GAME_MOUSE_BUTTONS.find(choice => choice.button === button);
+        if (!option) return `Choose a supported mouse button for ${id}.`;
+        if (mouseButtons.has(button)) return `${option.label} is already assigned to another action.`;
+        mouseActionIds.add(id);
+        mouseButtons.add(button);
     }
     return null;
 }

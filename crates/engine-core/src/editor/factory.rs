@@ -332,6 +332,11 @@ impl CommandFactory {
 					*sky_exposure_ev,
 				)?;
 			}
+			EditorCommandDto::SetSceneFog { fog } => {
+				if let Some(fog) = fog {
+					fog.validate()?;
+				}
+			}
 			EditorCommandDto::SetProject { project } => project.validate()?,
 			EditorCommandDto::OrbitCamera { yaw, pitch } => {
 				finite(&[*yaw, *pitch], "Camera orbit")?
@@ -398,6 +403,19 @@ impl CommandFactory {
 				}
 				.validate()?;
 			}
+			EditorCommandDto::RetrySceneRoute {
+				run_id,
+				scene_generation,
+				attempt_id,
+			} => {
+				validate_name(run_id, 128)?;
+				if *attempt_id == 0 || (*scene_generation).max(*attempt_id) > 9_007_199_254_740_991
+				{
+					return Err(
+						"Scene transition identity is outside the valid JSON integer range".into(),
+					);
+				}
+			}
 			EditorCommandDto::CreateCamera
 			| EditorCommandDto::CreatePlayer
 			| EditorCommandDto::CreateAudioSource
@@ -413,7 +431,8 @@ impl CommandFactory {
 			| EditorCommandDto::Redo
 			| EditorCommandDto::StartPlay
 			| EditorCommandDto::StopPlay
-			| EditorCommandDto::SetPaused { .. } => {}
+			| EditorCommandDto::SetPaused { .. }
+			| EditorCommandDto::RequestSceneRoute { .. } => {}
 		}
 		Ok(())
 	}
@@ -444,6 +463,7 @@ impl CommandFactory {
 				true,
 				false,
 			),
+			("set_scene_fog", "Configure Scene Fog", "scene", true, false),
 			("create_player", "Create Player", "player", true, false),
 			(
 				"create_audio_source",

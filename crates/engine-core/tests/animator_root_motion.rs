@@ -52,6 +52,7 @@ fn fixture(
 		scene_index: 0,
 		mesh_node: 1,
 		skin_index: 0,
+		character: None,
 	};
 	let mut actor = entity("actor", [0., 0.901, 0.]).with_collider(Some(collider([0.3, 0.9, 0.3])));
 	actor.asset_id = Some(source.asset_id.clone());
@@ -69,6 +70,7 @@ fn fixture(
 				source: source.clone(),
 			},
 			root_motion_source_node,
+			foot_ik: None,
 		},
 	}));
 
@@ -126,14 +128,17 @@ fn fixture(
 	let asset = AnimationAsset {
 		source_sha256: source.expected_sha256.clone(),
 		source_scene: 0,
+		character: None,
 		nodes: vec![
 			RigNode {
 				source_node: 0,
+				name: None,
 				parent: None,
 				rest,
 			},
 			RigNode {
 				source_node: 1,
+				name: None,
 				parent: Some(0),
 				rest,
 			},
@@ -398,6 +403,85 @@ fn rejected_tick_rolls_back_both_root_displacement_and_playback_clock() {
 			.pose(&key("actor"))
 			.unwrap()
 			.elapsed_ticks,
+		1
+	);
+}
+
+#[test]
+fn timeline_actor_pose_temporarily_overrides_animator_root_motion() {
+	use engine_core::{
+		game_session::GameSession,
+		sequence::{SequenceAction, SequenceAsset, SequenceCue, SequenceEvent, SequenceInstance},
+		simulation_session::ConfiguredBehaviorFactory,
+	};
+	use std::collections::BTreeMap;
+
+	let (scene, mut project, animator) = fixture(Some(0), true, None, false);
+	let scene_id = project.startup_scene_id.clone();
+	project.sequences.assets.push(SequenceAsset {
+		id: key("cinematic"),
+		schema_version: 1,
+		duration_ms: 500,
+		cues: vec![SequenceCue {
+			at_ms: 0,
+			action: SequenceAction::PlayClip {
+				role: key("performer"),
+				clip_index: 0,
+			},
+		}],
+	});
+	project.sequences.instances.push(SequenceInstance {
+		id: key("arrival"),
+		scene_id: scene_id.clone(),
+		sequence_id: key("cinematic"),
+		bindings: BTreeMap::from([(key("performer"), key("actor"))]),
+		trigger: None,
+		once_per_entry: true,
+	});
+	let mut game = GameSession::with_factory_for_scene(
+		Arc::new(project),
+		scene_id,
+		Arc::new(scene),
+		Arc::new(ConfiguredBehaviorFactory),
+	)
+		.unwrap();
+	game.set_animator_resolver(resolver(animator)).unwrap();
+	game.active_mut().queue_sequence(&key("arrival")).unwrap();
+	let started = game.tick(STEP).unwrap();
+	assert!(matches!(
+		started.sequence_events.as_slice(),
+		[SequenceEvent::Started { .. }]
+	));
+	for _ in 0..5 {
+		game.tick(STEP).unwrap();
+		let simulation = game.active();
+		assert_eq!(
+			simulation.world().data().entities[0].transform.position[0],
+			0.
+		);
+		assert_eq!(
+			simulation
+				.animations()
+				.pose(&key("actor"))
+				.unwrap()
+				.clip_index,
+			0
+		);
+	}
+	assert!(game.active_mut().skip_sequence());
+	assert!(matches!(
+		game.tick(STEP).unwrap().sequence_events.as_slice(),
+		[SequenceEvent::Skipped { .. }]
+	));
+	game.tick(STEP).unwrap();
+	let simulation = game.active();
+	assert!(simulation.world().data().entities[0].transform.position[0] > 0.);
+	assert_eq!(
+		simulation
+			.animations()
+			.pose(&key("actor"))
+			.unwrap()
+			.clip_index,
 		1
 	);
 }

@@ -1,53 +1,38 @@
-<section aria-label="Animation clips" class="animation">
-    <div class="clip-kind" aria-label="Clip library source">
-        <button type="button" [attr.aria-pressed]="animation.library() === 'imported'"
-                (click)="animation.selectLibrary('imported')">Imported Clips
-        </button>
-        <button type="button" [attr.aria-pressed]="animation.library() === 'authored'"
-                (click)="animation.selectLibrary('authored')">Authored Clips
-        </button>
+<section aria-label="Animation clips" class="animation" [class.timeline-tools]="animation.authoredTimelineOpen()">
+    <div class="library-controls">
+        <div class="clip-kind" aria-label="Clip library source">
+            <button type="button" [attr.aria-pressed]="animation.library() === 'imported'"
+                    (click)="animation.selectLibrary('imported')">Imported Clips
+            </button>
+            <button type="button" [attr.aria-pressed]="animation.library() === 'authored'"
+                    (click)="animation.selectLibrary('authored')">Authored Clips
+            </button>
+        </div>
+        @if (animation.propAvailable()) {
+            <label class="object-source">
+                Object source
+                <select #scope [value]="animation.scope()" (change)="animation.chooseScope(scope.value)">
+                    <option value="scene">Scene objects</option>
+                    <option value="prop">Prop Workspace</option>
+                </select>
+            </label>
+        }
     </div>
-    @if (animation.propAvailable()) {
-        <label>
-            Preview target
-            <select #scope [value]="animation.scope()" (change)="animation.chooseScope(scope.value)">
-                <option value="scene">Scene selection</option>
-                <option value="prop">Prop Workspace selection</option>
-            </select>
-        </label>
-    }
     @if (animation.library() === 'authored') {
         <editor-authored-clip-editor/>
     } @else if (animation.target(); as target) {
-        @if (animation.options().length > 1) {
-            <label>
-                Animated object
-                <select #object [value]="target.key" (change)="animation.chooseTarget(object.value)">
-                    @for (item of animation.options(); track item.key) {
-                        <option [value]="item.key">{{ item.name }}</option>
-                    }
-                </select>
-            </label>
-        } @else {
-            <p class="target">{{ target.name }}</p>
-        }
+        <editor-search-picker label="Animated object" placeholder="Find an animated object…" [value]="target.key"
+                              [options]="objectOptions()" (picked)="animation.chooseTarget($event)"/>
         @if (!animation.nativeAvailable) {
             <p>Open this project in the desktop editor to preview its animation.</p>
         } @else if (animation.loading()) {
             <p role="status">Reading imported clips…</p>
         }
-        @if (animation.clips().length) {
-            <label>
-                Imported GLB clip
-                <select #clip [value]="animation.clipIndex()" (change)="animation.chooseClip(+clip.value)">
-                    @for (item of animation.clips(); track item.index) {
-                        <option [value]="item.index">{{ item.name }}</option>
-                    }
-                </select>
-            </label>
-        }
-        @if (animation.opening()) {
-            <p role="status">Preparing the isolated preview…</p>
+        @if (clipOptions().length) {
+            <editor-search-picker label="Imported GLB clip" placeholder="Find a clip…" [value]="selectedClip()"
+                                  [options]="clipOptions()" (picked)="chooseClip($event)"/>
+        } @else if (animation.nativeAvailable && !animation.loading() && !animation.opening() && !animation.error()) {
+            <p class="help">This object has no imported GLB clips.</p>
         }
         @if (animation.preview(); as preview) {
             <label class="time">
@@ -68,6 +53,7 @@
             <button type="button" (click)="animation.retry()">Retry Animation Preview</button>
         }
     } @else {
-        <p>Select a visible object with an Animation component in Scene or Prop.</p>
+        <p class="help">Add an Animation component to a visible GLB in Scene or select an animated object in Prop
+            Workspace.</p>
     }
 </section>

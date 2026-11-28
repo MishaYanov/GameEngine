@@ -1,7 +1,40 @@
-use renderer::vulkan::{ModelPushConstants, RenderObject};
+use renderer::{
+	EditorShadingMode, WindowRenderer,
+	vulkan::{CameraUniform, ModelPushConstants, RenderObject},
+};
+use std::collections::HashSet;
 
 use super::{EntityId, MAX_SCENE_RENDER_OBJECTS, Scene, validate_animation_placement};
-use crate::scene_data::{LightData, LightKind, SceneEnvironment};
+use crate::{
+	scene_data::{LightData, LightKind, SceneEnvironment},
+	visibility::Frustum,
+};
+
+/// Camera and directional-light frusta for a single scene submission.
+#[derive(Default)]
+pub struct RenderVisibility {
+	camera: Option<Frustum>,
+	shadow: Option<Frustum>,
+}
+
+impl RenderVisibility {
+	pub fn from_camera(
+		renderer: &WindowRenderer,
+		camera: &CameraUniform,
+		shading: Option<EditorShadingMode>,
+	) -> Result<Self, String> {
+		let camera_frustum =
+			Frustum::from_view_projection(glam::Mat4::from_cols_array(&camera.view_projection))?;
+		let shadow = renderer
+			.directional_shadow_view_projection(camera, shading)
+			.map(Frustum::from_view_projection)
+			.transpose()?;
+		Ok(Self {
+			camera: Some(camera_frustum),
+			shadow,
+		})
+	}
+}
 
 impl Scene {
 	pub fn render_objects(&self) -> Vec<RenderObject<'_>> {
@@ -26,6 +59,78 @@ impl Scene {
 	pub fn try_render_visible(
 		&self,
 		frustum: Option<&crate::visibility::Frustum>,
+	) -> Result<(Vec<RenderObject<'_>>, crate::visibility::SceneRenderStats), String> {
+		self.try_render_filtered(frustum, None, &HashSet::new(), &HashSet::new())
+	}
+
+	/// Build an editor submission with vertex markers on the selected mesh objects.
+	pub fn try_render_editor_visible(
+		&self,
+		frustum: Option<&crate::visibility::Frustum>,
+		selected: &[engine_core::EntityKey],
+	) -> Result<(Vec<RenderObject<'_>>, crate::visibility::SceneRenderStats), String> {
+		let selected = selected.iter().collect();
+		self.try_render_filtered(frustum, None, &HashSet::new(), &selected)
+	}
+
+	pub fn try_render_world_detail<'a>(
+		&self,
+		frustum: Option<&crate::visibility::Frustum>,
+		lods: impl IntoIterator<Item=&'a engine_core::project::WorldLod>,
+		eye: [f32; 3],
+	) -> Result<(Vec<RenderObject<'_>>, crate::visibility::SceneRenderStats), String> {
+		let hidden = self.hidden_world_lods(lods, eye);
+		self.try_render_filtered(frustum, None, &hidden, &HashSet::new())
+	}
+
+	/// Submit camera-visible geometry and casters that intersect the light's view.
+	pub fn try_render_view<'a>(
+		&self,
+		visibility: &RenderVisibility,
+		selected: &[engine_core::EntityKey],
+		lods: impl IntoIterator<Item=&'a engine_core::project::WorldLod>,
+		eye: [f32; 3],
+	) -> Result<(Vec<RenderObject<'_>>, crate::visibility::SceneRenderStats), String> {
+		let hidden = self.hidden_world_lods(lods, eye);
+		let selected = selected.iter().collect();
+		self.try_render_filtered(
+			visibility.camera.as_ref(),
+			visibility.shadow.as_ref(),
+			&hidden,
+			&selected,
+		)
+	}
+
+	fn hidden_world_lods<'a>(
+		&self,
+		lods: impl IntoIterator<Item=&'a engine_core::project::WorldLod>,
+		eye: [f32; 3],
+	) -> HashSet<&'a engine_core::EntityKey> {
+		let mut hidden = HashSet::new();
+		for lod in lods {
+			let has_detail = self
+				.entity_by_key(&lod.detail)
+				.is_some_and(|id| self.is_renderable(id));
+			let has_proxy = self
+				.entity_by_key(&lod.proxy)
+				.is_some_and(|id| self.is_renderable(id));
+			if has_detail && has_proxy {
+				hidden.insert(if lod.prefer_detail(eye) {
+					&lod.proxy
+				} else {
+					&lod.detail
+				});
+			}
+		}
+		hidden
+	}
+
+	fn try_render_filtered(
+		&self,
+		frustum: Option<&Frustum>,
+		shadow: Option<&Frustum>,
+		hidden: &HashSet<&engine_core::EntityKey>,
+		selected: &HashSet<&engine_core::EntityKey>,
 	) -> Result<(Vec<RenderObject<'_>>, crate::visibility::SceneRenderStats), String> {
 		let mut part_count = 0usize;
 		for entry in self.entries.iter().filter(|entry| entry.renderable) {
@@ -54,21 +159,31 @@ impl Scene {
 				validate_animation_placement(&entry.name, matrix)?;
 			}
 			stats.total_entities += 1;
-			if !entry.renderable {
+			if !entry.renderable || entry.key.as_ref().is_some_and(|key| hidden.contains(key)) {
 				continue;
 			}
-			let outside = frustum.is_some_and(|frustum| {
-				instance
-					.animation_bounds()
-					.or_else(|| instance.model().bounds())
-					.and_then(|bounds| bounds.transformed(matrix).ok())
-					.is_some_and(|bounds| !frustum.intersects(bounds))
+			let bounds = (frustum.is_some() || shadow.is_some())
+				.then(|| {
+					instance
+						.animation_bounds()
+						.or_else(|| instance.model().bounds())
+				})
+				.flatten()
+				.and_then(|bounds| bounds.transformed(matrix).ok());
+			let visible = frustum
+				.zip(bounds)
+				.is_none_or(|(view, bounds)| view.intersects(bounds));
+			let shadow_caster = shadow.map_or(visible, |view| {
+				bounds.is_none_or(|bounds| view.intersects(bounds))
 			});
-			if outside {
+			if visible {
+				stats.visible_entities += 1;
+			} else {
 				stats.culled_entities += 1;
-				continue;
+				if !shadow_caster {
+					continue;
+				}
 			}
-			stats.visible_entities += 1;
 			let mut constants = ModelPushConstants::identity();
 			constants.model = (matrix * instance.animation_mesh_matrix()).to_cols_array();
 			if let Some(material) = &entry.material {
@@ -77,12 +192,20 @@ impl Scene {
 			objects
 				.try_reserve(instance.model().parts().len())
 				.map_err(|error| format!("Cannot reserve scene render objects: {error}"))?;
+			let show_vertices =
+				visible && entry.key.as_ref().is_some_and(|key| selected.contains(key));
 			for part in instance.model().parts() {
-				stats.draw_calls += 1;
-				stats.triangles += part.mesh().index_count() as usize / 3;
-				let mut object = RenderObject::new(part.mesh(), part.material(), constants);
+				if visible {
+					stats.draw_calls += 1;
+					stats.triangles += part.mesh().index_count() as usize / 3;
+				}
+				let mut object = RenderObject::new(part.mesh(), part.material(), constants)
+					.with_pass_visibility(visible, shadow_caster);
 				if let Some(palette) = instance.animation_palette() {
 					object = object.with_skin_palette(palette);
+				}
+				if show_vertices {
+					object = object.with_vertex_markers();
 				}
 				objects.push(object);
 			}
@@ -151,7 +274,14 @@ impl Scene {
 		let texture = assets.and_then(|assets| assets.sky_texture(renderer, image));
 		renderer.set_sky_panorama(texture)?;
 		renderer.set_sky(gradient);
-		renderer.set_ambient(environment.ambient_linear)
+		renderer.set_ambient(environment.ambient_linear)?;
+		renderer.set_fog(environment.fog.map(|fog| renderer::vulkan::Fog {
+			color_linear: fog.color_linear,
+			density: fog.density,
+			base_height: fog.base_height,
+			height_falloff: fog.height_falloff,
+			start_distance: fog.start_distance,
+		}))
 	}
 
 	pub fn environment(&self) -> &SceneEnvironment {

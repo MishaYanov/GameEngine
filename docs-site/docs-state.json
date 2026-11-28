@@ -1,7 +1,7 @@
 {
-  "last_checked_commit": "879050c4fb5b17ad331b6b9c79058a7fb5e0fa1a",
+  "last_checked_commit": "cc0e6b9bedadbd9c17dbeef4c207dc9dbed27046",
   "last_checked_date": "2026-11-24",
-  "last_documentation_update_commit": "d1ceea447b06f9c81aa045c0dba1e64586ae08f4",
+  "last_documentation_update_commit": "cc0e6b9bedadbd9c17dbeef4c207dc9dbed27046",
   "workflow": "Inspect Git history and staged, unstaged, and untracked changes. Update documentation only on explicit user command. Preserve the empty Game App Developer space unless requested otherwise.",
   "baseline_note": "The object authoring roadmap uses the inspected editor and engine working tree. Older entries retain their original verification evidence.",
   "conditional_controls_and_object_scripts_proposal": {
@@ -6037,6 +6037,32 @@
     ],
     "verification_limits": [
       "Manual installed MCP consent and clean-machine installer acceptance were outside this run."
+    ]
+  },
+  "scene_flow_streaming_guides": {
+    "inspected_head": "cc0e6b9bedadbd9c17dbeef4c207dc9dbed27046",
+    "previous_checkpoint": "879050c4fb5b17ad331b6b9c79058a7fb5e0fa1a",
+    "scope": "Teach route and Timeline authoring, additive region setup, Player transition controls, Compiler validation, Windows build storage, and targeted scene and streaming verification.",
+    "paths": [
+      "docs/editor-workspace.md",
+      "docs/apps/game/README.md",
+      "docs/compiler/README.md",
+      "docs/windows-editor-quickstart.md",
+      "docs/testing.md",
+      "docs/performance-baseline.md"
+    ],
+    "worktree_inspection": "Reviewed new Git history, staged project and asset work, unstaged code, and untracked Scene Flow, Timeline, streaming, compiler tests, and benchmark files.",
+    "pending_documentation_changes": [],
+    "verification": [
+      "The documentation site built and link-checked 28 pages. All 8 site tests passed, including archive exclusion.",
+      "Verified the documented route, Timeline, and region fields against the Editor template. Verified native test names and environment variables, Player shortcuts and load path, Compiler target directory, and installer flags against the corresponding source.",
+      "Checked the quoted Cinder Oath prefetch and Robot CPU source-retention measurements against their local reports.",
+      "Follow-up checks passed 1,326 Rust tests across the affected packages, 803 Editor tests, and 12 benchmark report tests. Scene Flow regressions cover literal markup, stale retries, pinned regions, failed unload recovery, and confined scene reads.",
+      "The Windows Vulkan route and grid tests passed, including final model-owner retirement. The native runtime prefab lifecycle test also passed. The instrumented grid recorded a 248.829 ms unload before the shared-model fix and a 2.687 ms maximum update afterward."
+    ],
+    "verification_limits": [
+      "Grid statistics cover update time in a hidden-window test. The final run still recorded a 250.708 ms checkpoint draw. Visible Release frame pacing remains a separate measurement.",
+      "The precision probe covers sampled CPU camera and collision results. The default Rust suite leaves opt-in native, benchmark, device, and export coverage outside its results."
     ]
   }
 }

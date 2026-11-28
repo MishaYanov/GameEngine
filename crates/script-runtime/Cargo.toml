@@ -1,0 +1,12 @@
+[package]
+name = "engine-script-runtime"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+engine-script-sdk = { path = "../script-sdk" }
+wasmi = { version = "2.0.3", default-features = false, features = ["stable", "std", "validate", "auto-dispatch", "deterministic"] }

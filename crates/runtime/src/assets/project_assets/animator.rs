@@ -2,7 +2,7 @@ use super::*;
 use engine_core::animation::{
 	ANIMATOR_GRAPH_SUFFIX, AnimationClipRef, AnimatorGraph, MAX_ANIMATOR_GRAPH_BYTES,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn prepare_animator(
 	asset_root: &Path,
@@ -41,25 +41,41 @@ pub fn prepare_animator(
 		None => return Err("Choose an unused path for the new Animator".into()),
 	};
 	let mut dependencies = BTreeSet::new();
+	let mut imported = BTreeMap::new();
 	for state in &graph.states {
-		let (id, fingerprint, kind) = match &state.clip {
-			AnimationClipRef::Imported { source, .. } => {
-				(&source.asset_id, &source.expected_sha256, AssetKind::Model)
+		let id = match &state.clip {
+			AnimationClipRef::Imported { source, clip_index } => {
+				use std::collections::btree_map::Entry;
+				let model = match imported.entry(&source.asset_id) {
+					Entry::Occupied(entry) => entry.into_mut(),
+					Entry::Vacant(entry) => {
+						entry.insert(bridge::animation_asset::load(&root, source)?)
+					}
+				};
+				model
+					.resolve_clip_index(source, *clip_index)
+					.map_err(|error| format!("Animator state {:?}: {error}", state.id))?;
+				&source.asset_id
 			}
 			AnimationClipRef::Authored {
 				asset_id,
 				expected_sha256,
-			} => (asset_id, expected_sha256, AssetKind::AnimationClip),
+			} => {
+				catalog
+					.by_id(asset_id)
+					.filter(|asset| {
+						asset.kind == AssetKind::AnimationClip
+							&& &asset.fingerprint == expected_sha256
+					})
+					.ok_or_else(|| {
+						format!(
+							"Animator state {:?} refers to a missing or changed clip revision",
+							state.id
+						)
+					})?;
+				asset_id
+			}
 		};
-		catalog
-			.by_id(id)
-			.filter(|asset| asset.kind == kind && &asset.fingerprint == fingerprint)
-			.ok_or_else(|| {
-				format!(
-					"Animator state {:?} refers to a missing or changed clip revision",
-					state.id
-				)
-			})?;
 		dependencies.insert(id.clone());
 	}
 	let asset = PersistentAsset {

@@ -3,24 +3,17 @@
     @if (open()) {
         <fieldset [disabled]="pending()">
             @if (lights().length) {
-                <label>Light
-                    <select #light (change)="select(light.value)" [disabled]="changed()" [value]="draft()?.key ?? ''">
-                        @if (!draft()) {
-                            <option value="">Choose a light</option>
-                        }
-                        @for (item of lights(); track item.key) {
-                            <option [value]="item.key">{{ item.name }}
-                                ({{ item.kind === 'point' ? 'Point' : 'Directional' }})
-                            </option>
-                        }
-                    </select>
-                </label>
+                <editor-search-picker label="Light" placeholder="Find a light by name or type…"
+                                      [options]="lightOptions()" [value]="draft()?.key ?? null" [resultLimit]="60"
+                                      [revealResults]="true"
+                                      [disabled]="pending() || changed()" (picked)="select($event)"/>
             } @else {
                 <p>Add a Point Light or Directional Light from Objects.</p>
             }
             @if (draft(); as light) {
                 <label>Name
-                    <input #name (input)="updateName(name.value)" [value]="light.name" maxlength="1024" type="text">
+                    <input #name (input)="updateName(name.value)" [value]="light.name" [title]="light.name"
+                           maxlength="1024" type="text">
                 </label>
                 @let field = light.kind === 'point' ? 'position' : 'direction';
                 <fieldset class="vector">

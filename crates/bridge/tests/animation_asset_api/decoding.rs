@@ -6,7 +6,9 @@ use engine_core::{
 		Interpolation, checked_similarity_inverse, clip_time, global_pose, mesh_local_palette,
 		sample_local, sample_pose, short_slerp,
 	},
-	asset_catalog::AssetId,
+	asset_catalog::{AssetCatalog, AssetId, CATALOG_FILE},
+	project::ProjectData,
+	simulation_session::SimulationSession,
 };
 use glam::{Mat4, Quat, Vec3};
 use serde_json::{Value, json};
@@ -40,6 +42,13 @@ fn fixture_decodes_three_clips_and_shared_source_instances_share_one_immutable_a
 	let metadata = animation_asset::inspect(&root(), &id).unwrap();
 	assert_eq!(metadata.source.mesh_node, 3);
 	assert_eq!(metadata.clips.len(), 3);
+	assert_eq!(metadata.joint_metadata.len(), 2);
+	assert!(
+		metadata
+			.joint_metadata
+			.iter()
+			.all(|joint| joint.stable_id.is_none())
+	);
 	let mut wrong = metadata.source;
 	wrong.expected_sha256 = "0".repeat(64);
 	assert!(
@@ -58,6 +67,53 @@ fn fixture_decodes_three_clips_and_shared_source_instances_share_one_immutable_a
 		animation_asset::prepare_scene(&root(), &data).is_err(),
 		"shared cache must still validate each source binding"
 	);
+}
+
+#[test]
+fn skin_normal_map_keeps_generated_frames_and_preserves_skin_influences() {
+	let bytes = edit_glb(|doc, bin| {
+		let mut png = std::io::Cursor::new(Vec::new());
+		image::RgbaImage::from_pixel(1, 1, image::Rgba([204, 128, 230, 255]))
+			.write_to(&mut png, image::ImageFormat::Png)
+			.unwrap();
+		let png = png.into_inner();
+		let views = doc["bufferViews"].as_array_mut().unwrap();
+		let view = views.len();
+		views.push(json!({"buffer":0,"byteOffset":bin.len(),"byteLength":png.len()}));
+		bin.extend_from_slice(&png);
+		doc["buffers"][0]["byteLength"] = json!(bin.len());
+		doc["images"] = json!([{"bufferView":view,"mimeType":"image/png"}]);
+		doc["textures"] = json!([{"source":0}]);
+		doc["materials"][0]["normalTexture"] = json!({"index":0,"scale":0.65});
+		doc["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"] = json!({"index":0});
+	});
+	let reference = decoded();
+	let asset = animation_asset::decode(&bytes).unwrap();
+	let map = asset.primitives[0].normal_map.unwrap();
+	assert_eq!(map.scale, 0.65);
+	assert_eq!(asset.images.len(), 1);
+	assert_eq!(asset.primitives[0].base_color_image, Some(map.image));
+	assert!(asset.primitives[1].normal_map.is_none());
+	assert_eq!(asset.images[map.image].rgba, [204, 128, 230, 255]);
+	let normal_vertices = &asset.primitives[0].vertices;
+	assert!(
+		normal_vertices
+			.iter()
+			.any(|vertex| vertex.tangent[3].abs() == 1.0)
+	);
+	for vertex in normal_vertices {
+		assert!(
+			reference.primitives[0]
+				.vertices
+				.iter()
+				.any(|source| vertex.position == source.position
+					&& vertex.normal == source.normal
+					&& vertex.joints == source.joints
+					&& vertex.weights == source.weights
+					&& vertex.normal_uv == source.uv)
+		);
+	}
+	assert_eq!(asset.envelopes, reference.envelopes);
 }
 
 #[test]
@@ -210,6 +266,202 @@ fn embedded_base_color_images_are_decoded_once_and_sampler_subset_is_explicit() 
 			.unwrap_err()
 			.contains("linear/repeat")
 	);
+}
+
+#[test]
+fn character_reimport_preserves_clip_and_joint_ids_across_renames_and_reordering() {
+	let original = edit_glb(|doc, _| mark_character(doc));
+	let replacement = edit_glb(|doc, _| {
+		mark_character(doc);
+		let clips = doc["animations"].as_array_mut().unwrap();
+		clips.swap(0, 1);
+		clips[0]["name"] = json!("Renamed walk");
+		let joints = doc["skins"][0]["joints"].as_array().unwrap();
+		let first = joints[0].as_u64().unwrap();
+		let second = joints[1].as_u64().unwrap();
+		let remap = |node: &mut Value| {
+			let old = node.as_u64().unwrap();
+			*node = json!(if old == first {
+				second
+			} else if old == second {
+				first
+			} else {
+				old
+			});
+		};
+		let nodes = doc["nodes"].as_array_mut().unwrap();
+		nodes.swap(first as usize, second as usize);
+		nodes[second as usize]["name"] = json!("Renamed joint");
+		for node in nodes {
+			if let Some(children) = node["children"].as_array_mut() {
+				children.iter_mut().for_each(remap);
+			}
+		}
+		for scene in doc["scenes"].as_array_mut().unwrap() {
+			scene["nodes"]
+				.as_array_mut()
+				.unwrap()
+				.iter_mut()
+				.for_each(remap);
+		}
+		let skin = &mut doc["skins"][0];
+		skin["joints"]
+			.as_array_mut()
+			.unwrap()
+			.iter_mut()
+			.for_each(remap);
+		if let Some(skeleton) = skin.get_mut("skeleton") {
+			remap(skeleton);
+		}
+		for clip in doc["animations"].as_array_mut().unwrap() {
+			for channel in clip["channels"].as_array_mut().unwrap() {
+				remap(&mut channel["target"]["node"]);
+			}
+		}
+	});
+	let original_asset = animation_asset::decode(&original).unwrap();
+	let replacement_asset = animation_asset::decode(&replacement).unwrap();
+	replacement_asset
+		.require_compatible_character(&original_asset)
+		.unwrap();
+	let id = AssetId::new("a9a07900-9dc2-4d9f-8ff1-718defec0291").unwrap();
+	let source = original_asset.source_ref(id.clone());
+	let walk = replacement_asset.resolve_clip_index(&source, 1).unwrap();
+	assert_eq!(walk, 0);
+	assert_eq!(replacement_asset.clips[walk as usize].name, "Renamed walk");
+	assert_eq!(
+		sample_local(&original_asset, 1, 0.2).unwrap(),
+		sample_local(&replacement_asset, walk as usize, 0.2).unwrap(),
+	);
+	let previous_joint = original_asset.joint_node("joint-0").unwrap();
+	let replacement_joint = replacement_asset.joint_node("joint-0").unwrap();
+	assert_ne!(
+		original_asset.nodes[usize::from(previous_joint)].source_node,
+		replacement_asset.nodes[usize::from(replacement_joint)].source_node
+	);
+
+	let dir =
+		std::env::temp_dir().join(format!("engine-character-{}", AssetId::generate().as_str()));
+	let _cleanup = TestDirectory(&dir);
+	let model_dir = dir.join("characters");
+	std::fs::create_dir_all(&model_dir).unwrap();
+	std::fs::write(model_dir.join("two-joint.glb"), &replacement).unwrap();
+	let original_catalog = std::fs::read_to_string(root().join(CATALOG_FILE)).unwrap();
+	let mut catalog = AssetCatalog::from_json(&original_catalog).unwrap();
+	catalog.assets[0]
+		.fingerprint
+		.clone_from(&original_asset.source_sha256);
+	catalog.assets[0].bytes = original.len() as u64;
+	std::fs::write(dir.join(CATALOG_FILE), catalog.to_json().unwrap()).unwrap();
+	assert!(
+		animation_asset::load(&dir, &source)
+			.unwrap_err()
+			.contains("outside its catalog")
+	);
+	catalog.assets[0]
+		.fingerprint
+		.clone_from(&replacement_asset.source_sha256);
+	catalog.assets[0].bytes = replacement.len() as u64;
+	catalog.assets[0].revision += 1;
+	std::fs::write(dir.join(CATALOG_FILE), catalog.to_json().unwrap()).unwrap();
+	let metadata = animation_asset::inspect(&dir, &id).unwrap();
+	assert!(metadata.joint_metadata.iter().any(
+		|joint| joint.name == "Renamed joint" && joint.stable_id.as_deref() == Some("joint-0")
+	));
+	let mut data = scene(true);
+	data.entities[0].animation.as_mut().unwrap().settings.source = source;
+	let pins = [(key("clip-demo"), Arc::new(original_asset))].into();
+	let bindings = animation_asset::prepare_scene_with_pins(&dir, &data, &pins).unwrap();
+	assert_eq!(
+		bindings[&key("clip-demo")].source_sha256,
+		replacement_asset.source_sha256
+	);
+	let mut project = ProjectData::for_scene("Character reimport", "scene.json", &data).unwrap();
+	project.fixed_hz = 20;
+	let mut simulation = SimulationSession::new(project, Arc::new(data)).unwrap();
+	simulation.install_animation_bindings(bindings).unwrap();
+	simulation.tick(0.05).unwrap();
+	let pose = simulation.animations().pose(&key("clip-demo")).unwrap();
+	assert_eq!(pose.clip_index, walk);
+	assert_eq!(
+		pose.local,
+		sample_local(&replacement_asset, walk as usize, 0.05).unwrap()
+	);
+}
+
+#[test]
+fn character_profile_rejects_partial_duplicate_and_removed_identities() {
+	let original = animation_asset::decode(&edit_glb(|doc, _| mark_character(doc))).unwrap();
+	let partial = edit_glb(|doc, _| {
+		mark_character(doc);
+		doc["animations"][0]
+			.as_object_mut()
+			.unwrap()
+			.remove("extras");
+	});
+	assert!(
+		animation_asset::decode(&partial)
+			.unwrap_err()
+			.contains("every animation clip")
+	);
+	let duplicate = edit_glb(|doc, _| {
+		mark_character(doc);
+		doc["animations"][1]["extras"] = doc["animations"][0]["extras"].clone();
+	});
+	assert!(
+		animation_asset::decode(&duplicate)
+			.unwrap_err()
+			.contains("unique clip IDs")
+	);
+	let removed = edit_glb(|doc, _| {
+		mark_character(doc);
+		doc["animations"].as_array_mut().unwrap().remove(1);
+	});
+	assert!(
+		animation_asset::decode(&removed)
+			.unwrap()
+			.require_compatible_character(&original)
+			.unwrap_err()
+			.contains("clip-1")
+	);
+	assert!(
+		decoded()
+			.require_compatible_character(&original)
+			.unwrap_err()
+			.contains("lacks stable")
+	);
+	let mut reparented = original.clone();
+	let child = reparented.joint_node("joint-1").unwrap();
+	reparented.nodes[usize::from(child)].parent = None;
+	assert!(
+		reparented
+			.require_compatible_character(&original)
+			.unwrap_err()
+			.contains("changed its parent")
+	);
+}
+
+struct TestDirectory<'a>(&'a std::path::Path);
+impl Drop for TestDirectory<'_> {
+	fn drop(&mut self) {
+		let _ = std::fs::remove_dir_all(self.0);
+	}
+}
+
+fn mark_character(doc: &mut Value) {
+	let joints = doc["skins"][0]["joints"].as_array().unwrap().clone();
+	for (index, node) in joints.into_iter().enumerate() {
+		doc["nodes"][node.as_u64().unwrap() as usize]["extras"] =
+			json!({"game_engine_joint_id": format!("joint-{index}")});
+	}
+	for (index, clip) in doc["animations"]
+		.as_array_mut()
+		.unwrap()
+		.iter_mut()
+		.enumerate()
+	{
+		clip["extras"] = json!({"game_engine_clip_id": format!("clip-{index}")});
+	}
 }
 
 fn edit_glb(edit: impl FnOnce(&mut Value, &mut Vec<u8>)) -> Vec<u8> {

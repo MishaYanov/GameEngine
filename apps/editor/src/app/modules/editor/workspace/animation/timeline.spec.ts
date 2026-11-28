@@ -5,6 +5,7 @@ import type {
     ClipDraftOperation, ClipTimelineDraft, ClipTimelinePreviewRequest, TimelineEdit, TimelineKeyMove, VisualClipPreview,
 } from '../../../../core/editor/authored-clip.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {PropWorkspaceService, type PropWorkspaceDocument} from '../prop-workspace/prop-workspace.service';
 import {AnimationWorkspaceService} from './animation-workspace.service';
 import {ClipTimeline} from './timeline';
 import {TimelineEditService} from './timeline-edit.service';
@@ -48,6 +49,7 @@ function setup(draft = initial) {
     let revision = 0, cursor = 0;
     let history = [draft.clip];
     const showPreview = signal(false);
+    const propDocument = signal<PropWorkspaceDocument | null>(null);
     const edit = vi.fn(async (_id: string, _expected: number, operation: ClipDraftOperation): Promise<ClipTimelineDraft> => {
         if (operation.type === 'undo') cursor--;
         if (operation.type === 'redo') cursor++;
@@ -78,10 +80,12 @@ function setup(draft = initial) {
     let review: (() => Promise<boolean>) | null = null;
     const reviewNavigation = () => review?.() ?? Promise.resolve(true);
     TestBed.configureTestingModule({providers: [
+            {provide: PropWorkspaceService, useValue: {document: propDocument}},
             {
                 provide: AnimationWorkspaceService, useValue: {
                     authoredReady: showPreview,
-                    registerTimelineReview: (callback: () => Promise<boolean>) => {
+                    authoredTimelinePreviewError: signal<string | null>(null),
+                    registerDraftReview: (callback: () => Promise<boolean>) => {
                         review = callback;
                         return () => {
                             review = null;
@@ -104,7 +108,7 @@ function setup(draft = initial) {
     const fixture = TestBed.createComponent(ClipTimeline);
     fixture.componentRef.setInput('asset', draft);
     return {
-        fixture, edit, open, sample, close, saveDraft, closeDraft, showPreview, reviewNavigation,
+        fixture, edit, open, sample, close, saveDraft, closeDraft, showPreview, reviewNavigation, propDocument,
         timeline: fixture.debugElement.injector.get(TimelineEditService)
     };
 }
@@ -135,6 +139,39 @@ function field(root: HTMLElement, label: string): HTMLInputElement {
 }
 
 describe('Authored clip timeline', () => {
+    it('names a Track using only the identified Prop document and otherwise shows the full key', async () => {
+        const {fixture, propDocument} = setup();
+        fixture.componentRef.setInput('scope', {
+            kind: 'source', asset_id: 'lever-prop', draft_id: 'lever-draft', draft_revision: 1,
+        });
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const track = root.querySelector<HTMLInputElement>('.track-choice [role="combobox"]')!;
+        expect(track.value).toBe('Position · lever');
+
+        propDocument.set({
+            kind: 'source', scope: {generation: 1, sceneId: 'main'}, name: 'Gate', path: 'gate.json',
+            objects: [], placements: [], references: [],
+            draft: {
+                draft_id: 'lever-draft', asset_id: 'lever-prop', workspace_generation: 11, revision: 1,
+                path: 'gate.json', fingerprint: 'a'.repeat(64),
+                prefab: {
+                    schema_version: 3, gameplay: null, reference_slots: {}, entities: [{
+                        key: 'lever', name: 'Inner Handle with a Long Descriptive Name', components: [],
+                        transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
+                    }]
+                },
+            },
+        });
+        await fixture.whenStable();
+        expect(track.value).toBe('Position · Inner Handle with a Long Descriptive Name');
+        fixture.componentRef.setInput('scope', {
+            kind: 'source', asset_id: 'unrelated-prop', draft_id: 'another-draft', draft_revision: 1,
+        });
+        await fixture.whenStable();
+        expect(track.value).toBe('Position · lever');
+    });
+
     it('selects a requested bookmark after its clip draft loads', async () => {
         const {fixture, timeline} = setup(timedDraft);
         fixture.componentRef.setInput('initialMarker', 'locked');

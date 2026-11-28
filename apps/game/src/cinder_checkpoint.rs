@@ -5,7 +5,7 @@ mod store;
 
 pub(crate) use store::{Attempt, PracticeStore, Preflight, Review, TransferFile, publish_transfer};
 
-use crate::{GameApp, local_player_files::read_bounded, play::resolve_scene_path};
+use crate::{GameApp, local_player_files::read_bounded};
 use gameplay_catalog::{
 	CINDER_OATH_ID,
 	cinder_oath::{CinderProgress, intro_route},
@@ -13,8 +13,9 @@ use gameplay_catalog::{
 use runtime::{
 	project::{MAX_PROJECT_BYTES, ProjectData},
 	scene_catalog::SceneId,
-	scene_data::{MAX_SCENE_BYTES, parse_json},
+	scene_data::parse_json,
 	scene_editor::PreparedScene,
+	scene_io::read_confined_scene_source,
 	scene_load_timing::{Outcome as SceneLoadOutcome, SceneLoadTiming, Scope as SceneLoadScope},
 };
 use serde::{Deserialize, Serialize};
@@ -140,19 +141,13 @@ impl GameApp {
 		let normalized_manifest = project
 			.to_json()
 			.map_err(|_| PreflightBlock::IncompatibleProject)?;
-		let (path, scene_bytes) = (|| {
-			let path = resolve_scene_path(
-				self.asset_root.as_deref().ok_or("Player not initialized")?,
-				project.scene_path(&scene)?,
-			)?;
-			let bytes = read_bounded(&path, MAX_SCENE_BYTES)?.ok_or("Missing arena scene")?;
-			Ok::<_, String>((path, bytes))
+		let (path, source) = (|| {
+			let root = self.asset_root.as_deref().ok_or("Player not initialized")?;
+			read_confined_scene_source(root, Path::new(project.scene_path(&scene)?))
 		})()
 		.map_err(|_| PreflightBlock::InvalidAuthoredScene)?;
-		let source =
-			std::str::from_utf8(&scene_bytes).map_err(|_| PreflightBlock::InvalidAuthoredScene)?;
 		let document = Arc::new(
-			parse_json(source)
+			parse_json(&source)
 				.map_err(|_| PreflightBlock::InvalidAuthoredScene)?
 				.data,
 		);
@@ -161,7 +156,7 @@ impl GameApp {
 			.prepare_restored_game(scene, Arc::clone(&document), CinderProgress::arena_entry())
 			.map_err(|_| PreflightBlock::InvalidAuthoredScene)?;
 		Ok(ArenaEntry {
-			checkpoint: Checkpoint::arena_entry(normalized_manifest.as_bytes(), &scene_bytes),
+			checkpoint: Checkpoint::arena_entry(normalized_manifest.as_bytes(), source.as_bytes()),
 			prepared,
 			document,
 			path,

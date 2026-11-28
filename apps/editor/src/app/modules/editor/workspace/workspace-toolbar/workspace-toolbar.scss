@@ -1,41 +1,51 @@
 :host {
   display: block;
   flex: none;
+  min-width: 0;
 }
 
 .workspace-actions,
 .action-group {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .workspace-actions {
-  flex-wrap: wrap;
-  flex: none;
   padding: var(--space-1) var(--space-2);
+}
+
+.action-group {
+  flex: none;
 }
 
 .action-group + .action-group {
-  padding-inline-start: var(--space-2);
+  padding-inline-start: var(--space-1);
   border-inline-start: var(--border-width) solid var(--color-pane-edge);
 }
 
-.action-group button {
+:is(.action-group button, .save-summary) {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-1);
-  min-height: var(--space-7);
-  padding: var(--space-1) var(--space-2);
+  min-height: max(24px, var(--layout-control-height));
+  padding: 0 var(--space-2);
   border: var(--border-width) solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
+  font: inherit;
   font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
-.action-group button:hover:enabled {
+.action-group button.icon-action {
+  min-width: max(24px, var(--layout-control-height));
+  padding: 0;
+}
+
+:is(.action-group button, .save-summary):hover:enabled {
   background: var(--color-control-hover);
   color: var(--color-text);
 }
@@ -44,39 +54,92 @@
   background: var(--color-control-pressed);
 }
 
-.action-group .play-action:enabled {
-  background: var(--color-action);
-  color: var(--color-on-action);
-}
-
-.action-group .play-action:enabled:hover {
-  background: var(--color-action-hover);
-}
-
-.action-group .play-action:enabled:active {
-  background: var(--color-action-pressed);
-}
-
 .action-group button:disabled {
   color: var(--color-text-disabled);
 }
 
-.action-group .play-action:disabled {
+.action-group .play-action {
+  min-width: 3.75rem;
   background: var(--color-control-disabled);
 }
 
+.action-group .play-action:enabled {
+  background: var(--color-selected);
+  color: var(--color-success);
+}
+
+.action-group .play-action:enabled:hover {
+  background: var(--color-selected-hover);
+  color: var(--color-text);
+}
+
+.action-group .play-action.stop-action:enabled {
+  color: var(--color-warning);
+}
+
+.save-state,
+.save-summary {
+  min-width: 0;
+  margin-inline-start: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.save-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-warning);
+}
+
+.save-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.save-summary.save-issue {
+  color: var(--color-warning);
+}
+
+.save-summary editor-icon {
+  rotate: 90deg;
+}
+
 .save-report {
-  max-block-size: min(12rem, 25vh);
-  min-inline-size: 0;
+  position: fixed;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-inline, flip-block;
+  max-inline-size: min(26rem, calc(100vw - 2rem));
+  max-block-size: min(14rem, 45vh);
+  margin: var(--space-1) 0 0;
   overflow: auto;
   overflow-wrap: anywhere;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-popover);
+  color: var(--color-text);
   font-size: var(--font-size-sm);
 }
 
 .save-report ul {
-  margin-block: var(--space-1);
-  padding-inline-start: var(--space-5);
+  margin: 0 0 var(--space-2);
+  padding-inline-start: var(--space-4);
+}
+
+.save-report p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.save-report button {
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text);
+  font: inherit;
 }
 
 .action-error {
@@ -85,38 +148,4 @@
   background: var(--color-danger-bg);
   color: var(--color-danger);
   font-size: var(--font-size-sm);
-}
-
-:host-context(html[data-theme='workbench']) {
-  .workspace-actions {
-    gap: 3px;
-    padding: 3px var(--space-2);
-  }
-
-  .action-group {
-    gap: 2px;
-  }
-
-  .action-group + .action-group {
-    padding-inline-start: 4px;
-  }
-
-  .action-group button {
-    min-height: var(--layout-control-height);
-    padding-block: 1px;
-  }
-
-  .action-group .play-action:enabled {
-    background: var(--color-selected);
-    color: var(--color-success);
-  }
-
-  .action-group .play-action:enabled:hover {
-    background: var(--color-selected-hover);
-    color: var(--color-text);
-  }
-
-  .action-group .play-action:enabled:active {
-    background: var(--color-control-pressed);
-  }
 }

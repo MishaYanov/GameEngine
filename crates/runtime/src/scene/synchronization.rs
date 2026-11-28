@@ -269,6 +269,82 @@ impl Scene {
 		Ok(true)
 	}
 
+	/// Prepare only the incoming region's models. Keep surviving native IDs and
+	/// GPU owners in a candidate so a rejected publish leaves the current view.
+	pub fn prepare_region_geometry(
+		&self,
+		prepared: &mut engine_core::simulation_session::PreparedRegionChange,
+		assets: &mut crate::assets::AssetManager,
+		renderer: &renderer::WindowRenderer,
+	) -> Result<Self, String> {
+		let result = (|| {
+			let mut candidate = self.clone();
+			let added = prepared.added_entities();
+			if !added.is_empty() {
+				let fragment = SceneData {
+					schema_version: prepared.document().schema_version,
+					entities: added.to_vec(),
+					bindings: Default::default(),
+					camera: Default::default(),
+					default_game_camera: None,
+					organization: Default::default(),
+					environment: Default::default(),
+					lights: Vec::new(),
+				};
+				let (incoming, _) = crate::scene_io::instantiate(&fragment, assets, renderer)?;
+				for (entry, entity) in incoming.entries.into_iter().zip(added) {
+					let id = candidate
+						.spawn_keyed_model(
+							entity.key.clone(),
+							entity.name.clone(),
+							entity.model_path.clone(),
+							entry.instance,
+						)
+						.map_err(|error| error.to_string())?;
+					candidate.set_entity_metadata(id, entity)?;
+				}
+			}
+			candidate.synchronize_retained(prepared.document(), &HashMap::new(), None)?;
+			prepared.set_visibility_capabilities(candidate.visibility_capabilities())?;
+			Ok(candidate)
+		})();
+		match result {
+			Ok(candidate) => {
+				// Shared scene models remain owned by the candidate across publication.
+				// A model that leaves the scene may be dropped when the asset cache prunes.
+				if self.releases_draw_models(prepared.removed_entities(), &candidate) {
+					renderer.wait_for_scene_draw()?;
+				}
+				Ok(candidate)
+			}
+			Err(error) => {
+				renderer.wait_idle()?;
+				Err(error)
+			}
+		}
+	}
+
+	fn releases_draw_models(&self, removed: &[EntityKey], candidate: &Scene) -> bool {
+		let mut retiring: HashSet<_> = removed
+			.iter()
+			.filter_map(|key| self.key_ids.get(key))
+			.filter_map(|id| self.id_indices.get(id))
+			.map(|&index| self.entries[index].instance.model())
+			.filter(|model| !model.parts().is_empty())
+			.map(std::ptr::from_ref)
+			.collect();
+		if retiring.is_empty() {
+			return false;
+		}
+		for entry in &candidate.entries {
+			retiring.remove(&std::ptr::from_ref(entry.instance.model()));
+			if retiring.is_empty() {
+				return false;
+			}
+		}
+		true
+	}
+
 	/// Apply a core authoring document while retaining GPU resources and stable
 	/// native IDs. The core owns history; this adapter owns only resource Arcs.
 	pub(crate) fn synchronize_retained(

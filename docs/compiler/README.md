@@ -52,16 +52,24 @@ shared resolver requires
 each scene/model path to resolve to a regular file within the canonical asset root and to belong to that captured list.
 One path index serves the whole catalog pass; scene membership is checked before reading/parsing the file.
 
-Preparation indexes behavior targets and validates every scene, including nonstartup scenes. It prepares each
-scene with the same gameplay resolver as the Player to check required roles, movement and scene destinations.
-The export preserves the selected module and packages the referenced models and their dependencies.
+Preparation indexes behavior targets and validates every scene, including nonstartup scenes. Full scenes use the
+Player's gameplay resolver to check required roles, movement and scene destinations. Preflight also checks route
+references, Timeline bindings, world regions and distance-based proxy objects.
+
+A streamed region is validated as static additive content in its persistent world. The region document holds static
+props and colliders. Its persistent world supplies the camera, player, lighting, audio and active gameplay. Each
+entity key must be unique across the world and its regions. Preflight validates these rules for a region without
+starting a separate GameSession for it. The export packages full scenes and region scenes with their assets and
+preserves the selected gameplay module.
 
 Captured membership identifies paths. Prepared inputs also retain their byte lengths and fingerprints for the
 pre-build recheck and verified copying below. Detailed glTF geometry validation remains with the runtime importer.
 
-The nested build invokes `cargo build --locked --package game --release --target-dir <workspace>/target` using the
-source workspace. Cargo and shader compiler glslc must be available. The nested build does not use --offline; an offline
-outer invocation does not make it offline automatically.
+The source-based export invokes `cargo build --locked --package game --release` from the engine workspace with an
+explicit target directory. Set `CARGO_TARGET_DIR` to an absolute path to select it. A relative path is resolved from
+the engine workspace, and the default is its `target` folder. Cargo and the shader compiler `glslc` must be available.
+The nested invocation has no `--offline` flag. Set `CARGO_NET_OFFLINE=true` in the environment to run it against an
+already populated Cargo cache.
 
 Staging creates a new folder, copies the prepared assets, and runs catalog validation against the copied asset
 root before writing `project.json`, `project-name.txt`, and `README.txt`. Finish checks the staged manifest and

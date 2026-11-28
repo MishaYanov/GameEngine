@@ -23,6 +23,9 @@ export class ProjectSetup {
     protected readonly result = signal<ProjectCreationResult | null>(null);
     protected readonly openMessage = signal('');
     protected readonly desktop = this.projects.nativeAvailable;
+    protected readonly openExistingUnavailable = computed(() =>
+        !this.desktop || this.busy() || this.choosingDestination(),
+    );
     private readonly entry = inject(ActivatedRoute).snapshot.queryParamMap;
     private readonly initialTemplate: ProjectTemplate = this.entry.get('template') === 'cinder_oath' ? 'cinder_oath' : 'blank';
     protected readonly fromEditor = this.entry.get('from') === 'editor';
@@ -89,13 +92,33 @@ export class ProjectSetup {
         }
     }
 
+    protected openExistingProject(): Promise<void> {
+        return this.openManifest();
+    }
+
     protected async openCreatedProject(): Promise<void> {
         const project = this.result();
-        if (!project || !this.desktop || this.busy() || this.choosingDestination()) return;
+        if (project) await this.openManifest(project.manifestPath);
+    }
+
+    private async openManifest(createdManifest?: string): Promise<void> {
+        if (this.destroyed || this.openExistingUnavailable()) return;
+        const generation = this.editor.workspaceGeneration();
+        const created = createdManifest !== undefined;
         this.opening.set(true);
+        this.form.disable();
         this.error.set('');
-        this.openMessage.set('Opening your project in the editor…');
+        this.openMessage.set(created ? 'Opening your project in the editor…' : 'Choose an existing project.json file…');
         try {
+            const manifest = createdManifest ?? await this.editor.chooseProjectManifest();
+            if (this.destroyed) return;
+            if (manifest === null) {
+                this.openMessage.set('');
+                return;
+            }
+            if (generation !== this.editor.workspaceGeneration()) {
+                throw new Error('The current workspace changed. Choose a project again.');
+            }
             // Keep the exact revision reviewed before an asynchronous discard decision.
             const reviewed = this.editor.snapshot();
             if (reviewed?.mode === 'play') throw new Error('Stop Play in the editor before opening this project.');
@@ -108,27 +131,31 @@ export class ProjectSetup {
             if (discardUnsaved) {
                 this.openMessage.set('Waiting for your decision about unsaved changes…');
                 const confirmed = await this.editor.confirmProjectDiscard();
-                if (!confirmed || this.destroyed) {
-                    if (!this.destroyed) this.openMessage.set('Project created. Your current project remains open.');
+                if (this.destroyed) return;
+                if (!confirmed) {
+                    this.openMessage.set(created ? 'Project created. Your current project remains open.' : 'Opening canceled.');
                     return;
                 }
             }
-            if (this.destroyed) return;
             this.openMessage.set('Opening your project in the editor…');
-            await this.editor.openProject(project.manifestPath, {
+            await this.editor.openProject(manifest, {
+                expectedGeneration: generation,
                 expectedRevision: reviewed?.revision ?? null,
                 discardUnsaved,
             });
-            if (!this.destroyed && !await this.router.navigateByUrl('/editor')) {
-                throw new Error('Your project is open. Select Open in Editor to return to it.');
+            if (!this.destroyed && !await this.router.navigateByUrl('/editor', {replaceUrl: this.desktop})) {
+                throw new Error(created
+                    ? 'Your project is open. Select Open in Editor to return to it.'
+                    : 'Your project is open. Try opening it again to show the Editor.');
             }
         } catch (error: unknown) {
             if (!this.destroyed) {
                 this.error.set(this.message(error));
-                this.openMessage.set('Your project was created and can be opened later.');
+                this.openMessage.set(created ? 'Your project was created and can be opened later.' : '');
             }
         } finally {
             this.opening.set(false);
+            if (!this.result() && !this.destroyed) this.form.enable();
         }
     }
 

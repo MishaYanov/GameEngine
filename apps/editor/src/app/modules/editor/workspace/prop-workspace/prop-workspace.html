@@ -23,6 +23,22 @@
                     <button (click)="showSourceInAssets(assetId)" type="button">Show in Assets</button>
                 }
                 <button (click)="preview.frame()" [disabled]="!preview.ready()" type="button">Frame Prop</button>
+                <label>Shading
+                    <select #shading [value]="preview.display().shading" (change)="selectPreviewShading(shading)"
+                            [disabled]="!preview.ready() || preview.displayPending()">
+                        <option value="lit">Lit</option>
+                        <option value="unlit">Unlit</option>
+                        <option value="wireframe">Wireframe</option>
+                    </select>
+                </label>
+                <button (click)="togglePreviewVertices()" [attr.aria-pressed]="preview.display().showVertices"
+                        [disabled]="!preview.ready() || preview.displayPending()"
+                        title="Show mesh vertices for the current selection" type="button">Show Vertices
+                </button>
+                <button (click)="togglePreviewNormalDetail()" [attr.aria-pressed]="preview.display().showNormalDetail"
+                        [disabled]="!preview.ready() || preview.displayPending() || preview.display().shading !== 'lit'"
+                        title="Compare the Prop with and without imported normal maps" type="button">Show normal detail
+                </button>
                 @if (preview.supportsEnvironment()) {
                     <label>Preview environment
                         <select #environment [value]="preview.environment()" (change)="selectPreviewEnvironment(environment)"
@@ -46,6 +62,9 @@
             <p role="alert">{{ message }}</p>
         }
         @if (preview.environmentError(); as message) {
+            <p role="alert">{{ message }}</p>
+        }
+        @if (preview.displayError(); as message) {
             <p role="alert">{{ message }}</p>
         }
         @if (preview.loading()) {
@@ -149,6 +168,36 @@
                         <dl aria-label="Entity details" class="properties"><dt>Entity</dt><dd [title]="object.key">{{ object.key }}</dd></dl>
                         @if (!prop.canEditDraft()) { <p>Properties are read-only in this view.</p> }
                     </section>
+                    @if (preview.materialsPending()) {
+                        <p role="status">Reading imported materials…</p>
+                    } @else if (preview.materialsError(); as message) {
+                        <p role="alert">{{ message }}</p>
+                    } @else if (preview.materials(); as imported) {
+                        <section aria-label="Imported materials">
+                            <h4>Imported materials</h4>
+                            <p>{{ imported.model_path }}</p>
+                            @for (material of imported.materials; track material.index) {
+                                <details>
+                                    <summary>{{ material.name }}</summary>
+                                    @if (material.normal; as normal) {
+                                        <dl class="properties">
+                                            <dt>Normal source</dt>
+                                            <dd>Image {{ normal.image }}, texture {{ normal.texture }}</dd>
+                                            <dt>UV set</dt>
+                                            <dd>{{ normal.tex_coord }}</dd>
+                                            <dt>Strength</dt>
+                                            <dd>{{ normal.scale }}</dd>
+                                        </dl>
+                                    }
+                                    @for (primitive of material.primitives; track primitive.index) {
+                                        <p>Primitive {{ primitive.index + 1 }} · {{ primitive.detail }}</p>
+                                    }
+                                </details>
+                            } @empty {
+                                <p>No imported materials are available for this mesh.</p>
+                            }
+                        </section>
+                    }
                     @if (prop.draft()?.draft_revision !== undefined) {
                         <prop-object-editor [object]="object" [objects]="document.objects" [disabled]="!prop.canEditDraft()"
                                             (edited)="prop.editObject($event)"/>

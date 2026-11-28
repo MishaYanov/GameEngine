@@ -8,6 +8,7 @@ import {AnimationWorkspaceService} from './animation-workspace.service';
 interface AssetOwner {
     readonly id: string;
     readonly generation: number;
+    readonly nativeGeneration: number;
 }
 
 interface PreviewOwner {
@@ -85,7 +86,7 @@ export class TimelineEditService {
                 if (preview && issue?.token === preview.token && issue.workspace_generation === preview.workspace_generation &&
                     typeof issue.message === 'string') {
                     this.releasePreview();
-                    this.error.set(issue.message);
+                    this.setPreviewError(issue.message);
                 }
             }).then(release => {
                 if (this.destroyed) release();
@@ -104,8 +105,17 @@ export class TimelineEditService {
     connect(asset: ClipAssetDocument, scope: AnimationPreviewDocument | null): void {
         this.scope.set(scope);
         const generation = this.editor.workspaceGeneration();
-        if (this.owner()?.id === asset.asset.asset_id && this.owner()?.generation === generation) return;
-        const owner = {id: asset.asset.asset_id, generation};
+        const current = this.owner();
+        if (current?.id === asset.asset.asset_id && current.generation === generation &&
+            current.nativeGeneration === asset.workspace_generation && (this.draft() || this.busy())) return;
+        const owner = {id: asset.asset.asset_id, generation, nativeGeneration: asset.workspace_generation};
+        this.stop();
+        this.cancelDrag();
+        this.releasePreview();
+        this.draft.set(null);
+        this.playhead.set(0);
+        this.loopStart.set(0);
+        this.loopEnd.set(0);
         this.owner.set(owner);
         const snapshot = this.editor.snapshot();
         if (snapshot) void this.loadDraft(owner, snapshot.revision);
@@ -239,9 +249,16 @@ export class TimelineEditService {
                 if (!draft.dirty) this.closeDraft(draft.draft_id);
                 return;
             }
+            if (draft.asset.asset_id !== owner.id || draft.workspace_generation !== owner.nativeGeneration) {
+                if (!draft.dirty) this.closeDraft(draft.draft_id);
+                throw new Error('The Timeline returned a different saved clip.');
+            }
             this.draft.set(draft);
             this.loopEnd.set(draft.clip.duration_ticks);
         });
+        if (this.current(owner) && !this.draft() && this.error()) {
+            this.animation.authoredTimelinePreviewError.set(this.error());
+        }
     }
 
     private async openPreview(owner: PreviewOwner): Promise<void> {
@@ -266,8 +283,13 @@ export class TimelineEditService {
             this.animation.authoredReady.set(true);
             this.enqueueSeek();
         } catch (error) {
-            if (current()) this.error.set(String(error));
+            if (current()) this.setPreviewError(String(error));
         }
+    }
+
+    private setPreviewError(message: string): void {
+        this.error.set(message);
+        this.animation.authoredTimelinePreviewError.set(message);
     }
 
     private enqueueSeek(): void {
@@ -313,6 +335,7 @@ export class TimelineEditService {
         const token = this.preview()?.token;
         this.preview.set(null);
         this.animation.authoredReady.set(false);
+        this.animation.authoredTimelinePreviewError.set(null);
         if (token) this.closePreviewToken(token);
     }
 

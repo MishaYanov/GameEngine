@@ -10,14 +10,14 @@
   overflow: hidden;
 }
 
-:is(.scene-root, .hierarchy-search input, .hierarchy-actions button) {
+:is(.scene-root, .hierarchy-actions button) {
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-xs);
 }
 
-:is(.scene-root, .hierarchy-actions button) {
+.scene-root {
   padding: var(--space-1) var(--space-2);
 }
 
@@ -53,25 +53,11 @@
   position: relative;
   flex: 1;
   min-height: 48px;
+  // The drawer splitter covers the inner half of its pointer target.
+  margin-right: calc(var(--layout-resize-hit-area) / 2);
   overflow: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
-}
-
-.hierarchy-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border-block: 1px solid var(--color-pane-edge);
-}
-
-.hierarchy-search input {
-  width: 100%;
-  min-width: 0;
-  min-height: 24px;
-  padding: var(--space-1);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
 }
 
 .virtual-space {
@@ -167,21 +153,6 @@ editor-icon {
   --layout-icon-size: 14px;
 }
 
-.hierarchy-actions {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  border-top: 1px solid var(--color-pane-edge);
-}
-
-.hierarchy-actions button {
-  min-height: 28px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-}
-
 .entity-details, .placeholder, .hierarchy-status, .hierarchy-error {
   flex: none;
   margin: 0;
@@ -215,19 +186,13 @@ editor-icon {
   white-space: nowrap;
 }
 
-.drop-target:enabled {
+.drop-target:enabled, .scene-root.drop-target {
   background: var(--color-drop-target);
   border-color: var(--color-drop-edge);
 }
 
-.drop-rejected:enabled {
+.drop-rejected:enabled, .scene-root.drop-rejected {
   background: var(--color-danger-bg);
   border-color: var(--color-danger-border);
   border-style: dashed;
-}
-
-@container (max-width: 45rem) {
-  app-drawer {
-    height: 14rem;
-  }
 }

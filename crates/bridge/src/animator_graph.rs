@@ -109,7 +109,7 @@ pub fn prepare_actor_assets(
 				return Err("Animator rig targets a different mesh selection".into());
 			}
 			for state in &graph.states {
-				let AnimationClipRef::Imported { clip_index, .. } = &state.clip else {
+				let AnimationClipRef::Imported { source, clip_index } = &state.clip else {
 					return Err("Skeletal Animator state requires an imported clip".into());
 				};
 				asset
@@ -168,6 +168,7 @@ pub fn prepare_actor_assets(
 	};
 	let prepared = PreparedAnimator { graph, clips };
 	prepared.validate_root_motion(actor, settings)?;
+	prepared.validate_foot_ik(settings)?;
 	Ok(prepared)
 }
 

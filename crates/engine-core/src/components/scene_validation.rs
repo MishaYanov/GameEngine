@@ -64,6 +64,7 @@ pub fn validate_scene_components_with_slots(
 		if entity.is_local_player() && local_player.replace(&entity.key).is_some() {
 			return Err("A scene can assign local input to only one Player Controller".into());
 		}
+		let mut has_projectile = false;
 		for component in &entity.native_behaviors {
 			for target in component.behavior.entity_references() {
 				if !keys.contains(target) {
@@ -135,7 +136,20 @@ pub fn validate_scene_components_with_slots(
 							required_visual(&entities, slots, visual)?;
 						}
 					}
+					NativeBehaviorSpec::Projectile { .. } => {
+						if has_projectile
+							|| entity.parent.is_some()
+							|| entity
+							.character_controller
+							.as_ref()
+							.is_some_and(|controller| controller.enabled)
+						{
+							return Err("An enabled Projectile belongs to a root object and cannot share a Character Controller".into());
+						}
+						has_projectile = true;
+					}
 					NativeBehaviorSpec::TimedSpawner { .. }
+					| NativeBehaviorSpec::ProjectileLauncher { .. }
 					| NativeBehaviorSpec::StateMachine { .. } => {}
 				}
 				Ok::<(), String>(())

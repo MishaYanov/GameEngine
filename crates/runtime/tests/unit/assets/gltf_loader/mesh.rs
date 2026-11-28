@@ -159,3 +159,23 @@ fn factor_only_materials_get_safe_default_uvs() {
 		}
 	}
 }
+
+#[test]
+fn reads_masked_and_emissive_gltf_surface_properties() {
+	let document = gltf::Gltf::from_slice(br#"{
+		"asset": {"version":"2.0"},
+		"materials": [
+			{"alphaMode":"MASK","alphaCutoff":0.33,"emissiveFactor":[0.6,0.2,0.05]},
+			{"alphaMode":"MASK"},
+			{"alphaMode":"MASK","alphaCutoff":0},
+			{"alphaMode":"BLEND"}
+		]
+	}"#).expect("valid glTF materials");
+	let mut materials = document.materials();
+	let explicit = super::material_surface(&materials.next().unwrap());
+	assert_eq!(explicit.alpha_cutoff, Some(0.33));
+	assert_eq!(explicit.emissive_factor, [0.6, 0.2, 0.05]);
+	assert_eq!(super::material_surface(&materials.next().unwrap()).alpha_cutoff, Some(0.5));
+	assert_eq!(super::material_surface(&materials.next().unwrap()).alpha_cutoff, Some(0.0));
+	assert_eq!(super::material_surface(&materials.next().unwrap()).alpha_cutoff, None);
+}

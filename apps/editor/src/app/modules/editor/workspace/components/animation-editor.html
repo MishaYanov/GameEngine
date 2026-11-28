@@ -33,6 +33,24 @@
 		{{ inspected.metadata.clips.length }} clips
 	</p>
 }
+@if (reassignment(); as draft) {
+    <fieldset>
+        <legend>Reassign animation clips</legend>
+        <p>The reviewed version changed. Choose the clips to use on this object.</p>
+        @for (slot of reassignmentSlots(); track slot) {
+            <label>
+                {{ slot === 'clip_index' ? 'Clip' : slot + ' clip' }}
+                <select #replacement [value]="draft[slot] ?? ''" (change)="assignClip(slot, replacement.value)">
+                    <option value="">Choose clip</option>
+                    @for (item of clips(); track item.index) {
+                        <option [value]="item.index">{{ item.name }}</option>
+                    }
+                </select>
+            </label>
+        }
+        <button type="button" [disabled]="!canReassign()" (click)="acceptReassignment()">Use these clips</button>
+    </fieldset>
+}
 @if (value(); as settings) {
 	<label
 		>Playback<select

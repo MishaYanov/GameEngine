@@ -15,7 +15,9 @@ import {ViewportAssetDragService} from '../viewport-asset-drag.service';
 import {AnimatorAssets} from '../animator/animator-assets.service';
 import {AnimatorWorkspaceService} from '../animator/animator-workspace.service';
 import {ControlGraphWorkspaceService} from '../control-graph/control-graph-workspace.service';
-import {AssetsPanel} from './assets-panel';
+import {AnimationWorkspaceService} from '../animation/animation-workspace.service';
+import type {ProjectAssetFile} from '../../../../core/editor/editor.models';
+import {AssetsPanel, type AssetsFolderNavigation} from './assets-panel';
 import {PropAssetSelection} from '../prefabs/prop-asset-selection';
 import {EditorContextMenuTrigger} from '../../../../shared/components/context-menu/context-menu-trigger';
 import type {ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
@@ -56,6 +58,8 @@ type EditingStub = Pick<SceneEditingService, 'ready' | 'error' | 'withCommittedE
 
 interface PanelOptions {
     readonly models?: readonly ModelAsset[];
+    readonly files?: readonly ProjectAssetFile[];
+    readonly mode?: EditorSnapshot['mode'];
     readonly editing?: EditingStub;
     readonly nativeAvailable?: boolean;
     readonly animators?: readonly AnimatorAsset[];
@@ -63,7 +67,13 @@ interface PanelOptions {
 }
 
 async function createPanel(options: PanelOptions = {}) {
-    const current = signal(snapshot());
+    const current = signal<EditorSnapshot>({...snapshot(), mode: options.mode ?? 'edit'});
+    const catalogueFiles = signal<readonly ProjectAssetFile[]>([
+        ...(options.files ?? []),
+        ...[...options.animators ?? [], ...options.controls ?? []].map(asset => ({
+            asset_id: asset.id, kind: asset.kind, path: asset.path, name: asset.path.split('/').at(-1)!,
+        })),
+    ]);
     const modelAssets = signal<readonly ModelAsset[] | null>(options.models ?? null);
     const workspaceGeneration = signal(1);
     const busy = signal(false);
@@ -84,6 +94,7 @@ async function createPanel(options: PanelOptions = {}) {
     const loadPrefab = vi.fn(async (_path: string, _position: readonly [number, number, number], _generation?: number, _revision?: number) => current());
     const openAnimator = vi.fn(async () => true);
     const openControls = vi.fn(async () => true);
+    const openAuthoredAsset = vi.fn(async (_id: string) => true);
     TestBed.configureTestingModule({providers: [
         PropAssetSelection,
         {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: async () => null, save: async () => undefined}},
@@ -91,10 +102,11 @@ async function createPanel(options: PanelOptions = {}) {
             nativeAvailable: options.nativeAvailable ?? true,
             capabilities: () => ({}),
             snapshot: current, busy, playing: computed(() => current().mode === 'play'),
-                modelAssets, assets, importModel, loadPrefab, workspaceGeneration, audioClipDetails,
+                modelAssets, catalogueFiles, assets, importModel, loadPrefab, workspaceGeneration, audioClipDetails,
         }},
             {provide: SceneSwitchService, useValue: {request, canSwitch: () => true}},
             {provide: ViewportAssetDragService, useValue: drag},
+            {provide: AnimationWorkspaceService, useValue: {openAuthoredAsset, authoredOpenError: () => null}},
         ...(options.editing ? [{provide: SceneEditingService, useValue: options.editing}] : []),
         ...(options.animators ? [
             {provide: AnimatorAssets, useValue: {supported: () => true, assets: signal(options.animators)}},
@@ -107,7 +119,7 @@ async function createPanel(options: PanelOptions = {}) {
     const fixture = TestBed.createComponent(AssetsPanel);
     const root = fixture.nativeElement as HTMLElement;
     const button = (label: string): HTMLButtonElement => {
-        const candidate = [...root.querySelectorAll('button')].find(element => element.textContent.trim() === label);
+        const candidate = [...root.querySelectorAll('button')].find(element => (element.getAttribute('aria-label') ?? element.textContent.trim()) === label);
         if (!candidate) throw new Error(`Missing asset button: ${label}`);
         return candidate;
     };
@@ -123,10 +135,11 @@ async function createPanel(options: PanelOptions = {}) {
         await fixture.whenStable();
     };
     const filterBy = async (value: string): Promise<void> => {
-        const select = root.querySelector<HTMLSelectElement>('.asset-filter select')!;
-        select.value = value;
-        select.dispatchEvent(new Event('change'));
+        const filter = [...root.querySelectorAll<HTMLButtonElement>('button[data-asset-kind]')]
+            .find(button => button.dataset['assetKind'] === value)!;
+        filter.click();
         await fixture.whenStable();
+        expect(filter.getAttribute('aria-pressed')).toBe('true');
     };
     const contextAction = (path: string, id: string): Extract<ContextMenuItem, { kind: 'action' }> => {
         const trigger = fixture.debugElement.queryAll(By.directive(EditorContextMenuTrigger))
@@ -155,6 +168,7 @@ async function createPanel(options: PanelOptions = {}) {
         loadPrefab,
         openAnimator,
         openControls,
+        openAuthoredAsset,
         search,
         filterBy,
         drag
@@ -196,25 +210,44 @@ describe('AssetsPanel', () => {
         };
         const panel = await createPanel({models: [robot, bell], animators: [animator], controls: [controls]});
         await panel.search('animators/bell');
-        const animatorButton = panel.root.querySelector<HTMLButtonElement>('button[aria-label^="Open Animator"]')!;
-        expect(animatorButton.closest('details')?.open).toBe(true);
         expect(panel.root.textContent).not.toContain('No matching assets.');
-        animatorButton.click();
+        panel.file(animator.path).click();
+        await panel.fixture.whenStable();
+        panel.button('Open Animator').click();
         expect(panel.openAnimator).toHaveBeenCalledExactlyOnceWith(animator.id);
 
         await panel.search('BELL');
-        const controlsButton = panel.root.querySelector<HTMLButtonElement>('button[aria-label^="Open Controls Graph"]')!;
-        expect(controlsButton.closest('details')?.open).toBe(true);
-        controlsButton.click();
-        expect(panel.openControls).toHaveBeenCalledExactlyOnceWith(controls.id);
-        const filter = panel.root.querySelector<HTMLSelectElement>('.asset-filter select')!;
-        filter.value = 'audio_clip';
-        filter.dispatchEvent(new Event('change'));
+        panel.file(controls.path).click();
         await panel.fixture.whenStable();
+        panel.button('Open Controls Graph').click();
+        expect(panel.openControls).toHaveBeenCalledExactlyOnceWith(controls.id);
+        await panel.filterBy('audio_clip');
         expect(panel.file(bell.path)).toBeTruthy();
-        expect(panel.root.querySelector('details')).toBeNull();
+        expect(panel.root.querySelector<HTMLDetailsElement>('.more-filters')?.open).toBe(false);
         await panel.search('robot');
         expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
+    });
+
+    it('shows additional asset types on request and names the active type in the compact row', async () => {
+        const files: ProjectAssetFile[] = [
+            {asset_id: 'clip', kind: 'animation_clip', name: 'Bell turn', path: 'bell.clip.json'},
+            {asset_id: 'sky', kind: 'sky_panorama', name: 'Clouds', path: 'sky/clouds.png'},
+        ];
+        const panel = await createPanel({models: [robot, bell], files});
+        panel.button('Entire project').click();
+        await panel.fixture.whenStable();
+        const details = panel.root.querySelector<HTMLDetailsElement>('.more-filters')!;
+        const summary = details.querySelector('summary')!;
+        expect(details.open).toBe(false);
+        expect(summary.textContent.trim()).toBe('More types');
+        details.open = true;
+        await panel.filterBy('animation_clip');
+        expect(details.open).toBe(false);
+        expect(summary.textContent.trim()).toBe('Animation Clips');
+        expect(panel.file('bell.clip.json')).toBeTruthy();
+        expect(panel.root.querySelector('.asset-file[title="sky/clouds.png"]')).toBeNull();
+        await panel.filterBy('all');
+        expect(summary.textContent.trim()).toBe('More types');
     });
 
     it('limits search to the chosen file kind and preserves the browsing folder', async () => {
@@ -227,8 +260,9 @@ describe('AssetsPanel', () => {
 
         await panel.filterBy('prefab');
         expect(panel.root.querySelector('[aria-label="Selected asset"]')).toBeNull();
-        expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('No matching assets.');
-        expect(panel.root.querySelector('.asset-filter option[value="animator_graph"]')).toBeNull();
+        expect(panel.root.querySelector('[role="status"]')?.textContent).toContain('Choose Entire project or search across project folders.');
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('props');
+        expect(panel.root.querySelector('button[data-asset-kind="animator_graph"]')).toBeNull();
         await panel.search('robot');
         expect(panel.file(prop.path)).toBeTruthy();
         expect(panel.root.querySelector('.asset-file[title="props/robot.glb"]')).toBeNull();
@@ -244,7 +278,7 @@ describe('AssetsPanel', () => {
         expect(panel.file(robot.path)).toBeTruthy();
     });
 
-    it('opens the chosen graph registry when filtering without a search', async () => {
+    it('browses graphs in their actual folders and across the whole project', async () => {
         const animator: AnimatorAsset = {
             id: 'animator', kind: 'animator_graph', path: 'graphs/idle.animator.json',
             revision: 1, fingerprint: 'animator-fixture', bytes: 50,
@@ -254,25 +288,80 @@ describe('AssetsPanel', () => {
             revision: 1, fingerprint: 'controls-fixture', bytes: 50,
         };
         const panel = await createPanel({models: [robot], animators: [animator], controls: [controls]});
-
         await panel.filterBy('animator_graph');
-        expect(panel.root.querySelector('details')?.open).toBe(true);
-        expect(panel.root.querySelector('[aria-label^="Open Controls Graph"]')).toBeNull();
-        expect(panel.root.querySelector('.asset-file')).toBeNull();
-        expect(panel.root.querySelector('[role="status"]')).toBeNull();
+        panel.button('graphs').click();
+        await panel.fixture.whenStable();
+        expect(panel.file(animator.path)).toBeTruthy();
+        expect(panel.root.querySelector('[data-asset-id="controls"]')).toBeNull();
 
         await panel.filterBy('controls_graph');
-        const button = panel.root.querySelector<HTMLButtonElement>('[aria-label^="Open Controls Graph"]')!;
-        expect(button.closest('details')?.open).toBe(true);
-        expect(panel.root.querySelector('[aria-label^="Open Animator"]')).toBeNull();
-        button.click();
+        panel.button('Entire project').click();
+        await panel.fixture.whenStable();
+        expect(panel.file(controls.path).textContent).toContain('graphs/idle.controls.json');
+        expect(panel.root.querySelector('[data-asset-id="animator"]')).toBeNull();
+        panel.file(controls.path).dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
         expect(panel.openControls).toHaveBeenCalledExactlyOnceWith(controls.id);
+    });
+
+    it('shows game audio and authored assets while Play keeps all authoring actions blocked', async () => {
+        const clip: ProjectAssetFile = {
+            kind: 'animation_clip',
+            name: 'Turn',
+            path: 'clips/turn.clip.json',
+            asset_id: 'clip-turn'
+        };
+        const music: ProjectAssetFile = {kind: 'game_audio', name: 'Vault Theme', path: 'audio/the-vault.wav'};
+        const sky: ProjectAssetFile = {
+            kind: 'sky_panorama',
+            name: 'Night Sky',
+            path: 'environment/night.png',
+            asset_id: 'sky-night'
+        };
+        const panel = await createPanel({mode: 'play', files: [clip, music, sky]});
+        expect(panel.assets).toHaveBeenCalledOnce();
+        panel.button('audio').click();
+        await panel.fixture.whenStable();
+        panel.file(music.path).click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[aria-label="Selected asset"]')?.textContent).toContain('Used by game audio settings.');
+        expect(panel.root.querySelector('[aria-label="Add to Scene"]')).toBeNull();
+        panel.button('Current folder').click();
+        await panel.search('night');
+        expect(panel.root.querySelector('[data-asset-id="sky-night"]')).toBeNull();
+        panel.button('Entire project').click();
+        await panel.fixture.whenStable();
+        expect(panel.file(sky.path)).toBeTruthy();
+
+        await panel.search('turn');
+        panel.file(clip.path).click();
+        await panel.fixture.whenStable();
+        expect(panel.button('Open Animation Clip').disabled).toBe(true);
+        panel.file(clip.path).dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        expect(panel.openAuthoredAsset).not.toHaveBeenCalled();
+        expect(panel.importModel).not.toHaveBeenCalled();
+    });
+
+    it('opens the saved Animation Clip by stable identity', async () => {
+        const clip: ProjectAssetFile = {
+            kind: 'animation_clip',
+            name: 'Turn',
+            path: 'clips/turn.clip.json',
+            asset_id: 'clip-turn'
+        };
+        const panel = await createPanel({models: [robot], files: [clip]});
+        panel.button('clips').click();
+        await panel.fixture.whenStable();
+        panel.file(clip.path).dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        expect(panel.openAuthoredAsset).toHaveBeenCalledExactlyOnceWith(clip.asset_id);
+        expect(panel.importModel).not.toHaveBeenCalled();
     });
 
     it('shows the exact search result in its folder and keeps the kind filter', async () => {
         const matchingName: ModelAsset = {name: 'Robot', path: 'models/robot.glb', asset_id: 'duplicate-name'};
         const excludedProp: ModelAsset = {name: 'Robot prop', path: 'props/robot.prop.json', kind: 'prefab'};
         const panel = await createPanel({models: [robot, matchingName, excludedProp]});
+        const visits: AssetsFolderNavigation[] = [];
+        panel.fixture.componentInstance.folderNavigated.subscribe(visit => visits.push(visit));
         panel.button('models').click();
         await panel.fixture.whenStable();
         await panel.filterBy('model');
@@ -284,13 +373,22 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
 
         expect(panel.root.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('');
-        expect(panel.root.querySelector<HTMLSelectElement>('.asset-filter select')?.value).toBe('model');
+        expect(panel.root.querySelector<HTMLElement>('button[data-asset-kind][aria-pressed="true"]')?.dataset['assetKind']).toBe('model');
         expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('props');
         expect(panel.root.querySelector('.asset-file[title="props/robot.prop.json"]')).toBeNull();
         expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
         expect(panel.root.ownerDocument.activeElement).toBe(panel.file(robot.path));
         expect(panel.importModel).not.toHaveBeenCalled();
         expect(panel.current().dirty).toBe(false);
+        expect(visits).toEqual([{previous: '', current: 'models'}, {previous: 'models', current: 'props'}]);
+
+        panel.fixture.componentInstance.browse('prefab');
+        await panel.fixture.whenStable();
+        expect(visits.at(-1)).toEqual({previous: 'props', current: ''});
+        panel.fixture.componentInstance.browse('model');
+        await panel.fixture.whenStable();
+        expect(visits).toHaveLength(3);
+        expect(panel.root.ownerDocument.activeElement).toBe(panel.root.querySelector('input[aria-label="Search Assets"]'));
     });
 
     it('reveals a scene result from its context menu and ignores a result removed by a new query', async () => {
@@ -315,11 +413,9 @@ describe('AssetsPanel', () => {
 
     it('filters Audio Clips and shows native duration, format and reverse references with focus on the row', async () => {
         const panel = await createPanel({models: [robot, bell]});
-        const filter = panel.root.querySelector<HTMLSelectElement>('.asset-filter select')!;
-        filter.value = 'audio_clip';
-        filter.dispatchEvent(new Event('change'));
-        await panel.fixture.whenStable();
-        expect(panel.root.textContent).not.toContain('props');
+        await panel.filterBy('audio_clip');
+        expect(panel.button('props')).toBeDefined();
+        expect(panel.root.querySelector('.asset-file[title="props/robot.glb"]')).toBeNull();
 
         const row = panel.file(bell.path);
         row.focus();
@@ -353,6 +449,8 @@ describe('AssetsPanel', () => {
         };
         const duplicate = {...source, asset_id: 'different-source', path: 'prefabs/gate.json'};
         const panel = await createPanel({models: [duplicate, source]});
+        const visits: AssetsFolderNavigation[] = [];
+        panel.fixture.componentInstance.folderNavigated.subscribe(visit => visits.push(visit));
         const reveal = TestBed.inject(PropAssetSelection);
 
         await panel.search('unrelated search');
@@ -370,6 +468,7 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
         expect(selected.getAttribute('aria-pressed')).toBe('true');
         expect(reveal.request()).toBeNull();
+        expect(visits).toEqual([{previous: '', current: 'props/moved'}]);
     });
 
     it('reports a missing linked Prop without selecting an asset at its former path', async () => {
@@ -543,6 +642,102 @@ describe('AssetsPanel', () => {
         await panel.fixture.whenStable();
         expect(currentCrumb()?.textContent).toBe('Assets');
         expect(panel.button('props')).toBeTruthy();
+    });
+
+
+    it('goes Back and Forward between sibling folder visits, separately from Up', async () => {
+        const ramp: ModelAsset = {name: 'Ramp', path: 'props/outdoor/ramp.glb', asset_id: 'ramp-id'};
+        const gate: ModelAsset = {name: 'Gate', path: 'props/indoor/gate.glb', asset_id: 'gate-id'};
+        const panel = await createPanel({models: [ramp, gate]});
+        const visits: AssetsFolderNavigation[] = [];
+        panel.fixture.componentInstance.folderNavigated.subscribe(event => visits.push(event));
+        const current = () => panel.root.querySelector('[aria-current="location"]')?.textContent;
+        const navigate = async (...labels: string[]) => {
+            for (const label of labels) {
+                panel.button(label).click();
+                await panel.fixture.whenStable();
+            }
+        };
+
+        expect(panel.button('Back').disabled).toBe(true);
+        expect(panel.button('Forward').disabled).toBe(true);
+        await navigate('props', 'outdoor', 'Up', 'indoor', 'Back', 'Back');
+        expect(current()).toBe('outdoor');
+        expect(panel.file(ramp.path)).toBeTruthy();
+        await navigate('Forward', 'Forward');
+        expect(current()).toBe('indoor');
+        expect(panel.button('Forward').disabled).toBe(true);
+        expect(visits).toEqual([
+            {previous: '', current: 'props'},
+            {previous: 'props', current: 'props/outdoor'},
+            {previous: 'props/outdoor', current: 'props'},
+            {previous: 'props', current: 'props/indoor'},
+            {previous: 'props/indoor', current: 'props', direction: 'back'},
+            {previous: 'props', current: 'props/outdoor', direction: 'back'},
+            {previous: 'props/outdoor', current: 'props', direction: 'forward'},
+            {previous: 'props', current: 'props/indoor', direction: 'forward'},
+        ]);
+
+        await navigate('Back', 'outdoor');
+        expect(panel.button('Forward').disabled).toBe(true);
+        await navigate('Back', 'Back', 'Back');
+        expect(current()).toBe('props');
+        const back = panel.button('Back');
+        back.focus();
+        await navigate('Back');
+        expect(current()).toBe('Assets');
+        expect(back.disabled).toBe(true);
+        expect(panel.root.ownerDocument.activeElement).toBe(panel.root.querySelector('[aria-current="location"]'));
+    });
+
+    it('replays a validated folder without emitting, while keeping project-wide search and visible selection', async () => {
+        const panel = await createPanel();
+        const visits: AssetsFolderNavigation[] = [];
+        const component = panel.fixture.componentInstance;
+        component.folderNavigated.subscribe(event => visits.push(event));
+
+        for (const label of ['props', 'Up', 'scenes']) {
+            panel.button(label).click();
+            await panel.fixture.whenStable();
+        }
+        await panel.search('robot');
+        panel.file(robot.path).click();
+        await panel.fixture.whenStable();
+        expect(component.replayFolder('missing')).toBe(false);
+        expect(component.replayFolder('scenes')).toBe(false);
+        expect(component.replayFolder('')).toBe(true);
+        await panel.fixture.whenStable();
+        expect(visits).toHaveLength(3);
+        expect(panel.button('Forward').disabled).toBe(false);
+        expect(panel.root.querySelector<HTMLInputElement>('input[aria-label="Search Assets"]')?.value).toBe('robot');
+        expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
+
+        panel.button('Forward').click();
+        await panel.fixture.whenStable();
+        expect(visits.at(-1)).toEqual({previous: '', current: 'scenes', direction: 'forward'});
+        expect(panel.file(robot.path).getAttribute('aria-pressed')).toBe('true');
+
+        panel.workspaceGeneration.set(2);
+        await panel.fixture.whenStable();
+        expect(panel.button('Back').disabled).toBe(true);
+        expect(panel.button('Forward').disabled).toBe(true);
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('Assets');
+    });
+
+    it('skips deleted folders in history after the asset catalog updates', async () => {
+        const panel = await createPanel();
+        for (const label of ['props', 'Up', 'scenes']) {
+            panel.button(label).click();
+            await panel.fixture.whenStable();
+        }
+        panel.modelAssets.set([]);
+        await panel.fixture.whenStable();
+        panel.button('Back').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector('[aria-current="location"]')?.textContent).toBe('Assets');
+        expect(panel.button('Back').disabled).toBe(true);
+        expect(panel.button('Forward').disabled).toBe(false);
+        expect(panel.fixture.componentInstance.replayFolder('props')).toBe(false);
     });
 
     it('discovers props automatically and keeps the current folder and selected file when refreshed', async () => {

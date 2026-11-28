@@ -212,6 +212,8 @@ impl ViewportHost {
 				change.asset().kind,
 				runtime::asset_catalog::AssetKind::AudioClip
 					| runtime::asset_catalog::AssetKind::SkyPanorama
+					| runtime::asset_catalog::AssetKind::Texture
+					| runtime::asset_catalog::AssetKind::RustScript
 			) {
 				None
 			} else {

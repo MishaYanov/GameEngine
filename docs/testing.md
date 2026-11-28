@@ -69,6 +69,35 @@ This adds native initialization, prepared project compilation and hidden Vulkan 
 machine. Exercise New, Open, Edit, Save, Play, Stop and Export Game…. Launch the exported Player from a
 separate working directory and check focus, physical input, displayed frames, audio and termination.
 
+## Scene routes, Timelines and streamed regions
+
+From the repository root, run the CPU suites for route activation and stale candidates, Timeline cues and
+bindings, additive region ownership, and sampled large-coordinate precision.
+
+```powershell
+cargo test --locked --offline -p engine-core --test scene_flow_api --test sequence_api --test world_regions_api --test world_region_precision_api --test region_navigation_api
+cargo test --locked --offline -p runtime --lib world_streaming
+npm.cmd --prefix apps/editor test -- --watch=false --include src/app/modules/editor/workspace/scene-flow/scene-flow.spec.ts
+python -B -m unittest discover -s tests -p 'test_measure_scene*.py'
+```
+
+On Windows with Vulkan, run each ignored native test in its own Cargo invocation. Set `ENGINE_SCENE_FLOW_EVIDENCE`
+to a writable directory to keep the generated fixtures and grid report. Optionally set `ENGINE_SCENE_FLOW_COMPILER`
+to a built compiler executable to exercise staging before the hidden Player test.
+
+```powershell
+$env:ENGINE_SCENE_FLOW_EVIDENCE = 'D:\Builds\scene-flow-evidence'
+cargo test --locked --offline -p game --bin game cinematic_routes_and_seamless_regions_reach_a_presented_frame -- --ignored --nocapture
+cargo test --locked --offline -p game --bin game larger_native_world_keeps_region_resources_bounded -- --ignored --nocapture
+```
+
+These tests drive the native Player in a hidden window and check presentation, route and Timeline behavior, and
+repeated region residency. Set `ENGINE_SCENE_FLOW_DRAIN_CHECKPOINTS=1` for a comparison run that waits for each
+checkpoint draw outside the update timer. The report records checkpoint draw and wait durations and the region
+changes in its slowest update. Use a visible exported Player to check how a route feels during normal input, audio
+and presentation, and repeat on the intended hardware.
+[Interpret load and streaming measurements](performance-baseline.md#scene-switch-and-streaming-measurements).
+
 ## Object authoring and Agent package acceptance
 
 1. Build the Editor. Check the packaged Player, `release/agent/authoring-agent-worker.exe`,

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "origin": "projects/cinder-oath/assets/actors/knight.glb",
+      "destination": "assets/actors/knight.glb",
+      "sha256": "47d080bb44cbe1ca7f561bce99f4a600fe167f05705274716220e2bfae5b52a6",
+      "bytes": 323784
+    },
+    {
+      "origin": "projects/cinder-oath/assets/actors/warden.glb",
+      "destination": "assets/actors/warden.glb",
+      "sha256": "06567535b2054507ccf9013c60887820c74fa77396975f62397f0fe8641554a8",
+      "bytes": 330068
+    },
+    {
+      "origin": "projects/cinder-oath/assets/architecture/masonry.glb",
+      "destination": "assets/architecture/masonry.glb",
+      "sha256": "b4359162073c6647a02dd76944c88fd75e2a4432912c14e2af40d50300462a83",
+      "bytes": 1504
+    }
+  ]
+}

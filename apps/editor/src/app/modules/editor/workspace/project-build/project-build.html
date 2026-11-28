@@ -1,5 +1,5 @@
 <section aria-label="Standalone build" [attr.aria-busy]="pending() !== null || buildInProgress()">
-    <button type="button" [disabled]="!available()" (click)="exportProject()">
+    <button type="button" [disabled]="!canExport()" (click)="exportProject()">
         {{ pending() === 'choose' ? 'Choosing output…' : buildInProgress() ? 'Exporting…' : 'Export Game…' }}
     </button>
     @if (unsaved()) {

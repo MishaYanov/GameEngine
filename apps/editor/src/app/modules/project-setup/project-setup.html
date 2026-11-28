@@ -3,9 +3,28 @@
     <div class="workspace">
         <section aria-labelledby="setup-title" class="setup">
             @if (fromEditor) {
-                <a class="back-to-editor" routerLink="/editor"><span aria-hidden="true">←</span> Back to Editor</a>
+                <a class="back-to-editor" routerLink="/editor" [replaceUrl]="desktop"><span aria-hidden="true">←</span>
+                    Back to Editor</a>
             }
-            <h1 id="setup-title">Create your project.</h1>
+            <h1 id="setup-title">Open or create a project</h1>
+            <button
+                    (click)="openExistingProject()"
+                    [attr.aria-disabled]="openExistingUnavailable()"
+                    [disabled]="!desktop"
+                    aria-describedby="existing-project-help"
+                    class="open-existing"
+                    type="button"
+            >Open Existing Project… <span aria-hidden="true">↗</span></button>
+            <p class="hint" id="existing-project-help">Choose the existing project's <code>project.json</code> file.</p>
+            <div aria-live="polite" role="status">
+                @if (openMessage()) {
+                    <p class="notice">{{ openMessage() }}</p>
+                }
+            </div>
+            @if (error()) {
+                <pre class="error" role="alert">{{ error() }}</pre>
+            }
+            <h2 id="create-project-title">Create a project</h2>
             <p class="intro">
                 Choose what to start with, then give your project a name and a destination.
             </p>
@@ -13,6 +32,7 @@
                     (ngSubmit)="createProject()"
                     [attr.aria-busy]="busy() || choosingDestination()"
                     [formGroup]="form"
+                    aria-labelledby="create-project-title"
             >
                 <label for="project-template">Start with</label>
                 <select formControlName="template" id="project-template">
@@ -61,17 +81,12 @@
                     <p class="error" role="alert">Enter a valid project name and destination.</p>
                 }
                 @if (!desktop) {
-                    <p class="notice">Open the desktop editor to create projects.</p>
+                    <p class="notice">Open the desktop editor to open or create projects.</p>
                 }
                 <button [disabled]="busy() || choosingDestination() || !desktop || result() !== null" type="submit">
                     {{ buttonLabel() }} <span aria-hidden="true">↗</span>
                 </button>
             </form>
-            <div aria-live="polite" role="status">
-                @if (openMessage()) {
-                    <p class="notice">{{ openMessage() }}</p>
-                }
-            </div>
             @if (result(); as project) {
                 <section class="success" aria-labelledby="created-project-title">
                     <strong id="created-project-title">Project created</strong>
@@ -84,9 +99,6 @@
                             (click)="openCreatedProject()"
                     >Open in Editor <span aria-hidden="true">↗</span></button>
                 </section>
-            }
-            @if (error()) {
-                <pre class="error" role="alert">{{ error() }}</pre>
             }
         </section>
         <aside app-project-setup-preview aria-label="Starter project preview"></aside>

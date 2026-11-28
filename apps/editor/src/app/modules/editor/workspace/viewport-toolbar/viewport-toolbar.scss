@@ -1,6 +1,24 @@
 :host { display: block; flex: none; }
-.viewport-tools, .tool-group, .snap-settings { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); }
+
+.viewport-tools, .viewport-options, .tool-group, .snap-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
 .viewport-tools { padding: var(--space-1); border-bottom: 1px solid var(--color-pane-edge); background: var(--color-surface); }
+
+.viewport-options {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--border-width) solid var(--color-pane-edge);
+  background: var(--color-surface);
+  max-block-size: min(8rem, 30vh);
+  overflow: auto;
+}
+
+.viewport-options[hidden] {
+  display: none;
+}
 .tool-group { padding-inline-end: var(--space-1); border-inline-end: 1px solid var(--color-pane-edge); }
 button, select, input { min-height: 1.75rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); color: var(--color-text); background: var(--color-surface); font: inherit; font-size: var(--font-size-xs); }
 button { white-space: nowrap; }
@@ -77,4 +95,50 @@ kbd {
     border-color: transparent;
     background: transparent;
   }
+}
+
+button.tool-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  inline-size: var(--layout-subject-control-height);
+  min-inline-size: 24px;
+  padding-inline: 0;
+}
+
+.scene-size:not(.tool-icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+:host {
+  container-type: inline-size;
+}
+
+@container (max-width: 22rem) {
+  .viewport-tools .frame-selection {
+    display: none;
+  }
+}
+
+@container (max-width: 18rem) {
+  .viewport-tools {
+    gap: 2px;
+    padding-inline: var(--space-1);
+  }
+
+  .options-toggle .view-prefix {
+    display: none;
+  }
+}
+
+.options-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.options-toggle .shading-label {
+  color: var(--color-text-secondary);
 }

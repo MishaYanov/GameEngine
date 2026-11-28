@@ -79,6 +79,37 @@ class StaticGlbTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, expected):
                     static_glb.validate_static_glb(document, BINARY, EXPECTED_IDS)
 
+    def test_normal_mapping_uses_its_own_uv_accessor_and_rejects_malformed_metadata(self):
+        document = copy.deepcopy(DOCUMENT)
+        document["images"] = [{"mimeType": "image/png", "bufferView": 0}]
+        document["textures"] = [{"source": 0}]
+        document["materials"] = [{"normalTexture": {"index": 0, "texCoord": 1, "scale": 0.625}}]
+        document["accessors"].extend([
+            {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC2"},
+            {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC4"},
+        ])
+        primitive = document["meshes"][0]["primitives"][0]
+        primitive["material"] = 0
+        primitive["attributes"].update(TEXCOORD_1=2, TANGENT=3)
+
+        self.assertEqual(static_glb.validate_static_glb(document, BINARY, EXPECTED_IDS), EXPECTED_IDS)
+        edits = [
+            ("embedded texture", lambda doc: doc["materials"][0]["normalTexture"].update(index=1)),
+            ("embedded PNGs", lambda doc: doc["images"][0].update(mimeType="image/jpeg")),
+            ("first or second UV map", lambda doc: doc["materials"][0]["normalTexture"].update(texCoord=True)),
+            ("nonnegative", lambda doc: doc["materials"][0]["normalTexture"].update(scale=-0.25)),
+            ("nonnegative", lambda doc: doc["materials"][0]["normalTexture"].update(scale=float("inf"))),
+            ("TEXCOORD_0", lambda doc: doc["materials"][0]["normalTexture"].pop("texCoord")),
+            ("one UV per position", lambda doc: doc["accessors"][2].update(count=2)),
+            ("float VEC4", lambda doc: doc["accessors"][3].update(type="VEC3")),
+        ]
+        for expected, edit in edits:
+            with self.subTest(expected=expected):
+                invalid = copy.deepcopy(document)
+                edit(invalid)
+                with self.assertRaisesRegex(ValueError, expected):
+                    static_glb.validate_static_glb(invalid, BINARY, EXPECTED_IDS)
+
     def test_invalid_or_unpublishable_export_preserves_existing_destination(self):
         with TemporaryDirectory() as root:
             directory = Path(root)

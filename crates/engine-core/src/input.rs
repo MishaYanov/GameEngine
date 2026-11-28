@@ -26,7 +26,8 @@ pub use mouse::MouseButton;
 pub(crate) use profile::HeldGameActions;
 pub use profile::{
 	GameInputBinding, GameKeyboardInput, INPUT_PROFILE_SCHEMA_VERSION, InputProfile,
-	MAX_GAME_INPUT_ACTIONS, MAX_INPUT_PROFILE_BYTES, MovementBindings, valid_game_action_id,
+	MAX_GAME_INPUT_ACTIONS, MAX_INPUT_PROFILE_BYTES, MouseActionBinding, MovementBindings,
+	valid_game_action_id,
 };
 
 use std::collections::HashSet;

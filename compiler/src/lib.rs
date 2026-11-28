@@ -34,6 +34,8 @@ use export::{copy_prepared_project, validate_export_snapshot};
 use preflight::read_authored_scene;
 use preflight::validate_catalog_scenes;
 
+const DECLARED_ASSET_EXTENSIONS: [&str; 3] = ["wav", "rs", "wasm"];
+
 #[derive(Clone, PartialEq, Eq)]
 struct PackageAsset {
 	relative: PathBuf,
@@ -187,27 +189,36 @@ fn prepare_assets(root: &Path) -> io::Result<Vec<PackageAsset>> {
 }
 
 fn verify_frozen_asset_inventory(root: &Path, expected: &[PackageAsset]) -> io::Result<()> {
-	// Preflight already validated cue waves and catalogued Audio Clips.
-	let wave_files = expected
+	// Preflight already validated wave files and captured the Rust source and compiled module.
+	let declared_files = expected
 		.iter()
 		.filter(|asset| {
-			asset
-				.relative
-				.extension()
-				.is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
+			asset.relative.extension().is_some_and(|extension| {
+				DECLARED_ASSET_EXTENSIONS
+					.iter()
+					.any(|allowed| extension.eq_ignore_ascii_case(allowed))
+			})
 		})
 		.map(|asset| asset.relative.clone())
 		.collect();
-	if scan_assets(root, &wave_files)? != expected {
+	if scan_assets(root, &declared_files)? != expected {
 		return Err(io::Error::other("Staged assets changed"));
 	}
 	Ok(())
 }
 
-fn scan_assets(root: &Path, wave_files: &BTreeSet<PathBuf>) -> io::Result<Vec<PackageAsset>> {
+fn scan_assets(root: &Path, declared_files: &BTreeSet<PathBuf>) -> io::Result<Vec<PackageAsset>> {
 	let mut files = Vec::new();
 	let mut total = 0;
-	collect_assets(root, root, 0, &mut files, &mut total, &mut 0, wave_files)?;
+	collect_assets(
+		root,
+		root,
+		0,
+		&mut files,
+		&mut total,
+		&mut 0,
+		declared_files,
+	)?;
 	files.sort_by(|a, b| a.0.cmp(&b.0));
 	files
 		.into_iter()
@@ -326,7 +337,7 @@ fn collect_assets(
 	files: &mut Vec<(PathBuf, u64)>,
 	total: &mut u64,
 	visited: &mut usize,
-	wave_files: &BTreeSet<PathBuf>,
+	declared_files: &BTreeSet<PathBuf>,
 ) -> io::Result<()> {
 	*visited += 1;
 	if depth > 32 || *visited > 10_000 {
@@ -349,7 +360,7 @@ fn collect_assets(
 				files,
 				total,
 				visited,
-				wave_files,
+				declared_files,
 			)?;
 		}
 		return Ok(());
@@ -366,7 +377,8 @@ fn collect_assets(
 		.to_ascii_lowercase();
 	let relative = path.strip_prefix(root).map_err(io::Error::other)?;
 	if !["png", "jpg", "jpeg", "obj", "gltf", "glb", "bin", "json"].contains(&extension.as_str())
-		&& !(extension == "wav" && wave_files.contains(relative))
+		&& !(DECLARED_ASSET_EXTENSIONS.contains(&extension.as_str())
+		&& declared_files.contains(relative))
 	{
 		return Err(io::Error::other(format!(
 			"Unsupported packaged asset format: {}",

@@ -42,6 +42,31 @@ impl PreparedRuntimeSpawn {
 }
 
 impl RuntimeLifecycle {
+	/// Region objects retain authored keys, but receive a new handle generation
+	/// on every attachment. They are removed by their region owner.
+	pub(crate) fn admit_region_entities(&mut self, entities: &[EntityData]) -> Result<(), String> {
+		let generation = self.next_instance;
+		let next = generation
+			.checked_add(1)
+			.filter(|value| *value <= MAX_COUNTER)
+			.ok_or("Runtime entity generation exhausted")?;
+		if entities
+			.iter()
+			.any(|entity| self.generations.contains_key(&entity.key))
+		{
+			return Err("A region entity is already admitted to the world".into());
+		}
+		self.advance_topology()?;
+		let generations = std::sync::Arc::make_mut(&mut self.generations);
+		generations.extend(
+			entities
+				.iter()
+				.map(|entity| (entity.key.clone(), generation)),
+		);
+		self.next_instance = next;
+		Ok(())
+	}
+
 	pub fn prepare(
 		&self,
 		world: &RuntimeWorld,
@@ -74,6 +99,9 @@ impl RuntimeLifecycle {
 			.transpose()?;
 		if let Some(request) = &request {
 			self.validate_handle(&request.owner)?;
+			if request.projectile_direction.is_some() {
+				prefab.validate_projectile_launch()?;
+			}
 		}
 		let sources = prefab.expanded_entities()?;
 		let mut serial = self.next_instance;
@@ -100,6 +128,12 @@ impl RuntimeLifecycle {
 			.unwrap_or_default();
 		let mut entities =
 			PrefabData::remap_expanded(&sources, &prefab.reference_slots, &mapping, &bindings)?;
+		if let Some(direction) = request
+			.as_ref()
+			.and_then(|request| request.projectile_direction)
+		{
+			crate::projectile::orient_launch(&mut entities, direction)?;
+		}
 		for entity in &mut entities {
 			if entity.parent.is_none() {
 				for (value, offset) in entity.transform.position.iter_mut().zip(position) {

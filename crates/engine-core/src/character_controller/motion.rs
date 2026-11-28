@@ -1,6 +1,7 @@
 use super::{CharacterControllerSettings, CharacterState};
 use crate::{
-	EntityKey, animation::RootMotionDelta, collision::CollisionWorld, world::RuntimeWorld,
+	EntityKey, animation::RootMotionDelta, collision::CollisionWorld,
+	simulation_session::RegionMovementGuard, world::RuntimeWorld,
 };
 use glam::Vec3;
 
@@ -42,6 +43,7 @@ pub(super) fn solve(
 	tick: u64,
 	dt: f32,
 	root_motion: Option<RootMotionDelta>,
+	region_movement: &RegionMovementGuard,
 	budget: &mut usize,
 ) -> Result<(Vec3, CharacterState), String> {
 	let mut next = old.clone();
@@ -89,7 +91,11 @@ pub(super) fn solve(
 		requested.z =
 			requested.z * (1.0 - motion.motor_weight) + motion.displacement.y * motion.motor_weight;
 	}
-	let (mut applied, contacts) = collisions.slide_body(world, key, requested, budget)?;
+	let requested_movement = region_movement.clamp(body, requested);
+	requested = requested_movement.delta;
+	let (applied, contacts) = collisions.slide_body(world, key, requested, budget)?;
+	let accepted_movement = region_movement.clamp(body, applied);
+	let mut applied = accepted_movement.delta;
 	let wall = contacts.iter().any(|c| c.normal[1].abs() < 0.01);
 	for contact in &contacts {
 		let normal = Vec3::from_array(contact.normal);
@@ -111,7 +117,8 @@ pub(super) fn solve(
 					budget,
 				)?;
 				let candidate = raised + down.applied;
-				if supported(&down, body, candidate)
+				if !region_movement.clamp(body, candidate).blocked()
+					&& supported(&down, body, candidate)
 					&& candidate.y <= s.step_height + 0.0002
 					&& candidate.y >= -s.ground_probe - 0.0002
 					&& candidate.dot(planar.normalize()) > applied.dot(planar.normalize()) + 0.0002
@@ -130,7 +137,10 @@ pub(super) fn solve(
 		next.support = Some(support);
 	} else if !jump && velocity.y <= 0. {
 		let post = collisions.cast_body(world, key, applied, -Vec3::Y * s.ground_probe, budget)?;
-		if supported(&post, body, applied)
+		if !region_movement
+			.clamp(body, applied + post.applied)
+			.blocked()
+			&& supported(&post, body, applied)
 			&& (grounded || contacts.iter().any(|c| c.normal[1] < -0.999) || !old.initialized)
 		{
 			applied += post.applied;
@@ -146,6 +156,17 @@ pub(super) fn solve(
 			next.impact_speed = impact;
 		}
 	}
+	if jump
+		&& applied.y <= 0.0
+		&& (requested_movement.blocks_vertical_motion()
+		|| accepted_movement.blocks_vertical_motion())
+	{
+		next.jumped_at_tick = old.jumped_at_tick;
+		next.jump_available = old.jump_available;
+		next.coyote_until = old.coyote_until;
+	}
+	requested_movement.stop_velocity(&mut velocity);
+	accepted_movement.stop_velocity(&mut velocity);
 	next.velocity = velocity.to_array();
 	next.planar_speed = Vec3::new(applied.x, 0., applied.z).length() / dt;
 	next.initialized = true;

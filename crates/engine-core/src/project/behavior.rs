@@ -215,6 +215,10 @@ impl ProjectData {
 				return Err("Gameplay module ID must start with a lowercase ASCII letter and contain at most 32 lowercase ASCII letters, digits, or underscores".into());
 			}
 		}
+		self.sequences.validate_catalog(&self.scenes)?;
+		self.validate_scene_routes()?;
+		self.validate_world_regions()?;
+		self.validate_world_lods()?;
 		let mut definitions = HashMap::with_capacity(self.behavior_definitions.len());
 		if let Some(settings) = &self.gameplay_settings {
 			validate_gameplay_payload(settings)?;
@@ -353,6 +357,10 @@ impl ProjectData {
 		self.validate()?;
 		self.scenes.get(id).map_err(|e| e.to_string())?;
 		scene.validate()?;
+		self.sequences.validate_scene(id, scene)?;
+		self.validate_scene_routes_for(id, scene)?;
+		self.validate_region_document(id, scene)?;
+		self.validate_world_lod_proxies(id, scene)?;
 		let keys: HashSet<_> = scene
 			.entities
 			.iter()

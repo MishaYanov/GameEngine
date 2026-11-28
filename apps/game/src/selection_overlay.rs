@@ -60,6 +60,7 @@ impl SelectionOverlay {
 			model: (scene.world_matrix(selected).ok()? * local).to_cols_array(),
 			base_color_factor: [1.0; 4],
 			flags: [1, 0, 0, 0],
+			..ModelPushConstants::identity()
 		};
 		Some(RenderObject::new(&self.mesh, &self.material, transform))
 	}

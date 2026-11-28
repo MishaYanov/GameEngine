@@ -61,7 +61,7 @@ describe('InspectorPanel', () => {
     }
 
     it('shows the selection prompt until an entity is selected', () => {
-        expect(fixture.nativeElement.textContent).toContain('Select an entity');
+        expect(fixture.nativeElement.textContent).toContain('Select an object');
         expect(fixture.nativeElement.querySelector('input')).toBeNull();
     });
 
@@ -71,6 +71,8 @@ describe('InspectorPanel', () => {
         expect(fixture.nativeElement.textContent).toContain('Local space');
         const identity: HTMLElement = fixture.nativeElement.querySelector('[aria-label="Object identity"]');
         const transform: HTMLElement = fixture.nativeElement.querySelector('[aria-label="Local transform"]');
+        expect(identity.querySelector('h3')?.textContent).toBe('Robot');
+        expect(identity.querySelector('details')?.open).toBe(false);
         expect(identity.querySelector('input')).not.toBeNull();
         expect(identity.compareDocumentPosition(transform) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(input('Position X').value).toBe('1');
@@ -107,7 +109,7 @@ describe('InspectorPanel', () => {
         fixture.componentInstance.transformResetRequested.subscribe(reset);
         const root: HTMLElement = fixture.nativeElement;
         const buttons = [...root.querySelectorAll<HTMLButtonElement>('[aria-label="Reset local transform"] button')];
-        expect(buttons.map(button => button.textContent?.trim())).toEqual([
+        expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual([
             'Reset Transform', 'Reset Position', 'Reset Rotation', 'Reset Scale',
         ]);
         buttons.forEach(button => button.click());
@@ -218,7 +220,10 @@ describe('InspectorPanel', () => {
         await fixture.whenStable();
         const fields: HTMLInputElement[] = [...fixture.nativeElement.querySelectorAll('input')];
         expect(fields.every(field => field.matches(':disabled'))).toBe(true);
-        expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain('The scene changed');
+        const alert: HTMLElement = fixture.nativeElement.querySelector('[role="alert"]');
+        const identity: HTMLElement = fixture.nativeElement.querySelector('[aria-label="Object identity"]');
+        expect(alert.textContent).toContain('The scene changed');
+        expect(alert.compareDocumentPosition(identity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('has accessible property labels and field errors', async () => {

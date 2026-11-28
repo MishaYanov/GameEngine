@@ -34,6 +34,16 @@ pub struct ImportedPrimitiveMetadata {
 	pub vertex_count: usize,
 	pub index_count: usize,
 	pub material_index: Option<usize>,
+	pub normal_detail: ImportedNormalDetail,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ImportedNormalDetail {
+	Absent,
+	StrengthZero,
+	ReconstructedFlatFrame,
+	GeneratedTangents,
+	AuthoredTangents,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +54,10 @@ pub struct ImportedMaterial {
 	pub double_sided: bool,
 	pub base_color_image_index: Option<usize>,
 	pub tex_coord_set: u32,
+	pub normal_texture_index: Option<usize>,
+	pub normal_image_index: Option<usize>,
+	pub normal_uv_set: Option<u32>,
+	pub normal_scale: Option<f32>,
 }
 
 impl ImportedScene {
@@ -149,7 +163,10 @@ pub(super) fn describe_scene_checked(
 			));
 		}
 		*seen = true;
-		if node.skin().is_some() || node.weights().is_some() {
+		if node.skin().is_some() {
+			return Err(GltfLoaderError::SkinnedScene);
+		}
+		if node.weights().is_some() {
 			return Err(invalid(
 				"skinned and morph-target nodes are not supported by static scene import",
 			));
@@ -252,6 +269,17 @@ fn describe_mesh_metadata(
 					.indices()
 					.map_or(vertex_count, |indices| indices.count()),
 				material_index: primitive.material().index(),
+				normal_detail: match primitive.material().normal_texture() {
+					None => ImportedNormalDetail::Absent,
+					Some(info) if info.scale() == 0.0 => ImportedNormalDetail::StrengthZero,
+					Some(_) if primitive.get(&gltf::Semantic::Normals).is_none() => {
+						ImportedNormalDetail::ReconstructedFlatFrame
+					}
+					Some(_) if primitive.get(&gltf::Semantic::Tangents).is_none() => {
+						ImportedNormalDetail::GeneratedTangents
+					}
+					Some(_) => ImportedNormalDetail::AuthoredTangents,
+				},
 			});
 			let material = primitive.material();
 			if materials.insert(material.index()) {
@@ -261,6 +289,7 @@ fn describe_mesh_metadata(
 				}
 				let pbr = material.pbr_metallic_roughness();
 				let texture = pbr.base_color_texture();
+				let normal = material.normal_texture();
 				result.materials.push(ImportedMaterial {
 					material_index: material.index(),
 					name: name.to_owned(),
@@ -270,6 +299,12 @@ fn describe_mesh_metadata(
 						.as_ref()
 						.map(|texture| texture.texture().source().index()),
 					tex_coord_set: texture.map_or(0, |texture| texture.tex_coord()),
+					normal_texture_index: normal.as_ref().map(|info| info.texture().index()),
+					normal_image_index: normal.as_ref().map(|info| info.texture().source().index()),
+					normal_uv_set: normal
+						.as_ref()
+						.map(gltf::material::NormalTexture::tex_coord),
+					normal_scale: normal.as_ref().map(gltf::material::NormalTexture::scale),
 				});
 			}
 		}

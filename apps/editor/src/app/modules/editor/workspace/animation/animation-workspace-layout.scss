@@ -1,11 +1,7 @@
 .animation-layout {
   display: grid;
-  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  grid-template: minmax(0, 1fr) / minmax(14rem, min(33%, 24rem)) minmax(0, 1fr);
   gap: var(--space-2);
-}
-
-.animation-layout.animation-preview-visible {
-  grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr);
 }
 
 .animation-layout > * {
@@ -15,6 +11,53 @@
 
 .animation-layout editor-animation-workspace {
   overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.animation-layout.timeline-active {
+  grid-template:
+    "preview" clamp(4.5rem, 30%, 17rem)
+    "timeline" minmax(0, 1fr)
+    / minmax(0, 1fr);
+}
+
+.timeline-active editor-animation-workspace {
+  grid-area: timeline;
+}
+
+.timeline-active scene-viewport,
+.timeline-active .animation-preview-empty {
+  grid-area: preview;
+}
+
+.animation-preview-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: center;
+  overflow: auto;
+  background: var(--color-pane);
+  border: var(--border-width) solid var(--color-pane-edge);
+  border-radius: var(--radius-pane);
+  color: var(--color-text-secondary);
+}
+
+.animation-preview-empty h3,
+.animation-preview-empty p {
+  margin: 0;
+}
+
+.animation-preview-empty h3 {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-height: 40rem) {
+  .animation-layout.timeline-active {
+    grid-template-rows: clamp(3.75rem, 24%, 7.5rem) minmax(0, 1fr);
+  }
 }
 
 scene-entities-panel[hidden],
@@ -34,7 +77,7 @@ editor-assets-panel[hidden] {
     min-height: 0;
   }
 
-  .animation-layout.animation-preview-visible {
-    grid-template: minmax(0, 1fr) minmax(4rem, 32%) / minmax(0, 1fr);
+  .animation-layout {
+    grid-template: minmax(0, 42%) minmax(0, 1fr) / minmax(0, 1fr);
   }
 }

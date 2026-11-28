@@ -39,18 +39,19 @@ def _read_chunk(data, offset, chunk_type):
     return data[start:end], end
 
 
-def read_glb(path):
+def read_glb(path, *, limits=None):
     """Read a bounded GLB 2 file with one JSON and one BIN chunk."""
+    max_file, max_json = limits or (MAX_GLB_BYTES, MAX_JSON_BYTES)
     with Path(path).open("rb") as source:
-        raw = source.read(MAX_GLB_BYTES + 1)
-    if len(raw) > MAX_GLB_BYTES:
-        raise ValueError("GLB exceeds the 64 MiB export limit")
+        raw = source.read(max_file + 1)
+    if len(raw) > max_file:
+        raise ValueError(f"GLB exceeds the export limit of {max_file} bytes")
     if len(raw) < HEADER.size or HEADER.unpack_from(raw) != (b"glTF", 2, len(raw)):
         raise ValueError("Expected a complete GLB 2 file")
     data = memoryview(raw)
     json_chunk, offset = _read_chunk(data, HEADER.size, b"JSON")
-    if len(json_chunk) > MAX_JSON_BYTES:
-        raise ValueError("GLB JSON exceeds the 8 MiB export limit")
+    if len(json_chunk) > max_json:
+        raise ValueError(f"GLB JSON exceeds the export limit of {max_json} bytes")
     binary, end = _read_chunk(data, offset, b"BIN\0")
     if end != len(data):
         raise ValueError("GLB contains trailing chunks")
@@ -84,15 +85,20 @@ def _vector(value, size):
 
 def validate_static_glb(document, binary, expected_ids):
     """Check the export profile. The native importer still validates geometry and images."""
-    asset = document.get("asset")
-    if not isinstance(asset, dict) or asset.get("version") != "2.0":
-        raise ValueError("Expected glTF asset version 2.0")
     for option in ("animations", "skins", "cameras", "extensionsRequired", "extensionsUsed"):
         if document.get(option):
             raise ValueError(f"Static profile does not support glTF {option}")
+    return _validate_glb_geometry(document, binary, expected_ids, skinned=False)
+
+
+def _validate_glb_geometry(document, binary, expected_ids, *, skinned):
+    asset = document.get("asset")
+    if not isinstance(asset, dict) or asset.get("version") != "2.0":
+        raise ValueError("Expected glTF asset version 2.0")
+    profile = "Character" if skinned else "Static"
     buffers = _list(document, "buffers")
     if len(buffers) != 1 or "uri" in buffers[0]:
-        raise ValueError("Static GLB requires a single embedded buffer")
+        raise ValueError(f"{profile} GLB requires a single embedded buffer")
     byte_length = buffers[0].get("byteLength")
     if type(byte_length) is not int or byte_length <= 0 or not 0 <= len(binary) - byte_length <= 3:
         raise ValueError("GLB buffer length does not match the binary chunk")
@@ -108,28 +114,31 @@ def validate_static_glb(document, binary, expected_ids):
         if not _index(accessor.get("bufferView"), views) or type(count) is not int or count <= 0:
             raise ValueError("GLB accessor must use embedded geometry")
         if "sparse" in accessor:
-            raise ValueError("Static profile does not support sparse accessors")
+            raise ValueError(f"{profile} profile does not support sparse accessors")
 
     images = _list(document, "images")
     for image in images:
         if ("uri" in image or image.get("mimeType") not in {"image/png", "image/jpeg"}
                 or not _index(image.get("bufferView"), views)):
-            raise ValueError("Static GLB images must be embedded PNG or JPEG")
+            raise ValueError(f"{profile} GLB images must be embedded PNG or JPEG")
     textures = _list(document, "textures")
     for texture in textures:
         if not _index(texture.get("source"), images):
-            raise ValueError("Static GLB textures require embedded images")
+            raise ValueError(f"{profile} GLB textures require embedded images")
     materials = _list(document, "materials")
     textured_materials = set()
+    normal_uvs = {}
     for index, material in enumerate(materials):
-        if any(field in material for field in ("normalTexture", "occlusionTexture", "emissiveTexture")):
-            raise ValueError("Static profile only supports base-color textures")
+        if any(field in material for field in ("occlusionTexture", "emissiveTexture")):
+            raise ValueError(f"{profile} profile only supports base-color and normal textures")
+        if "normalTexture" in material:
+            normal_uvs[index] = _normal_uv(material["normalTexture"], textures, images)
         emission = material.get("emissiveFactor", [0, 0, 0])
         if material.get("alphaMode", "OPAQUE") != "OPAQUE" or not _vector(emission, 3) or any(emission):
-            raise ValueError("Static profile only supports opaque, non-emissive materials")
+            raise ValueError(f"{profile} profile only supports opaque, non-emissive materials")
         color = material.get("pbrMetallicRoughness", {})
         if not isinstance(color, dict) or "metallicRoughnessTexture" in color:
-            raise ValueError("Static profile only supports base-color textures")
+            raise ValueError(f"{profile} profile only supports base-color and normal textures")
         if "baseColorFactor" in color and (not _vector(color["baseColorFactor"], 4)
                 or any(not 0 <= value <= 1 for value in color["baseColorFactor"])):
             raise ValueError("Base color must be four numbers in the 0–1 range")
@@ -142,7 +151,7 @@ def validate_static_glb(document, binary, expected_ids):
 
     meshes = _list(document, "meshes")
     if not 1 <= len(meshes) <= MAX_SCENE_ENTRIES:
-        raise ValueError("Static GLB requires 1–10000 meshes")
+        raise ValueError(f"{profile} GLB requires 1–10000 meshes")
     mesh_ids = set()
     for mesh in meshes:
         extras = mesh.get("extras")
@@ -155,40 +164,81 @@ def validate_static_glb(document, binary, expected_ids):
             raise ValueError("Each GLB mesh must contain triangles")
         for primitive in primitives:
             if primitive.get("mode", 4) != 4 or "targets" in primitive:
-                raise ValueError("Static profile requires triangles without morph targets")
+                raise ValueError(f"{profile} profile requires triangles without morph targets")
             attributes = primitive.get("attributes")
             if not isinstance(attributes, dict) or any(
                 not _index(attributes.get(field), accessors) for field in ("POSITION", "NORMAL")
             ):
-                raise ValueError("Static mesh primitives require positions and normals")
+                raise ValueError(f"{profile} mesh primitives require positions and normals")
             if "indices" in primitive and not _index(primitive["indices"], accessors):
-                raise ValueError("Static mesh indices must use an embedded accessor")
+                raise ValueError(f"{profile} mesh indices must use an embedded accessor")
             material = primitive.get("material")
             if "material" in primitive and not _index(material, materials):
-                raise ValueError("Static mesh material index is invalid")
+                raise ValueError(f"{profile} mesh material index is invalid")
             if material in textured_materials and not _index(attributes.get("TEXCOORD_0"), accessors):
                 raise ValueError("A textured mesh primitive requires the first UV map")
+            if material in normal_uvs:
+                _validate_normal_attributes(attributes, accessors, normal_uvs[material])
     if mesh_ids != set(expected_ids):
         raise ValueError("Blender did not export the selected mesh IDs exactly once")
 
     nodes = _list(document, "nodes")
     for node in nodes:
-        if "skin" in node or "camera" in node:
-            raise ValueError("Static profile does not support skinned or camera objects")
+        if "camera" in node or (not skinned and "skin" in node):
+            unsupported = "camera objects" if skinned else "skinned or camera objects"
+            raise ValueError(f"{profile} profile does not support {unsupported}")
         for field, length in (("matrix", 16), ("translation", 3), ("rotation", 4), ("scale", 3)):
             if field in node and not _vector(node[field], length):
-                raise ValueError(f"Static node has invalid {field}")
+                raise ValueError(f"{profile} node has invalid {field}")
         if "mesh" in node and not _index(node["mesh"], meshes):
-            raise ValueError("Static node mesh index is invalid")
+            raise ValueError(f"{profile} node mesh index is invalid")
         children = node.get("children", [])
         if not isinstance(children, list) or any(not _index(child, nodes) for child in children):
-            raise ValueError("Static node child index is invalid")
+            raise ValueError(f"{profile} node child index is invalid")
     return mesh_ids
 
 
+def _normal_uv(info, textures, images):
+    if not isinstance(info, dict) or not _index(info.get("index"), textures):
+        raise ValueError("Normal texture must reference an embedded texture")
+    image = images[textures[info["index"]]["source"]]
+    if image["mimeType"] != "image/png":
+        raise ValueError("Normal textures must be embedded PNGs; use a PNG normal image in Blender")
+    uv = info.get("texCoord", 0)
+    if type(uv) is not int or uv not in (0, 1):
+        raise ValueError("Normal textures must use the first or second UV map")
+    scale = info.get("scale", 1)
+    if not _vector([scale], 1) or scale < 0:
+        raise ValueError("Normal texture scale must be finite and nonnegative")
+    return uv
+
+
+def _validate_normal_attributes(attributes, accessors, uv):
+    name = f"TEXCOORD_{uv}"
+    index = attributes.get(name)
+    count = accessors[attributes["POSITION"]]["count"]
+    if not _index(index, accessors):
+        raise ValueError(f"A normal-mapped mesh primitive requires {name}")
+    accessor = accessors[index]
+    component = accessor.get("componentType")
+    valid_component = component == 5126 or (
+        component in (5121, 5123) and accessor.get("normalized") is True
+    )
+    if accessor.get("type") != "VEC2" or accessor["count"] != count or not valid_component:
+        raise ValueError(f"Normal map {name} must have one UV per position")
+    if "TANGENT" in attributes:
+        index = attributes["TANGENT"]
+        if not _index(index, accessors):
+            raise ValueError("Normal map tangents must use an embedded accessor")
+        accessor = accessors[index]
+        if (accessor.get("type") != "VEC4" or accessor.get("componentType") != 5126
+                or accessor["count"] != count):
+            raise ValueError("Normal map tangents must have one float VEC4 per position")
+
+
 def _strip_extras(document):
-    # Blender's exporter has a single custom-properties switch for the file.
-    # Only mesh identity and the add-on's provenance belong in the runtime asset.
+    # Blender custom properties may contain private authoring data. Publication
+    # restores only the profile's validated identities and provenance.
     remaining = [document]
     while remaining:
         item = remaining.pop()
@@ -199,11 +249,12 @@ def _strip_extras(document):
             remaining.extend(item)
 
 
-def _write_glb(stream, document, binary):
+def _write_glb(stream, document, binary, *, limits=None):
+    max_file, max_json = limits or (MAX_GLB_BYTES, MAX_JSON_BYTES)
     encoded = json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
     encoded += b" " * (-len(encoded) % 4)
     length = HEADER.size + 2 * CHUNK_HEADER.size + len(encoded) + len(binary)
-    if len(encoded) > MAX_JSON_BYTES or length > MAX_GLB_BYTES:
+    if len(encoded) > max_json or length > max_file:
         raise ValueError("Published GLB exceeds the export size limit")
     stream.write(HEADER.pack(b"glTF", 2, length))
     stream.write(CHUNK_HEADER.pack(len(encoded), b"JSON"))
@@ -214,6 +265,14 @@ def _write_glb(stream, document, binary):
 
 def publish_static_glb(destination, export_candidate, expected_ids, provenance):
     """Run an exporter in a sibling staging directory and atomically publish its result."""
+    def identities(document, binary):
+        validate_static_glb(document, binary, expected_ids)
+        return [(mesh, MESH_ID, mesh["extras"][MESH_ID]) for mesh in document["meshes"]]
+
+    return _publish_glb(destination, export_candidate, identities, provenance, PROFILE_VERSION)
+
+
+def _publish_glb(destination, export_candidate, read_identities, provenance, version, *, limits=None):
     destination = Path(destination)
     if destination.suffix.lower() != ".glb" or destination.is_symlink():
         raise ValueError("Select a .glb destination that is a regular file")
@@ -222,25 +281,24 @@ def publish_static_glb(destination, export_candidate, expected_ids, provenance):
     ) as staging:
         raw = Path(staging) / "candidate.glb"
         export_candidate(raw)
-        document, binary = read_glb(raw)
-        validate_static_glb(document, binary, expected_ids)
-        ids = [mesh["extras"][MESH_ID] for mesh in document["meshes"]]
+        document, binary = read_glb(raw, limits=limits)
+        identities = read_identities(document, binary)
         _strip_extras(document)
-        for mesh, ident in zip(document["meshes"], ids, strict=True):
-            mesh["extras"] = {MESH_ID: ident}
+        for entry, key, ident in identities:
+            entry.setdefault("extras", {})[key] = ident
         digest = hashlib.sha256()
         binary_digest = hashlib.sha256(binary).hexdigest()
         digest.update(json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8"))
         digest.update(binary)
         document["asset"]["extras"] = {PROVENANCE: {
             **provenance,
-            "profile_version": PROFILE_VERSION,
+            "profile_version": version,
             "content_sha256": digest.hexdigest(),
             "embedded_data_sha256": binary_digest,
         }}
         published = Path(staging) / "validated.glb"
         with published.open("xb") as stream:
-            _write_glb(stream, document, binary)
+            _write_glb(stream, document, binary, limits=limits)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(published, destination)

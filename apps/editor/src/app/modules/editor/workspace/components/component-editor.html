@@ -1,6 +1,19 @@
 <section aria-label="Components" class="components">
     @if (!focusedComponent()) {
-	<h3>Components</h3>
+        <h3 #componentHeading tabindex="-1">Components</h3>
+        <div class="component-list" [hidden]="open()">
+            @if (choices().length) {
+                <div class="actions component-add">
+                    <editor-search-picker (picked)="chooseKind($event)" [disabled]="!available() || open()"
+                                          [options]="typeOptions()" [value]="canAdd() ? selectedKind() : null"
+                                          label="Component type"
+                                          placeholder="Search component types…"/>
+                    <button #addComponent type="button" [disabled]="!available() || open() || !canAdd()"
+                            (click)="start(undefined, addComponent)">
+                        Add Component
+                    </button>
+                </div>
+            }
     @for (component of orderedComponents(); track component.id) {
         <article [attr.aria-label]="label(component)" [attr.data-reference-component]="component.id" class="component"
                  tabindex="-1">
@@ -94,7 +107,8 @@
                         <button class="primary-action" (click)="particleDesignerRequested.emit(component.id)"
                                 [disabled]="!available() || open()" aria-haspopup="dialog" type="button">Edit Particles…</button>
                     } @else {
-                        <button class="primary-action" (click)="start(component)" [attr.aria-label]="'Edit ' + label(component)"
+                        <button #editComponent class="primary-action" (click)="start(component, editComponent)"
+                                [attr.aria-label]="'Edit ' + label(component)"
                                 [attr.aria-expanded]="open() && original()?.id === component.id"
                                 [disabled]="!available() || open()" type="button">Edit</button>
                     }
@@ -102,7 +116,9 @@
                         <summary [attr.aria-label]="'More actions for ' + label(component)">More actions</summary>
                         <div class="actions">
                             @if (component.data.kind === 'animation' && animationWorkspaceAvailable()) {
-                                <button type="button" [disabled]="!available() || open()" (click)="start(component)">Edit Binding</button>
+                                <button #editBinding type="button" [disabled]="!available() || open()"
+                                        (click)="start(component, editBinding)">Edit Binding
+                                </button>
                             }
                             <button type="button" [disabled]="!available() || open()" (click)="toggle(component)"
                                     [attr.aria-label]="(component.enabled ? 'Disable ' : 'Enable ') + label(component)">
@@ -119,28 +135,26 @@
 	} @empty {
 		<p>No components attached.</p>
 	}
-	@if (choices().length) {
-		<div class="actions">
-            <editor-search-picker (picked)="chooseKind($event)" [disabled]="!available() || open()"
-                                  [options]="typeOptions()" [value]="canAdd() ? selectedKind() : null"
-                                  label="Component type"
-                                  placeholder="Search component types…"/>
-			<button type="button" [disabled]="!available() || open() || !canAdd()" (click)="start()">
-				Add Component
-			</button>
-		</div>
-	}
+        </div>
     }
 	@if (error(); as message) {
 		<p class="error" role="alert">{{ message }}</p>
 	}
 	@if (open()) {
-		<fieldset [disabled]="!available()" class="component-form">
-			<legend>{{ original() ? 'Edit component' : 'Add component' }}</legend>
-			<p>Apply accepts one undoable change. Discard leaves the component unchanged.</p>
+        <fieldset #draftForm tabindex="-1" [disabled]="!available()"
+                  [attr.data-reference-component]="original()?.id" class="component-form">
+            <legend>{{ draftTitle() }}</legend>
+            @if (pending()) {
+                <p role="status">Applying component…</p>
+            }
 			<label class="check"><input type="checkbox" [formField]="fields.enabled" />Enabled</label>
 			@switch (draft().kind) {
                 @case ('particle_emitter') {
+                    <editor-particle-sprite-picker [assetId]="draft().particle.sprite_asset_id"
+                                                   [disabled]="!available()"
+                                                   (picked)="fields.particle.sprite_asset_id().value.set($event)"/>
+                    <label class="check"><input [formField]="fields.particle.linger_on_despawn" type="checkbox"/>Keep
+                        trail after despawn</label>
                     @for (field of particleFields; track field.key) {
                         <label>{{ field.label }}
                             <input [attr.inputmode]="field.key === 'seed' ? 'numeric' : 'decimal'" [formField]="fields.particle[field.key]"
@@ -279,19 +293,10 @@
                                           [options]="meshModelOptions()" [value]="draft().model_path || null"
                                           [disabled]="!available()" (picked)="chooseMeshModel($event)"/>
                     @if (modelMeshOptions().length || draft().mesh_id) {
-                        <label>Mesh
-                            <select #meshSelection [disabled]="!available()" (change)="chooseMeshIdentity(meshSelection.value)">
-                                <option value="" [selected]="!draft().mesh_id">Use mesh index</option>
-                                @if (meshSelectionUnavailable()) {
-                                    <option [value]="draft().mesh_id" [selected]="true" disabled>Unavailable mesh</option>
-                                }
-                                @for (mesh of modelMeshOptions(); track mesh.id) {
-                                    <option [value]="mesh.id" [selected]="mesh.id === draft().mesh_id">
-                                        {{mesh.name || 'Mesh'}} ({{mesh.index}})
-                                    </option>
-                                }
-                            </select>
-                        </label>
+                        <editor-search-picker label="Mesh" placeholder="Find a mesh…"
+                                              [options]="meshIdentityOptions()" [value]="draft().mesh_id"
+                                              [resultLimit]="80" [disabled]="!available()"
+                                              (picked)="chooseMeshIdentity($event)"/>
                     }
                     @if (!draft().mesh_id) {
                         <label>Mesh index
@@ -328,18 +333,10 @@
 					/>
 				}
                 @case ('script') {
-                    <label>Script
-                        <select #script data-component-reference-field="$script" [value]="draft().script.id" (change)="chooseScript(script.value)">
-                            @if (!scriptType()) {
-                                <option [value]="draft().script.id" disabled>
-                                    {{ draft().script.id || 'Choose a registered script' }}
-                                </option>
-                            }
-                            @for (type of scriptTypes(); track type.id) {
-                                <option [value]="type.id">{{ type.label }}</option>
-                            }
-                        </select>
-                    </label>
+                    <editor-search-picker label="Script" placeholder="Find a registered script…"
+                                          data-component-reference-field="$script" [options]="scriptOptions()"
+                                          [value]="draft().script.id || null" [disabled]="!available()"
+                                          (picked)="chooseScript($event)"/>
                     @if (scriptCanReset()) {
                         <button type="button" (click)="resetScriptConfig()">Reset Script settings</button>
                     }
@@ -355,18 +352,11 @@
                             </label>
                         }
                         @for (field of type.references; track field.key) {
-                            <label>{{ field.label }}
-                                <select #target [attr.data-component-reference-field]="field.key" [value]="scriptTarget(field.key)"
-                                    (change)="setScriptTarget(field.key, target.value)">
-                                    <option value="">Choose an object</option>
-                                    @for (object of scriptTargets(field); track object.key) {
-                                        <option [value]="'entity:' + object.key">{{ object.name }}</option>
-                                    }
-                                    @for (slot of scriptSlots(); track slot) {
-                                        <option [value]="'slot:' + slot">Prop slot · {{ slot }}</option>
-                                    }
-                                </select>
-                            </label>
+                            <editor-search-picker [label]="field.label" placeholder="Find an object or Prop slot…"
+                                                  [attr.data-component-reference-field]="field.key"
+                                                  [options]="scriptTargetOptions(field)"
+                                                  [value]="scriptTarget(field.key) || null" [resultLimit]="80"
+                                                  [disabled]="!available()" (picked)="setScriptTarget(field, $event)"/>
                         }
                     } @else if (draft().script.id) {
                         <p role="status">This script is unavailable. Choose a registered replacement or leave this attachment disabled.</p>
@@ -378,6 +368,8 @@
 							<option value="key_door">Key and Door</option>
 							<option value="collectible">Collectible</option>
 							<option value="timed_spawner">Timed Spawner</option>
+                        <option value="projectile">Projectile</option>
+                        <option value="projectile_launcher">Projectile Launcher</option>
 							<option value="state_machine">State Machine</option>
 						</select></label
 					>
@@ -388,9 +380,49 @@
                             [disabled]="!available()"
 							(changed)="machineChanged($event)"
 						/>
-					} @else if (draft().behavior_kind === 'timed_spawner') {
+                    } @else if (draft().behavior_kind === 'projectile') {
+                        <p>Add this behavior to the root of a Projectile Prop. Add a Particle Emitter for a trail.</p>
+                        <label>Speed (units per second)<input [formField]="fields.projectile.speed"
+                                                              inputmode="decimal"/></label>
+                        <label>Lifetime (ticks)<input [formField]="fields.lifetime_ticks" inputmode="numeric"/></label>
+                        <details>
+                            <summary>Collision layers</summary>
+                            @for (layer of projectileLayers(); track layer.bit) {
+                                <label class="check">
+                                    <input type="checkbox" #selectedLayer [checked]="projectileLayerSelected(layer.bit)"
+                                           [disabled]="!available()"
+                                           (change)="toggleProjectileLayer(layer.bit, selectedLayer.checked)"/>{{ layer.label }}
+                                </label>
+                            }
+                        </details>
+                        <label class="check"><input type="checkbox" [formField]="fields.projectile.impact"/>Impact burst</label>
+                        @if (draft().projectile.impact) {
+                            <editor-particle-sprite-picker [assetId]="draft().projectile.impactSprite"
+                                                           [disabled]="!available()"
+                                                           (picked)="fields.projectile.impactSprite().value.set($event)"/>
+                            <label>Particle count<input [formField]="fields.projectile.impactCount"
+                                                        inputmode="numeric"/></label>
+                            <label>Impact lifetime (seconds)<input [formField]="fields.projectile.impactLifetime"
+                                                                   inputmode="decimal"/></label>
+                            <label>Impact particle size<input [formField]="fields.projectile.impactSize"
+                                                              inputmode="decimal"/></label>
+                        }
+                    } @else if (draft().behavior_kind === 'timed_spawner' || draft().behavior_kind === 'projectile_launcher') {
+                        @if (draft().behavior_kind === 'projectile_launcher') {
+                            <p>Attach to the locally controlled object. Launches the chosen Prop along its local −Z
+                                axis.</p>
+                            <label>Launch Input Action<input [formField]="fields.projectile.launchAction"
+                                                             [attr.list]="projectileActionListId"
+                                                             autocomplete="off"/></label>
+                            <datalist [id]="projectileActionListId">
+                                @for (action of gameActions(); track action) {
+                                    <option [value]="action"></option>
+                                }
+                            </datalist>
+                        }
 						<label
-							>Spawn prefab path<input
+                        >{{ draft().behavior_kind === 'projectile_launcher' ? 'Projectile Prop path' : 'Spawn prefab path' }}
+                            <input
 								[formField]="fields.prefab_path"
 								[attr.list]="prefabListId"
 								autocomplete="off"
@@ -402,13 +434,13 @@
 								}
 							}
 						</datalist>
-						<label
-							>Spawn interval (ticks)<input [formField]="fields.interval_ticks" inputmode="numeric"
-						/></label>
+                        @if (draft().behavior_kind === 'timed_spawner') {
+                            <label>Spawn interval (ticks)<input [formField]="fields.interval_ticks"
+                                                                inputmode="numeric"/></label>
+                            <label>Lifetime (ticks)<input [formField]="fields.lifetime_ticks"
+                                                          inputmode="numeric"/></label>
+                        }
 						<label>Maximum alive<input [formField]="fields.max_alive" inputmode="numeric" /></label>
-						<label
-							>Lifetime (ticks)<input [formField]="fields.lifetime_ticks" inputmode="numeric"
-						/></label>
 						<fieldset>
 							<legend>Spawn offset</legend>
 							<div class="vector">
@@ -416,13 +448,14 @@
 									<label
 										>{{ axis.toUpperCase()
 										}}<input
-											[formField]="fields.spawn_offset[axis]"
+                                            [formField]="draft().behavior_kind === 'projectile_launcher' ? fields.projectile.launchOffset[axis] : fields.spawn_offset[axis]"
 											inputmode="decimal"
 											[attr.aria-label]="'Spawn offset ' + axis.toUpperCase()"
 									/></label>
 								}
 							</div>
 						</fieldset>
+                        @if (draft().behavior_kind === 'timed_spawner') {
 						<fieldset>
 							<legend>Prefab reference slots</legend>
 							<p>Bind each slot declared by the source prefab to an entity in this scene.</p>
@@ -458,6 +491,7 @@
 								Add reference slot
 							</button>
 						</fieldset>
+                        }
 					} @else {
 						@for (field of references(); track field.key) {
                             <editor-search-picker (picked)="fields[field.key]().value.set($event)"
@@ -500,17 +534,11 @@
 				}
 				@case ('player_controller') {
 					@if (inputActionAssetsEnabled()) {
-						<label>Input source
-							<select #source [value]="inputAssetId(draft().playerController.input)" (change)="chooseInputAsset(source.value)">
-								<option value="" [selected]="!inputAssetId(draft().playerController.input)">Project Input</option>
-								@if (draft().playerController.input.kind === 'asset' && inputSource(draft().playerController.input) === 'Unavailable Input Actions asset') {
-									<option [value]="inputAssetId(draft().playerController.input)" [selected]="true">Unavailable Input Actions asset</option>
-								}
-								@for (asset of inputActionAssets(); track asset.id) {
-									<option [value]="asset.id" [selected]="asset.id === inputAssetId(draft().playerController.input)">{{ asset.path }}</option>
-								}
-							</select>
-						</label>
+                        <editor-search-picker label="Input source" placeholder="Find an Input Actions asset…"
+                                              [options]="inputSourceOptions()"
+                                              [value]="inputAssetId(draft().playerController.input)"
+                                              [resultLimit]="80" [disabled]="!available()"
+                                              (picked)="chooseInputAsset($event)"/>
 					} @else {
 						<p>Input source: Project Input</p>
 					}

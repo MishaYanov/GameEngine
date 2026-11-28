@@ -19,12 +19,14 @@
 
 .menu-panel {
   position: fixed;
-  min-width: min(13rem, calc(100vw - 8px));
-  max-width: calc(100vw - 8px);
-  max-height: calc(100dvh - 8px);
+  inline-size: max-content;
+  min-inline-size: min(13rem, calc(100dvw - 8px));
+  max-inline-size: min(25rem, calc(100dvw - 8px));
+  max-block-size: calc(100dvh - 8px);
   box-sizing: border-box;
   padding: var(--space-1);
   overflow: auto;
+  overscroll-behavior: contain;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-raised);
@@ -75,6 +77,8 @@ button[aria-disabled="true"] {
 
 .item-label {
   flex: 1;
+  min-inline-size: 0;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 

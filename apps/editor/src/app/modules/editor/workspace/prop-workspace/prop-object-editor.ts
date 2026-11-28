@@ -1,6 +1,7 @@
 import {Component, computed, input, linkedSignal, output} from '@angular/core';
 import type {EntityKey, Transform} from '../../../../core/editor/editor.models';
 import {type Vector3Change, Vector3Field} from '../../../../shared/components/vector3-field/vector3-field';
+import {EditorSearchPicker, type SearchPickerOption} from '../../../../shared/components/search-picker/search-picker';
 import type {PropWorkspaceObject} from './prop-workspace.service';
 
 export type PropObjectEdit =
@@ -11,7 +12,7 @@ export type PropObjectEdit =
 
 @Component({
     selector: 'prop-object-editor',
-    imports: [Vector3Field],
+    imports: [Vector3Field, EditorSearchPicker],
     template: `
         <fieldset [disabled]="disabled()">
             <legend>Object properties</legend>
@@ -25,16 +26,9 @@ export type PropObjectEdit =
                     Active in Play
                 </label>
             }
-            <label>Prop parent
-                <select #parent [value]="object().parent ?? ''" (change)="reparent(parent.value)">
-                    @if (!requireParent()) {
-                        <option value="">Prop root</option>
-                    }
-                    @for (candidate of parents(); track candidate.key) {
-                        <option [value]="candidate.key">{{ candidate.name }}</option>
-                    }
-                </select>
-            </label>
+            <editor-search-picker label="Prop parent" placeholder="Find a parent in this Prop…"
+                                  [options]="parentOptions()" [value]="parentChoice()" [resultLimit]="60" [revealResults]="true"
+                                  [disabled]="disabled()" (picked)="reparent($event)"/>
             <section aria-label="Local transform">
                 <h4>Transform <small>Local space</small></h4>
                 @for (field of fields; track field.key) {
@@ -61,7 +55,7 @@ export type PropObjectEdit =
         section {display: grid; gap: var(--space-1);}
         h4 {margin: 0;}
         label {display: grid; gap: var(--space-1);}
-        input, select {
+        input {
             min-width: 0;
             min-height: var(--layout-subject-control-height);
             padding: var(--space-1);
@@ -124,10 +118,20 @@ export class PropObjectEditor {
         if (name !== this.object().name) this.edited.emit({key: this.object().key, name});
     }
 
-    protected reparent(parent: string): void {
-        if (this.disabled() || (!parent && this.requireParent()) ||
-            (parent && !this.parents().some(object => object.key === parent))) return;
-        const key = parent || null;
+    protected readonly parentChoice = computed(() => {
+        const parent = this.object().parent;
+        return parent === null ? (this.requireParent() ? null : 'prop-root') : 'object:' + parent;
+    });
+    protected readonly parentOptions = computed<readonly SearchPickerOption[]>(() => [
+        ...(!this.requireParent() ? [{id: 'prop-root', label: 'Prop root'}] : []),
+        ...this.parents().map(parent => ({id: 'object:' + parent.key, label: parent.name})),
+    ]);
+
+    protected reparent(choice: string): void {
+        if (this.disabled()) return;
+        const parent = this.parents().find(object => 'object:' + object.key === choice);
+        if (!parent && (choice !== 'prop-root' || this.requireParent())) return;
+        const key = parent?.key ?? null;
         if (key !== this.object().parent) this.edited.emit({key: this.object().key, parent: key});
     }
 

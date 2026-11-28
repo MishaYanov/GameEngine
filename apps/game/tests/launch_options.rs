@@ -229,3 +229,22 @@ fn input_preset_commands_are_standalone_and_apply_requires_both_tokens() {
 		assert!(LaunchOptions::parse(arguments, true).is_err());
 	}
 }
+
+#[test]
+fn recent_source_experiment_is_limited_to_installed_player_switch_smoke() {
+	let flag = "--smoke-retain-recent-source";
+	let smoke = ["--smoke-test", "--smoke-scene-cycles", "2", flag];
+	assert!(LaunchOptions::parse([flag], true).is_err());
+	assert!(LaunchOptions::parse(smoke, false).is_err());
+	assert!(LaunchOptions::parse([flag, flag], true).is_err());
+	assert!(
+		LaunchOptions::parse(smoke, true)
+			.unwrap()
+			.smoke_retain_recent_source
+	);
+	assert!(
+		!LaunchOptions::parse(["--smoke-test", "--smoke-scene-cycles", "2"], true)
+			.unwrap()
+			.smoke_retain_recent_source
+	);
+}

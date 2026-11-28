@@ -7,6 +7,10 @@
 }
 
 .drawer-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
   min-height: var(--layout-subject-control-height);
   padding-inline: var(--space-2);
   border: var(--border-width) solid var(--color-border);
@@ -28,4 +32,28 @@
 
 .drawer-mode-switch button:disabled {
   color: var(--color-text-disabled);
+}
+
+.workspace-authoring-drawer.workspace-authoring-hidden {
+  display: none;
+}
+
+@container (max-width: 54rem) {
+  .drawer-mode-switch button, .problems-button {
+    inline-size: var(--layout-subject-control-height);
+    padding-inline: 0;
+  }
+
+  :is(.drawer-mode-switch button, .problems-button) > span {
+    display: none;
+  }
+
+  .workspace-main:where(:has(.workspace-authoring-drawer:not(.workspace-authoring-hidden), editor-runtime-inspector)) {
+    --workspace-hierarchy-max: 24%;
+    --workspace-inspector-max: 32%;
+  }
+}
+
+.scene-maximized :is(scene-entities-panel, .workspace-authoring-drawer, editor-assets-panel) {
+  display: none;
 }

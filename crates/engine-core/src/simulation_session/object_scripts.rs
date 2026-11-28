@@ -1,15 +1,15 @@
 //! Prepared instances and the narrow API used by compiled project scripts.
 
 use std::{
-	collections::{BTreeMap, BTreeSet},
+	collections::{BTreeMap, BTreeSet, HashSet},
 	sync::Arc,
 };
 
 use crate::{
 	EntityKey,
 	components::{
-		ComponentId, ScriptComponent, ScriptDescriptor, ScriptIssue, ScriptReference,
-		ScriptReferenceKind, ScriptSettings,
+		ComponentId, ParticleBurstSettings, ScriptComponent, ScriptDescriptor, ScriptIssue,
+		ScriptReference, ScriptReferenceKind, ScriptSettings,
 	},
 	runtime_lifecycle::{RuntimeEntityHandle, RuntimeLifecycle},
 	scene_data::{EntityData, TransformData},
@@ -17,7 +17,7 @@ use crate::{
 	world::RuntimeWorld,
 };
 
-use super::{ActionWriter, InputFrame, SimulationAction};
+use super::{ActionWriter, InputFrame, ProjectileHit, ProjectileHookStep, SimulationAction};
 
 const MAX_ACTIVE_SCRIPTS: usize = 4096;
 const MAX_TRIGGER_DELIVERIES_PER_STEP: usize = 4096;
@@ -83,6 +83,17 @@ pub trait ObjectScript: Send {
 	) -> Result<(), String> {
 		Ok(())
 	}
+	fn on_hit(
+		&mut self,
+		_context: &ObjectScriptContext<'_>,
+		_hit: &ProjectileHit,
+		_commands: &mut ObjectScriptCommands<'_, '_>,
+	) -> Result<(), String> {
+		Ok(())
+	}
+	fn on_destroy(&mut self, _context: &ObjectScriptContext<'_>) -> Result<(), String> {
+		Ok(())
+	}
 
 	/// Called when the accepted instance retires. No world mutation is available here.
 	fn on_stop(&mut self) {}
@@ -98,6 +109,15 @@ impl Clone for Box<dyn ObjectScript> {
 pub struct ObjectScriptRegistration {
 	pub descriptor: fn() -> ScriptDescriptor,
 	pub instantiate: fn(&ScriptSettings) -> Result<Box<dyn ObjectScript>, String>,
+}
+
+type ScriptConstructor =
+dyn Fn(&ScriptSettings) -> Result<Box<dyn ObjectScript>, String> + Send + Sync;
+
+#[derive(Clone)]
+pub struct ProjectScriptRegistration {
+	pub descriptor: ScriptDescriptor,
+	pub instantiate: Arc<ScriptConstructor>,
 }
 
 pub struct ObjectScriptContext<'a> {
@@ -120,6 +140,14 @@ impl ObjectScriptContext<'_> {
 			.filter(|handle| self.lifecycle.validate_handle(handle).is_ok())
 	}
 
+	pub fn reference_transforms(&self) -> impl Iterator<Item=(&str, &TransformData)> {
+		self.references.iter().filter_map(|(name, handle)| {
+			self.transform(handle)
+				.ok()
+				.map(|transform| (name.as_str(), transform))
+		})
+	}
+
 	pub fn transform(&self, target: &RuntimeEntityHandle) -> Result<&TransformData, String> {
 		if target != self.owner && !self.references.values().any(|handle| handle == target) {
 			return Err("Script may only read its owner or declared references".into());
@@ -139,12 +167,16 @@ impl ObjectScriptContext<'_> {
 	pub fn step_seconds(&self) -> f32 {
 		self.step_seconds
 	}
+	pub fn owner_yaw(&self) -> Result<f32, String> {
+		Ok(self.transform(self.owner())?.rotation[1])
+	}
 }
 
 pub struct ObjectScriptCommands<'a, 'actions> {
 	context: &'a ObjectScriptContext<'a>,
 	actions: &'a mut ActionWriter<'actions>,
 	write_owner_transform: bool,
+	impact_effect: Option<&'a mut Option<ParticleBurstSettings>>,
 }
 
 impl ObjectScriptCommands<'_, '_> {
@@ -157,6 +189,47 @@ impl ObjectScriptCommands<'_, '_> {
 		self.actions.push(SimulationAction::SetLocalYaw {
 			entity: self.context.owner.key.clone(),
 			radians,
+		})
+	}
+
+	pub fn set_animator_bool(&mut self, parameter: String, value: bool) -> Result<(), String> {
+		if !crate::input::valid_game_action_id(&parameter) {
+			return Err("Script Animator parameter requires a valid ID".into());
+		}
+		self.actions.push(SimulationAction::SetAnimatorBool {
+			entity: self.context.owner.key.clone(),
+			parameter,
+			value,
+		})
+	}
+
+	pub fn emit_particle_burst(
+		&mut self,
+		position: [f32; 3],
+		settings: ParticleBurstSettings,
+	) -> Result<(), String> {
+		settings.validate()?;
+		if !position.iter().all(|coordinate| coordinate.is_finite()) {
+			return Err("Particle burst requires a finite position".into());
+		}
+		if let Some(effect) = &mut self.impact_effect {
+			if effect.is_some() {
+				return Err("A projectile hit can select one scripted impact burst".into());
+			}
+			**effect = Some(settings);
+			return Ok(());
+		}
+		self.actions
+			.push(SimulationAction::EmitParticleBurst { position, settings })
+	}
+
+	pub fn destroy_owner(&mut self) -> Result<(), String> {
+		self.context.lifecycle.validate_handle(self.context.owner)?;
+		if self.impact_effect.is_some() {
+			return Ok(());
+		}
+		self.actions.push(SimulationAction::Despawn {
+			handle: self.context.owner.clone(),
 		})
 	}
 }
@@ -179,7 +252,7 @@ impl Instance {
 		entity: &EntityData,
 		attachment: &ScriptComponent,
 		descriptor: &ScriptDescriptor,
-		registration: ObjectScriptRegistration,
+		instantiate: &ScriptConstructor,
 	) -> Result<Self, ScriptIssue> {
 		descriptor.validate_attachment(
 			entity,
@@ -211,7 +284,7 @@ impl Instance {
 			owner: lifecycle
 				.handle(&entity.key)
 				.ok_or_else(|| invalid("Script owner runtime handle is missing"))?,
-			instance: (registration.instantiate)(&attachment.settings)
+			instance: instantiate(&attachment.settings)
 				.map_err(ScriptIssue::InvalidConfiguration)?,
 			started: false,
 			references: Arc::new(references),
@@ -230,7 +303,7 @@ impl Instance {
 
 #[derive(Clone, Default)]
 pub(super) struct ObjectScripts {
-	registrations: Arc<BTreeMap<String, (ScriptDescriptor, ObjectScriptRegistration)>>,
+	registrations: Arc<BTreeMap<String, ProjectScriptRegistration>>,
 	active: BTreeMap<(EntityKey, ComponentId), Instance>,
 	subscribers: Arc<BTreeMap<EntityKey, BTreeSet<(EntityKey, ComponentId)>>>,
 	pending: BTreeMap<(EntityKey, ComponentId), Vec<ObjectScriptTrigger>>,
@@ -243,12 +316,19 @@ impl ObjectScripts {
 		world: &RuntimeWorld,
 		lifecycle: &RuntimeLifecycle,
 		registrations: &[ObjectScriptRegistration],
+		project: &[ProjectScriptRegistration],
 	) -> Result<Self, String> {
 		let mut scripts = Self::default();
-		for registration in registrations {
-			let descriptor = (registration.descriptor)();
+		for registration in registrations
+			.iter()
+			.map(|registration| ProjectScriptRegistration {
+				descriptor: (registration.descriptor)(),
+				instantiate: Arc::new(registration.instantiate),
+			})
+			.chain(project.iter().cloned())
+		{
 			if Arc::make_mut(&mut scripts.registrations)
-				.insert(descriptor.id.clone(), (descriptor, *registration))
+				.insert(registration.descriptor.id.clone(), registration)
 				.is_some()
 			{
 				return Err("Duplicate object script registration".into());
@@ -275,7 +355,7 @@ impl ObjectScripts {
 				}
 				let address = (entity.key.clone(), attachment.id.clone());
 				let prepare = || {
-					let (descriptor, registration) = self
+					let registration = self
 						.registrations
 						.get(&attachment.settings.script_id)
 						.ok_or_else(|| {
@@ -286,8 +366,8 @@ impl ObjectScripts {
 						lifecycle,
 						entity,
 						attachment,
-						descriptor,
-						*registration,
+						&registration.descriptor,
+						registration.instantiate.as_ref(),
 					)
 				};
 				let instance =
@@ -408,6 +488,7 @@ impl ObjectScripts {
 				context: &context,
 				actions,
 				write_owner_transform: state.write_owner_transform,
+				impact_effect: None,
 			};
 			let error = |hook: &str, cause| {
 				format!(
@@ -458,6 +539,77 @@ impl ObjectScripts {
 			}
 		}
 		self.held_local_actions = held;
+		Ok(())
+	}
+
+	pub(super) fn plan_hit(
+		&mut self,
+		world: &RuntimeWorld,
+		lifecycle: &RuntimeLifecycle,
+		step: ProjectileHookStep,
+		hit: &ProjectileHit,
+		actions: &mut ActionWriter<'_>,
+	) -> Result<Option<ParticleBurstSettings>, String> {
+		let mut effect = None;
+		for ((key, attachment), state) in &mut self.active {
+			if state.owner != hit.projectile || !state.started {
+				continue;
+			}
+			let context = ObjectScriptContext {
+				world,
+				lifecycle,
+				owner: &state.owner,
+				references: &state.references,
+				tick: step.tick,
+				step_seconds: step.step_seconds,
+			};
+			let mut commands = ObjectScriptCommands {
+				context: &context,
+				actions,
+				write_owner_transform: state.write_owner_transform,
+				impact_effect: Some(&mut effect),
+			};
+			state
+				.instance
+				.on_hit(&context, hit, &mut commands)
+				.map_err(|cause| {
+					format!(
+						"Object {} Script {} on_hit: {cause}",
+						key.as_str(),
+						attachment.as_str()
+					)
+				})?;
+		}
+		Ok(effect)
+	}
+
+	pub(super) fn plan_destroy(
+		&mut self,
+		world: &RuntimeWorld,
+		lifecycle: &RuntimeLifecycle,
+		step: ProjectileHookStep,
+		keys: &HashSet<EntityKey>,
+	) -> Result<(), String> {
+		for ((key, attachment), state) in &mut self.active {
+			if !keys.contains(key) || !state.started {
+				continue;
+			}
+			let context = ObjectScriptContext {
+				world,
+				lifecycle,
+				owner: &state.owner,
+				references: &state.references,
+				tick: step.tick,
+				step_seconds: step.step_seconds,
+			};
+			state.instance.on_destroy(&context).map_err(|cause| {
+				format!(
+					"Object {} Script {} on_destroy: {cause}",
+					key.as_str(),
+					attachment.as_str()
+				)
+			})?;
+		}
 		Ok(())
 	}
 

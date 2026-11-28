@@ -3,10 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use super::ComponentId;
+use crate::asset_catalog::AssetId;
 
 pub const MAX_ENABLED_PARTICLE_EMITTERS: usize = 64;
+pub(crate) const MAX_PARTICLES_PER_EMITTER: usize = 192;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParticleEmitterSettings {
 	pub rate_per_second: f32,
@@ -19,6 +21,10 @@ pub struct ParticleEmitterSettings {
 	pub size: f32,
 	pub color: [f32; 3],
 	pub seed: u32,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub sprite_asset_id: Option<AssetId>,
+	#[serde(default, skip_serializing_if = "is_false")]
+	pub linger_on_despawn: bool,
 }
 
 impl Default for ParticleEmitterSettings {
@@ -32,6 +38,8 @@ impl Default for ParticleEmitterSettings {
 			size: 0.15,
 			color: [1.0, 0.35, 0.08],
 			seed: 1,
+			sprite_asset_id: None,
+			linger_on_despawn: false,
 		}
 	}
 }
@@ -57,10 +65,43 @@ impl ParticleEmitterSettings {
 	}
 }
 
+/// One-shot emission with the same particle motion and visual settings as a trail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParticleBurstSettings {
+	pub count: u16,
+	/// Burst emission ignores the continuous rate and trail retirement option.
+	pub settings: ParticleEmitterSettings,
+}
+
+impl Default for ParticleBurstSettings {
+	fn default() -> Self {
+		Self {
+			count: 12,
+			settings: ParticleEmitterSettings::default(),
+		}
+	}
+}
+
+impl ParticleBurstSettings {
+	pub fn validate(&self) -> Result<(), String> {
+		if !(1..=MAX_PARTICLES_PER_EMITTER).contains(&usize::from(self.count)) {
+			return Err(format!(
+				"Particle burst count must be from 1 to {MAX_PARTICLES_PER_EMITTER}"
+			));
+		}
+		self.settings.validate()
+	}
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParticleEmitterComponent {
 	pub id: ComponentId,
 	pub enabled: bool,
 	pub settings: ParticleEmitterSettings,
+}
+
+fn is_false(value: &bool) -> bool {
+	!*value
 }

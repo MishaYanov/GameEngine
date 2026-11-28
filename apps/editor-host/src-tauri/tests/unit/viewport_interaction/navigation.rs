@@ -26,6 +26,10 @@ fn navigation_and_view_preferences_never_change_authored_camera_revision_or_hist
 		ViewportActionDto::SetPivot {
 			pivot: ViewportPivot::Center,
 		},
+		ViewportActionDto::SetShading {
+			shading: ViewportShading::Unlit,
+		},
+		ViewportActionDto::SetShowVertices { visible: true },
 	] {
 		controller.action(action, &mut workspace, EXTENT).unwrap();
 	}
@@ -60,6 +64,9 @@ fn navigation_and_view_preferences_never_change_authored_camera_revision_or_hist
 	let mut wheel = event("wheel_lines", [200.0, 200.0], None);
 	wheel.delta = Some([0.0, 2.0]);
 	send(&mut controller, &mut workspace, wheel);
+	let state = controller.state();
+	assert_eq!(state.settings.shading, ViewportShading::Unlit);
+	assert!(state.settings.show_vertices);
 	assert_ne!(controller.camera.position(), original_position);
 	assert_eq!(
 		serde_json::to_value(workspace.backend.snapshot().unwrap()).unwrap(),
@@ -136,6 +143,159 @@ fn scene_keyboard_requires_focus_and_preserves_transform_shortcuts() {
 	send(&mut controller, &mut workspace, key("KeyQ"));
 	assert!(!controller.state().focused);
 	assert_eq!(controller.settings.tool, ViewportTool::Scale);
+}
+
+#[test]
+fn scene_right_click_returns_a_scoped_work_plane_point_without_moving_the_camera() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	controller.camera.orient(ViewportOrientation::Top);
+	controller.settings.plane = ViewportPlane::Xz;
+	controller.settings.snap = true;
+	controller.settings.move_snap = 0.5;
+	let position = pixel(&controller, Vec3::new(0.6, 0.0, 0.6));
+	let initial = controller.camera.position();
+	let yaw = controller.camera.yaw;
+	let snapshot = workspace.backend.snapshot().unwrap();
+
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", position, Some("right")),
+	);
+	controller.look_from_fly_motion([1.0, -1.0]);
+	assert!(controller.is_flying());
+	assert!(controller.take_context_click().is_none());
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", position, Some("right")),
+	);
+
+	let result = controller.take_context_click().expect("short right click");
+	assert_eq!(result.workspace_generation, workspace.generation);
+	assert_eq!(result.revision, snapshot.revision);
+	assert_eq!(result.scene_id, snapshot.active_scene_id);
+	assert_eq!(
+		result.normalized,
+		[
+			position[0] / f64::from(EXTENT[0]),
+			position[1] / f64::from(EXTENT[1])
+		]
+	);
+	assert_eq!(result.position, Some([0.5, 0.0, 0.5]));
+	assert_eq!(controller.camera.position(), initial);
+	assert_eq!(controller.camera.yaw, yaw);
+	assert!(!controller.captured());
+	assert!(controller.take_context_click().is_none());
+	assert_eq!(workspace.backend.session().revision(), snapshot.revision);
+}
+
+#[test]
+fn scene_right_drag_and_fly_keys_continue_to_control_the_camera() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	focus_keyboard(&mut controller, &mut workspace);
+	let point = [320.0, 260.0];
+	let initial = controller.camera.position();
+	let yaw = controller.camera.yaw;
+
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", point, Some("right")),
+	);
+	controller.look_from_fly_motion([11.0, 4.0]);
+	assert_ne!(controller.camera.yaw, yaw);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", point, Some("right")),
+	);
+	assert!(controller.take_context_click().is_none());
+
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", point, Some("right")),
+	);
+	send(&mut controller, &mut workspace, key("KeyW"));
+	assert!(controller.needs_camera_tick());
+	controller.camera_tick(0.05);
+	assert!(!controller.camera.position().abs_diff_eq(initial, 1.0e-5));
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", point, Some("right")),
+	);
+	assert!(!controller.captured());
+	assert!(controller.take_context_click().is_none());
+}
+
+#[test]
+fn scene_context_menu_discards_long_outside_modified_stale_and_play_input() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	let point = [320.0, 260.0];
+	let down = event("pointer_down", point, Some("right"));
+	let up = event("pointer_up", point, Some("right"));
+
+	send(&mut controller, &mut workspace, down.clone());
+	controller
+		.navigation
+		.as_mut()
+		.unwrap()
+		.context_press
+		.as_mut()
+		.unwrap()
+		.started -= std::time::Duration::from_secs(1);
+	send(&mut controller, &mut workspace, up.clone());
+	assert!(controller.take_context_click().is_none());
+
+	send(&mut controller, &mut workspace, down.clone());
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_move", [329.0, 260.0], None),
+	);
+	send(&mut controller, &mut workspace, up.clone());
+	assert!(controller.take_context_click().is_none());
+
+	let mut modified = down.clone();
+	modified.modifiers.shift = true;
+	send(&mut controller, &mut workspace, modified);
+	send(&mut controller, &mut workspace, up.clone());
+	assert!(controller.take_context_click().is_none());
+
+	send(&mut controller, &mut workspace, down.clone());
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", [-1.0, 260.0], Some("right")),
+	);
+	assert!(controller.take_context_click().is_none());
+
+	send(&mut controller, &mut workspace, down.clone());
+	select(&mut workspace, &["entity-0"]);
+	send(&mut controller, &mut workspace, up.clone());
+	assert!(controller.take_context_click().is_none());
+
+	send(&mut controller, &mut workspace, down.clone());
+	send(
+		&mut controller,
+		&mut workspace,
+		event("blurred", point, None),
+	);
+	send(&mut controller, &mut workspace, up.clone());
+	assert!(controller.take_context_click().is_none());
+
+	command(&mut workspace, Command::StartPlay);
+	send(&mut controller, &mut workspace, down);
+	send(&mut controller, &mut workspace, up);
+	assert!(controller.take_context_click().is_none());
 }
 
 #[test]

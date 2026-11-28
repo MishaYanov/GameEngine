@@ -720,6 +720,155 @@ fn workspace_revision_and_command_validation_precede_filesystem_preflight() {
 }
 
 #[test]
+fn create_scene_writes_a_saved_blank_document_and_preserves_the_active_scene() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let before = workspace.backend.snapshot().unwrap();
+	let original = fs::read(&workspace.scene_path).unwrap();
+	let path = "scenes/blank.json";
+	let created = workspace
+		.create_scene(path, before.revision, workspace.generation)
+		.unwrap();
+	let added = created
+		.scenes
+		.iter()
+		.find(|state| state.asset_path == path)
+		.unwrap();
+	assert_eq!(created.active_scene_id, before.active_scene_id);
+	assert_eq!(created.scene_revision, before.scene_revision);
+	assert_eq!(created.document, before.document);
+	assert_eq!(original, fs::read(&workspace.scene_path).unwrap());
+	assert!(added.loaded && !added.dirty);
+	assert!(created.project_dirty);
+	assert!(!workspace.project_path.exists());
+	let blank = runtime::scene_io::load_data(&fixture.0.join(path))
+		.unwrap()
+		.data;
+	assert!(blank.entities.is_empty());
+	assert!(blank.bindings.is_empty());
+	assert!(blank.lights.is_empty());
+	assert_eq!(blank.camera, runtime::scene_data::CameraData::default());
+	assert_eq!(
+		&blank,
+		workspace
+			.backend
+			.session()
+			.scene_document(&added.id)
+			.unwrap()
+			.as_ref()
+	);
+	workspace.save_project(created.revision).unwrap();
+	let mut reopened = fixture.open();
+	run(
+		&mut reopened,
+		Command::SwitchScene {
+			scene_id: added.id.clone(),
+		},
+	);
+	assert_eq!(
+		reopened.backend.session().authored_document().as_ref(),
+		&blank
+	);
+}
+
+#[test]
+fn create_scene_rejects_existing_paths_and_invalid_edit_context_without_writing() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	run(
+		&mut workspace,
+		Command::Select {
+			keys: vec!["a".into()],
+		},
+	);
+	let before = workspace.backend.snapshot().unwrap();
+	let existing = fixture.0.join("scenes/existing.json");
+	fs::write(&existing, "keep this").unwrap();
+
+	for path in [
+		"../escape.json",
+		"missing/new.json",
+		"scenes/main.json",
+		"scenes/existing.json",
+		"asset-catalog.json",
+		"ASSET-CATALOG.JSON",
+	] {
+		assert!(
+			workspace
+				.create_scene(path, before.revision, workspace.generation)
+				.is_err(),
+			"{path}"
+		);
+	}
+	assert!(workspace
+		.create_scene(
+			"scenes/stale.json",
+			before.revision - 1,
+			workspace.generation
+		)
+		.is_err());
+	assert_eq!(workspace.backend.session().revision(), before.revision);
+	assert_eq!(fs::read_to_string(existing).unwrap(), "keep this");
+	assert!(!fixture.0.parent().unwrap().join("escape.json").exists());
+	assert!(!fixture.0.join("missing").exists());
+	assert!(!fixture.0.join("scenes/stale.json").exists());
+
+	let path = "scenes/blocked.json";
+	run(
+		&mut workspace,
+		Command::BeginTransaction {
+			label: "Scene edit".into(),
+		},
+	);
+	assert!(workspace
+		.create_scene(
+			path,
+			workspace.backend.session().revision(),
+			workspace.generation
+		)
+		.is_err());
+	run(&mut workspace, Command::CancelTransaction);
+	run(&mut workspace, Command::StartPlay);
+	assert!(workspace
+		.create_scene(
+			path,
+			workspace.backend.session().revision(),
+			workspace.generation
+		)
+		.is_err());
+	assert!(!fixture.0.join(path).exists());
+}
+
+#[test]
+fn create_scene_retires_its_new_file_if_the_catalog_rejects_it() {
+	let fixture = Fixture::new();
+	let mut workspace = fixture.open();
+	let document = workspace.backend.session().authored_document();
+	for index in 1..runtime::scene_catalog::MAX_PROJECT_SCENES {
+		run(
+			&mut workspace,
+			Command::AddScene {
+				id: SceneId::generate(),
+				asset_path: format!("scenes/retained-{index}.json"),
+				document: document.as_ref().clone(),
+			},
+		);
+	}
+	let before = workspace.backend.snapshot().unwrap();
+	let path = "scenes/rejected.json";
+	let error = workspace
+		.create_scene(path, before.revision, workspace.generation)
+		.unwrap_err();
+	assert!(error.contains("scene limit"), "{error}");
+	assert_eq!(workspace.backend.session().revision(), before.revision);
+	assert_eq!(
+		workspace.backend.session().active_scene_id(),
+		&before.active_scene_id
+	);
+	assert!(!fixture.0.join(path).exists());
+}
+
+#[test]
 fn registering_existing_scene_marks_it_saved_and_catalog_removal_keeps_its_file() {
 	let fixture = Fixture::new();
 	let mut workspace = fixture.open();

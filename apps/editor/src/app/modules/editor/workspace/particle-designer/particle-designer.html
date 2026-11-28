@@ -7,13 +7,17 @@
         <div class="designer">
             <section aria-labelledby="particle-preview-heading" class="preview">
                 <h3 id="particle-preview-heading">Preview</h3>
-                <editor-particle-preview [restart]="restart()" [running]="running()" [settings]="session.candidate()"/>
+                <editor-particle-preview [restart]="restart()" [running]="running()" [settings]="session.candidate()"
+                                         [sprite]="session.spritePreview()"/>
                 <div class="actions">
                     <button (click)="togglePreview()" type="button">{{ running() ? 'Pause' : 'Play' }}</button>
                     <button (click)="restartPreview()" type="button">Restart</button>
                 </div>
                 @if (!session.candidate()) {
                     <p role="status">Finish the settings to resume preview.</p>
+                }
+                @if (session.spriteError(); as message) {
+                    <p role="status">{{ message }}</p>
                 }
             </section>
             <fieldset [disabled]="session.pending()">
@@ -27,6 +31,11 @@
                         }
                     </select>
                 </label>
+                <editor-particle-sprite-picker [assetId]="session.draft().sprite_asset_id"
+                                               [disabled]="session.pending()"
+                                               (picked)="fields.sprite_asset_id().value.set($event)"/>
+                <label class="trail-option"><input [formField]="fields.linger_on_despawn" type="checkbox"> Keep trail
+                    after despawn</label>
                 @for (field of numberFields; track field.key) {
                     @let error = fieldError(field);
                     <label>

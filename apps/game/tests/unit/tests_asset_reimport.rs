@@ -81,6 +81,63 @@ fn check_runtime_visibility(assets: &mut AssetManager, renderer: &WindowRenderer
 	}
 }
 
+fn check_scene_catalog_snapshot(assets: &mut AssetManager, renderer: &WindowRenderer) {
+	let catalog_path = assets.root().join(runtime::asset_catalog::CATALOG_FILE);
+	let original_catalog = fs::read(&catalog_path).unwrap();
+	let mut data =
+		runtime::SceneData::from_json(include_str!("../../assets/scenes/robots.json")).unwrap();
+	data.bindings.clear();
+	data.default_game_camera = None;
+	data.camera.follow = None;
+	data.entities = vec![
+		runtime::scene_data::EntityData::new(
+			runtime::EntityKey::new("visible").unwrap(),
+			"Visible model",
+			"moved.glb",
+		),
+		runtime::scene_data::EntityData::new(
+			runtime::EntityKey::new("legacy-hidden").unwrap(),
+			"Hidden model using legacy path",
+			"cube.glb",
+		)
+			.with_renderable(false),
+	];
+
+	let mut catalog_changed = false;
+	let assembled = scene_io::instantiate_with_progress(&data, assets, renderer, |completed, _| {
+		if completed == 1 {
+			fs::write(&catalog_path, b"{}").unwrap();
+			catalog_changed = true;
+		}
+	});
+	let next_assembly = scene_io::instantiate(&data, assets, renderer);
+	let reference = runtime::asset_registry::AssetRef::new("moved.glb", Some(0)).unwrap();
+	let direct_load = assets.load_asset(renderer, &reference);
+	data.entities.clear();
+	let model_free = scene_io::instantiate(&data, assets, renderer);
+	fs::write(&catalog_path, original_catalog).unwrap();
+
+	let (scene, _) = assembled.expect("scene assembly should keep its first model catalog");
+	assert!(catalog_changed);
+	assert!(!scene.try_render_objects().unwrap().is_empty());
+	let hidden = scene
+		.entity_by_key(&runtime::EntityKey::new("legacy-hidden").unwrap())
+		.unwrap();
+	assert!(!scene.is_renderable(hidden));
+
+	let catalog_error = "Asset catalog and records must be objects";
+	assert!(next_assembly.err().unwrap().contains(catalog_error));
+	assert!(
+		direct_load
+			.err()
+			.unwrap()
+			.to_string()
+			.contains(catalog_error)
+	);
+	let (scene, _) = model_free.expect("a scene without models should not read the catalog");
+	assert!(scene.try_render_objects().unwrap().is_empty());
+}
+
 #[test]
 #[ignore = "requires native Vulkan and a window server"]
 fn native_asset_reimport_promotes_candidates_only_after_successful_publication() {
@@ -214,6 +271,7 @@ fn native_asset_reimport_promotes_candidates_only_after_successful_publication()
 			assert_eq!(assets.loaded_model_count(), 1);
 			assert_eq!(assets.gpu_logical_bytes(), original_bytes);
 			check_runtime_visibility(&mut assets, &renderer);
+			check_scene_catalog_snapshot(&mut assets, &renderer);
 			renderer.wait_idle().unwrap();
 			drop(moved_model);
 			drop(assets);

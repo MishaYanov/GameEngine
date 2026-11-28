@@ -14,7 +14,11 @@ pub(crate) mod paths;
 mod references;
 pub use paths::resolve_confined_scene_path;
 
-pub use document::{load_data, replace_bytes, save_data, save_new_bytes, save_project_data};
+pub(crate) use document::load_opened_data;
+pub use document::{
+	load_confined_data, load_confined_data_from_canonical_root, load_data,
+	read_confined_scene_source, replace_bytes, save_data, save_new_bytes, save_project_data,
+};
 pub use native::{
 	instantiate, instantiate_cancellable, instantiate_with_progress, instantiate_with_references,
 	instantiate_with_warming,

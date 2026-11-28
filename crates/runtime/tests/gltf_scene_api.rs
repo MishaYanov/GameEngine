@@ -8,6 +8,8 @@ mod cache;
 mod decoding;
 #[path = "gltf_scene_api/metadata_jobs.rs"]
 mod metadata_jobs;
+#[path = "gltf_scene_api/normal_maps.rs"]
+mod normal_maps;
 mod support;
 
 fn model() -> Value {

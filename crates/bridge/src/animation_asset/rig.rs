@@ -56,6 +56,15 @@ pub(super) fn decode_rig<'doc>(
 		mapping.insert(node.index(), dense);
 		nodes.push(RigNode {
 			source_node: node.index() as u32,
+			name: node
+				.name()
+				.map(|name| {
+					name.chars()
+						.filter(|ch| !ch.is_control())
+						.take(256)
+						.collect::<String>()
+				})
+				.filter(|name| !name.is_empty()),
 			parent,
 			rest,
 		});

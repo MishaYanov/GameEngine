@@ -42,6 +42,12 @@ pub enum NativeBehaviorSpec {
 		#[serde(default)]
 		bindings: BTreeMap<String, EntityKey>,
 	},
+	Projectile {
+		settings: ProjectileSettings,
+	},
+	ProjectileLauncher {
+		settings: ProjectileLauncherSettings,
+	},
 }
 impl NativeBehaviorSpec {
 	pub fn entity_references(&self) -> Vec<&EntityKey> {
@@ -67,6 +73,7 @@ impl NativeBehaviorSpec {
 				.chain(visual.iter())
 				.collect(),
 			Self::TimedSpawner { bindings, .. } => bindings.values().collect(),
+			Self::Projectile { .. } | Self::ProjectileLauncher { .. } => Vec::new(),
 		}
 	}
 	pub fn validate(&self) -> Result<(), String> {
@@ -79,6 +86,8 @@ impl NativeBehaviorSpec {
 		}
 		match self {
 			Self::StateMachine { definition } => definition.validate(),
+			Self::Projectile { settings } => settings.validate(),
+			Self::ProjectileLauncher { settings } => settings.validate(),
 			Self::KeyDoor {
 				actor,
 				key_trigger,
@@ -161,6 +170,7 @@ impl NativeBehaviorSpec {
 					one(key, remap);
 				}
 			}
+			Self::Projectile { .. } | Self::ProjectileLauncher { .. } => {}
 		}
 	}
 }

@@ -13,6 +13,96 @@ use std::collections::HashMap;
 use support::*;
 
 #[test]
+fn optional_scene_fog_round_trips_and_rejects_invalid_density() {
+	let mut data = scene(vec![entity("landscape", [0.0; 3])]);
+	let legacy = data.to_json().unwrap();
+	assert!(
+		SceneData::from_json(&legacy)
+			.unwrap()
+			.environment
+			.fog
+			.is_none()
+	);
+
+	let fog = engine_core::components::SceneFog {
+		color_linear: [0.09, 0.14, 0.22],
+		density: 0.025,
+		base_height: 8.0,
+		height_falloff: 0.07,
+		start_distance: 4.0,
+	};
+	data.environment.fog = Some(fog);
+	let saved = data.to_json().unwrap();
+	assert_eq!(
+		SceneData::from_json(&saved).unwrap().environment.fog,
+		Some(fog)
+	);
+
+	let mut invalid: serde_json::Value = serde_json::from_str(&saved).unwrap();
+	invalid["environment"]["fog"]["density"] = serde_json::json!(-0.02);
+	assert!(SceneData::from_json(&invalid.to_string()).is_err());
+	data.environment.fog.as_mut().unwrap().height_falloff = f32::NAN;
+	assert!(data.to_json().is_err());
+}
+
+#[test]
+fn fog_command_requires_explicit_clear_preserves_lighting_and_supports_undo() {
+	let scene = scene(vec![]);
+	let project = ProjectData::for_scene("Environment", "scenes/main.json", &scene).unwrap();
+	let mut engine = Engine::new(scene, project).unwrap();
+	let fog = engine_core::components::SceneFog {
+		color_linear: [0.1, 0.17, 0.22],
+		density: 0.038,
+		base_height: 15.0,
+		height_falloff: 0.09,
+		start_distance: 4.0,
+	};
+	assert!(serde_json::from_str::<Command>(r#"{"type":"set_scene_fog"}"#).is_err());
+	let clear = serde_json::from_str::<Command>(r#"{"type":"set_scene_fog","fog":null}"#).unwrap();
+
+	run(&mut engine, Command::SetSceneFog { fog: Some(fog) });
+	run(
+		&mut engine,
+		Command::SetSceneEnvironment {
+			ambient_linear: [0.10, 0.15, 0.22],
+			sky_exposure_ev: -0.8,
+		},
+	);
+	let adjusted = engine.session().authored_document();
+	assert_eq!(adjusted.environment.fog, Some(fog));
+	run(&mut engine, clear);
+	assert!(
+		engine
+			.session()
+			.authored_document()
+			.environment
+			.fog
+			.is_none()
+	);
+	run(&mut engine, Command::Undo);
+	let restored = engine.session().authored_document();
+	assert_eq!(restored.environment.fog, Some(fog));
+	assert_eq!(restored.environment.ambient_linear, [0.10, 0.15, 0.22]);
+	assert_eq!(restored.environment.sky_exposure_ev, -0.8);
+
+	let revision = engine.session().revision();
+	assert!(
+		engine
+			.execute(EditorCommandRequest {
+				expected_revision: revision,
+				command: Command::SetSceneFog {
+					fog: Some(engine_core::components::SceneFog {
+						density: -0.5,
+						..fog
+					}),
+				},
+			})
+			.is_err()
+	);
+	assert_eq!(engine.session().revision(), revision);
+}
+
+#[test]
 fn script_component_round_trips_undoes_and_keeps_unknown_ids_for_repair() {
 	let original = scene(vec![entity("door", [0., 0., 0.])]);
 	let legacy = original.to_json().unwrap();

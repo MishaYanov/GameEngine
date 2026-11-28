@@ -60,6 +60,12 @@ impl TriggerTracker {
 		}
 	}
 
+	pub(crate) fn remove_pairs_for(&mut self, keys: &HashSet<EntityKey>) {
+		if !keys.is_empty() {
+			self.pairs
+				.retain(|(sensor, actor)| !keys.contains(sensor) && !keys.contains(actor));
+		}
+	}
 	pub(crate) fn invalidate(&mut self) {
 		self.sample_needed |= self.has_sensors || !self.pairs.is_empty();
 	}

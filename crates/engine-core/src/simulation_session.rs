@@ -26,10 +26,16 @@ mod input;
 mod object_scripts;
 mod player_control;
 mod possession;
+mod scene_flow;
+mod sequence;
+mod world_regions;
+pub(crate) use world_regions::RegionMovementGuard;
+pub use world_regions::{PreparedRegionChange, WorldRegionState};
 pub use crate::world::RuntimeReparentMode;
 pub use control_graph::ControlGraphResolver;
 pub use player_control::InputActionsResolver;
 pub use possession::LocalInputScope;
+pub use crate::projectile::{ProjectileHit, ProjectileHookStep};
 
 pub use gameplay::{
 	ActionWriter, ConfiguredBehaviorFactory, GameModule, GameModuleFactory, GameModuleResolver,
@@ -39,7 +45,7 @@ pub use gameplay::{
 pub use input::{InputFrame, MovementTarget};
 pub use object_scripts::{
 	ObjectScript, ObjectScriptAction, ObjectScriptCommands, ObjectScriptContext,
-	ObjectScriptRegistration, ObjectScriptTrigger,
+	ObjectScriptRegistration, ObjectScriptTrigger, ProjectScriptRegistration,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +76,10 @@ pub struct TickOutcome {
 	pub progress_revision: u64,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub requested_scene: Option<SceneId>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub requested_route: Option<crate::project::SceneRouteId>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub sequence_events: Vec<crate::sequence::SequenceEvent>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub trigger_events: Vec<TriggerEvent>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -91,6 +101,7 @@ pub struct SimulationSession {
 	particles: ParticleBank,
 	project: Arc<ProjectData>,
 	world: RuntimeWorld,
+	regions: world_regions::WorldRegions,
 	collisions: CollisionWorld,
 	clock: FixedStepper,
 	module: Box<dyn GameModule>,
@@ -104,6 +115,7 @@ pub struct SimulationSession {
 	controlled_targets: Vec<EntityKey>,
 	controlled_target_set: HashSet<EntityKey>,
 	triggers: TriggerTracker,
+	sequences: sequence::SequenceDirector,
 	camera: GameCameraController,
 	camera_objects: camera_objects::CameraObjects,
 	input_action_map: Option<crate::input::InputActionMap>,
@@ -174,6 +186,7 @@ impl SimulationSession {
 		if project.physics_layers.is_some() {
 			crate::project::validate_required_physics_contacts(&runtime_document, &matrix)?;
 		}
+		project.sequences.validate_scene(&scene_id, &runtime_document)?;
 		let world = RuntimeWorld::new(runtime_document)?;
 		behaviors.retain(|behavior| {
 			world
@@ -224,8 +237,9 @@ impl SimulationSession {
 		let collisions = CollisionWorld::with_matrix(&world, matrix)?;
 		let clock = FixedStepper::new(project.fixed_hz, project.max_catchup_steps)?;
 		let triggers = TriggerTracker::new(&world);
-		let object_scripts =
-			object_scripts::ObjectScripts::prepare(&world, &lifecycle, factory.object_scripts())?;
+		let object_scripts = object_scripts::ObjectScripts::prepare(
+			&world, &lifecycle, factory.object_scripts(), &factory.project_scripts()?,
+		)?;
 		let mut camera_exclusions = None;
 		let mut preparation_budget = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
 		let camera = GameCameraController::new_with_lifecycle(
@@ -255,6 +269,7 @@ impl SimulationSession {
 			particles,
 			project,
 			world,
+			regions: Default::default(),
 			collisions,
 			clock,
 			module,
@@ -272,6 +287,7 @@ impl SimulationSession {
 			controlled_targets,
 			controlled_target_set: seen,
 			triggers,
+			sequences: sequence::SequenceDirector::default(),
 			camera,
 			camera_objects,
 			input_action_map: None,
@@ -358,6 +374,9 @@ impl SimulationSession {
 					"transition":entry.transition,"blend_age":entry.blend_age,"blend_ticks":entry.blend_ticks})
 			}).collect());
 		}
+		if !self.project.sequences.is_empty() {
+			state["sequences"] = self.sequences.replay_state();
+		}
 		state
 	}
 	pub fn needs_tick(&self) -> bool {
@@ -369,6 +388,7 @@ impl SimulationSession {
 				|| self.object_scripts.needs_tick(&self.inputs)
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
+			|| self.sequences.needs_tick()
 				|| !self.inputs.action_presses.is_empty()
 				|| self
 					.conditional_input
@@ -397,6 +417,7 @@ impl SimulationSession {
 				|| self.object_scripts.needs_tick(&self.inputs)
 				|| crate::native_behavior_runtime::needs_tick(&self.world)
 				|| self.triggers.sample_needed
+			|| self.sequences.needs_tick()
 				|| !self.inputs.action_presses.is_empty()
 				|| self
 					.conditional_input
@@ -709,6 +730,7 @@ impl SimulationSession {
 		let mut characters = self.characters.clone();
 		let mut animations = self.animations.clone();
 		let mut triggers = self.triggers.clone();
+		let mut sequences = self.sequences.clone();
 		let mut object_scripts = self.object_scripts.clone();
 		// One step can update committed particles after validation. A catch-up
 		// batch still stages each intermediate world pose for atomic rollback.
@@ -725,6 +747,7 @@ impl SimulationSession {
 		let mut camera_exclusions = self.camera_exclusions.clone();
 		let mut trigger_events = Vec::new();
 		let mut audio_onsets = Vec::new();
+		let mut sequence_events = Vec::new();
 		let mut accepted_action_presses = Vec::new();
 		let mut control_graph_step = None;
 		let mut trigger_event_bytes = 0usize;
@@ -734,10 +757,12 @@ impl SimulationSession {
 		let mut steps = 0;
 		let mut pending_steps = 0;
 		let mut requested_scene = None;
+		let mut requested_route = None;
 		let initial_matrix_updates = self.world.matrix_updates();
 		let mut collision_candidates_remaining = Self::MAX_COLLISION_CANDIDATES_PER_TICK;
 		let mut progress_transaction = progress.transaction();
 		let mut view_attachments = Vec::new();
+		let region_movement = RegionMovementGuard::new(&self.project, &self.scene_id, &self.regions);
 		let result = (|| -> Result<(), String> {
 			for _ in 0..report.steps {
 				let mut requested_possession = host_possession.take();
@@ -755,6 +780,27 @@ impl SimulationSession {
 						&mut trigger_event_bytes,
 					)?;
 				}
+				let tick = self.tick + u64::from(steps) + 1;
+				let sequence_was_active = sequences.needs_tick();
+				let sequence_event_start = sequence_events.len();
+				sequences.step(
+					sequence::SequenceStep {
+						library: &self.project.sequences,
+						scene: &self.scene_id,
+						world: &self.world,
+						lifecycle: &lifecycle,
+						triggers: &trigger_events[event_start..],
+						tick,
+						fixed_hz: self.project.fixed_hz,
+						skip_pressed: self.inputs.action_pressed(sequence::SKIP_ACTION),
+					},
+					&animations,
+					&mut sequence_events,
+					&mut audio_onsets,
+				);
+				let sequence_gates_input = sequence_was_active
+					|| sequences.needs_tick()
+					|| sequence_events.len() != sequence_event_start;
 				self.actions.clear();
 				let mut gameplay_emissions = crate::state_machine_runtime::plan(
 					&self.world,
@@ -785,15 +831,19 @@ impl SimulationSession {
 					camera_delta.yaw_delta = 0.0;
 					camera_delta.pitch_delta = 0.0;
 				}
-				let controls =
-					if self.inputs.possession_managed && self.inputs.local_player().is_none() {
-						None
-					} else {
-						self.evaluate_control_graph(camera_delta)
-					};
-				let routed = controls
-					.as_ref()
-					.map(|(graph, _)| self.inputs.with_control_output(graph.intent));
+				let controls = if sequence_gates_input
+					|| self.inputs.possession_managed && self.inputs.local_player().is_none()
+				{
+					None
+				} else {
+					self.evaluate_control_graph(camera_delta)
+				};
+				let routed = if sequence_gates_input {
+					camera_delta = CameraIntent::default();
+					Some(sequence::neutral_gameplay_input(&self.inputs))
+				} else {
+					controls.as_ref().map(|(graph, _)| self.inputs.with_control_output(graph.intent))
+				};
 				let step_input = routed.as_ref().unwrap_or(&self.inputs);
 				if let Some((route, _)) = &controls {
 					camera_delta.yaw_delta = f64::from(route.intent.look.delta[0]);
@@ -812,8 +862,29 @@ impl SimulationSession {
 						actions: &mut self.actions,
 					},
 				)?;
+				let projectile_step = ProjectileHookStep {
+					tick: self.tick + u64::from(steps) + 1,
+					step_seconds: report.step_seconds,
+				};
+				crate::projectile::plan_launches(&self.world, &mut lifecycle, step_input)?;
+				let projectile_hits = crate::projectile::plan_motion(
+					&self.world,
+					&self.collisions,
+					&lifecycle,
+					projectile_step,
+					&mut collision_candidates_remaining,
+					&mut ActionWriter { actions: &mut self.actions },
+				)?;
+				for hit in projectile_hits {
+					let mut output = ActionWriter { actions: &mut self.actions };
+					let impact = object_scripts.plan_hit(&self.world, &lifecycle, projectile_step, &hit.event, &mut output)?;
+					if let Some(settings) = impact.or_else(|| hit.impact.cloned()) {
+						output.push(SimulationAction::EmitParticleBurst { position: hit.event.position, settings })?;
+					}
+				}
 				object_scripts.stage_triggers(&lifecycle, &trigger_events[event_start..])?;
 				let look_rate = step_input.controller_look;
+				let resident_regions = self.resident_regions();
 				self.module.plan_with_progress(
 					GameplayContext {
 						world: &self.world,
@@ -823,6 +894,7 @@ impl SimulationSession {
 						step_seconds: report.step_seconds,
 						progress: progress_transaction.view(),
 						triggers: &trigger_events[event_start..],
+						resident_regions: &resident_regions,
 						trigger_overlaps: triggers.view(),
 						lifecycle: &lifecycle,
 					},
@@ -837,6 +909,8 @@ impl SimulationSession {
 					camera.camera(),
 					controls.as_ref().map(|(graph, _)| graph.intent.jump),
 				)?;
+				let route_input = (!scene_request_pending && !self.project.scene_routes.is_empty())
+					.then(|| step_input.action_presses.clone());
 				let owner = step_input.local_player().map(|target| &target.key);
 				let mut acknowledged = HashSet::new();
 				for action in &self.actions {
@@ -851,7 +925,9 @@ impl SimulationSession {
 				// rolls back its actions and clears all input on pause.
 				let mut step_actions = std::mem::take(&mut self.inputs.action_presses);
 				self.inputs.control_sample.finish_step();
-				if controls.is_some() {
+				if sequence_gates_input {
+					step_actions.clear();
+				} else if controls.is_some() {
 					step_actions = acknowledged;
 				}
 				let count = characters.keys().count();
@@ -859,7 +935,6 @@ impl SimulationSession {
 				if actions_applied > Self::MAX_ACTIONS_PER_TICK {
 					return Err("Character action budget exceeded".into());
 				}
-				let tick = self.tick + u64::from(steps) + 1;
 				let no_cosmetics = std::collections::BTreeMap::new();
 				let cosmetics = controls
 					.as_ref()
@@ -891,7 +966,7 @@ impl SimulationSession {
 						cosmetic: cosmetics,
 						fixed_hz: self.project.fixed_hz,
 						tick,
-					})?
+					}, |key| sequences.owns_actor(key))?
 				} else {
 					std::collections::BTreeMap::new()
 				};
@@ -902,6 +977,7 @@ impl SimulationSession {
 						tick,
 						seconds: report.step_seconds,
 						root_motion: &root_motion,
+						region_movement: &region_movement,
 					},
 					&mut collision_candidates_remaining,
 					&mut before,
@@ -944,6 +1020,7 @@ impl SimulationSession {
 					_ => 0,
 				});
 				let mut removed_handles = HashSet::new();
+				let mut particle_bursts = Vec::new();
 				for action in self.actions.drain(..) {
 					let forbidden = match &action {
 						SimulationAction::Move { entity, .. }
@@ -980,6 +1057,7 @@ impl SimulationSession {
 								continue;
 							}
 							let keys = lifecycle.removal(&handle)?;
+							object_scripts.plan_destroy(&self.world, &lifecycle, projectile_step, &keys)?;
 							structural_work =
 								structural_work.saturating_add(self.world.data().entities.len());
 							if structural_work > Self::MAX_STRUCTURAL_WORK_PER_TICK {
@@ -1089,6 +1167,14 @@ impl SimulationSession {
 							});
 							continue;
 						}
+						SimulationAction::EmitParticleBurst { position, settings } => {
+							particle_bursts.push((position, settings));
+							continue;
+						}
+						SimulationAction::SetAnimatorBool { entity, parameter, value } => {
+							animations.set_script_bool(&entity, parameter, value)?;
+							continue;
+						}
 						SimulationAction::SetLocalPossession { target } => {
 							let change = possession::PossessionChange { target };
 							possession.validate(&change, &self.world, &lifecycle, &characters)?;
@@ -1119,7 +1205,9 @@ impl SimulationSession {
 							clip_index,
 							looping,
 						} => {
-							animations.play_clip(&entity, clip_index, looping)?;
+							if !sequences.owns_actor(&entity) {
+								animations.play_clip(&entity, clip_index, looping)?;
+							}
 							continue;
 						}
 						SimulationAction::SelectCamera { entity } => {
@@ -1172,6 +1260,8 @@ impl SimulationSession {
 						| SimulationAction::DriveCharacter { .. }
 						| SimulationAction::Reparent { .. }
 						| SimulationAction::SetParticleEmitterEnabled { .. }
+						| SimulationAction::EmitParticleBurst { .. }
+						| SimulationAction::SetAnimatorBool { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -1205,6 +1295,8 @@ impl SimulationSession {
 						| SimulationAction::DriveCharacter { .. }
 						| SimulationAction::Reparent { .. }
 						| SimulationAction::SetParticleEmitterEnabled { .. }
+						| SimulationAction::EmitParticleBurst { .. }
+						| SimulationAction::SetAnimatorBool { .. }
 						| SimulationAction::Despawn { .. } => {
 							unreachable!("Non-world actions were handled above");
 						}
@@ -1212,12 +1304,19 @@ impl SimulationSession {
 							entity,
 							world_delta,
 						} => {
+							let body = region_movement.legacy_body(
+								&self.world,
+								&self.collisions,
+								index,
+								&mut collision_candidates_remaining,
+							)?;
 							self.collisions
-								.move_entity_with_budget(
+								.move_entity_with_limit(
 									&mut self.world,
 									&entity,
 									world_delta,
 									&mut collision_candidates_remaining,
+									|delta| body.map_or(delta, |body| region_movement.clamp(body, delta).delta),
 								)?
 								.changes
 						}
@@ -1294,6 +1393,14 @@ impl SimulationSession {
 					self.tick + u64::from(steps) + 1,
 					&mut gameplay_emissions,
 				)?;
+				sequences.abort_stale(
+					&self.world,
+					&lifecycle,
+					tick,
+					&mut sequence_events,
+					&mut audio_onsets,
+				);
+				camera_objects.sequence_camera = sequences.camera().cloned();
 				let before_camera = camera.camera().clone();
 				let camera_tick = self.tick + u64::from(steps) + 1;
 				let switched = camera_objects.advance(
@@ -1419,11 +1526,31 @@ impl SimulationSession {
 							tick,
 						},
 						&mut audio_onsets,
+						|key| sequences.owns_actor(key),
+						|key, sole, reach| self.collisions.foot_support(
+							&self.world, key, sole, reach, &mut collision_candidates_remaining,
+						),
 					)?;
 					changes.merge(WorldChange {
 						changed_entities: animated,
 						..WorldChange::default()
 					});
+				}
+				changes.merge(WorldChange {
+					changed_entities: animations.set_sequence_poses(&self.world, sequences.sampled_clips())?,
+					..WorldChange::default()
+				});
+				if sequence_gates_input && !sequences.needs_tick() {
+					if let Some(input) = &mut self.conditional_input {
+						input.retarget(possession.owner.clone());
+					}
+					self.inputs.reset_local_controls(
+						possession.owner.clone(),
+						possession.managed,
+						true,
+						self.control_graph.is_some(),
+					);
+					camera_input.clear();
 				}
 				control_graph_step = controls.and_then(|sample| {
 					let owner = &self.inputs.local_player()?.key;
@@ -1451,10 +1578,33 @@ impl SimulationSession {
 					camera_input.clear();
 					control_graph_step = None;
 				}
+				if !particle_bursts.is_empty() && staged_particles.is_none() {
+					staged_particles = Some(self.particles.clone());
+				}
 				if let Some(particles) = &mut staged_particles {
 					particles_changed |= particles.step(&self.world, self.project.fixed_hz);
+					for (position, settings) in particle_bursts {
+						particles_changed |= particles.burst(position, &settings)?;
+					}
 				}
 				steps += 1;
+				if !scene_request_pending && requested_scene.is_none()
+					&& let Some(route) = scene_flow::select_route(scene_flow::RouteStep {
+					project: &self.project,
+					scene_id: &self.scene_id,
+					tick,
+					player: possession.owner.as_ref().map(|actor| &actor.key),
+					triggers: &trigger_events[event_start..],
+					overlaps: triggers.view(),
+					presses: route_input.as_ref(),
+					sequence_events: &sequence_events,
+					module: self.module.as_ref(),
+					progress: progress_transaction.view(),
+				})
+				{
+					requested_scene = Some(route.to.clone());
+					requested_route = Some(route.id.clone());
+				}
 				if requested_scene.is_some() {
 					// A new scene starts at the next step, after the host commits it.
 					break;
@@ -1508,6 +1658,9 @@ impl SimulationSession {
 			self.control_graph_step = control_graph_step;
 		}
 		outcome.requested_scene = requested_scene;
+		outcome.requested_route = requested_route;
+		outcome.sequence_events = sequence_events;
+		self.sequences = sequences;
 		self.triggers = triggers;
 		self.inputs
 			.movement

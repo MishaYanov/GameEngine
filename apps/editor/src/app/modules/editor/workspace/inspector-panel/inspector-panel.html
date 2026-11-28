@@ -1,4 +1,10 @@
 <ng-template #content>
+    @if (editError(); as error) {
+        <div class="edit-error" role="alert">
+            <p class="error">{{ error }}</p>
+            <button class="discard-edit" type="button" (click)="editCancelled.emit()">Discard edit</button>
+        </div>
+    }
     @if (batchSelection().length > 1) {
         <editor-batch-transform-inspector [objects]="batchSelection()" [editable]="editable()"
                                           (edited)="batchTransformRequested.emit($event)"/>
@@ -7,8 +13,26 @@
         @let selected = selection.entity;
         <div class="inspector-content">
             <section aria-label="Object identity" class="object-identity">
-                @if (!editable()) {
-                    <p class="read-only">Properties are read-only while editing is unavailable.</p>
+                <header class="selection-heading" data-reference-entity tabindex="-1">
+                    <div class="selection-title">
+                        <p class="object-kind">{{ selected.linked_prefab ? 'Linked Prop' : linkedMemberRoot() ? 'Linked Prop object' : 'Scene object' }}</p>
+                        <h3>{{ selected.name }}</h3>
+                    </div>
+                    @if (activationAvailable()) {
+                        <label class="activation">
+                            <input #activeInput type="checkbox" [checked]="selected.active !== false"
+                                   [disabled]="!activationEditable()" (change)="setActive(activeInput)"/>
+                            Active in Play
+                        </label>
+                    }
+                </header>
+                @if (readOnlyReason(); as reason) {
+                    <p class="read-only">{{ reason }}</p>
+                } @else if (activationAvailable() && linkedMemberRoot()) {
+                    <p class="read-only">Change Active in Play in the Prop source.</p>
+                }
+                @if (activationAvailable() && inactiveAncestor(); as ancestor) {
+                    <p class="read-only">Inactive in Play because {{ ancestor }} is inactive.</p>
                 }
                 <label class="name-field">
                     <span>Name</span>
@@ -30,27 +54,23 @@
                 @if (invalidName()) {
                     <p class="error" [id]="nameErrorId" role="status">Enter a nonempty name.</p>
                 }
-                @if (activationAvailable()) {
-                    <label>
-                        <input #activeInput type="checkbox" [checked]="selected.active !== false"
-                               [disabled]="!activationEditable()" (change)="setActive(activeInput)"/>
-                        Active in Play
-                    </label>
-                    @if (inactiveAncestor(); as ancestor) {
-                        <p class="read-only">Inactive in Play because {{ ancestor }} is inactive.</p>
-                    }
-                }
-                <dl aria-label="Entity details" class="entity-reference" data-reference-entity tabindex="-1">
-                    <dt>Entity</dt><dd [title]="selected.key">{{ selected.key }}</dd>
-                    @if (selected.component_views === undefined) {
-                        <dt>Model</dt><dd [title]="selected.model_path">{{ selected.model_path }}</dd>
-                    }
-                </dl>
+                <details class="object-details">
+                    <summary>Object details</summary>
+                    <dl aria-label="Entity details" class="entity-reference">
+                        <dt>ID</dt>
+                        <dd [title]="selected.key">{{ selected.key }}</dd>
+                        @if (selected.component_views === undefined) {
+                            <dt>Model</dt>
+                            <dd [title]="selected.model_path">{{ selected.model_path }}</dd>
+                        }
+                    </dl>
+                </details>
             </section>
             <section class="transform" aria-label="Local transform">
                 <h3>Transform <span>Local space</span></h3>
                 <editor-vector3-field
                         label="Position"
+                        [compactNumbers]="true"
                         [(locked)]="positionLinked"
                         [lockable]="true"
                         lockHint="Move all three axes by the same offset"
@@ -64,6 +84,7 @@
                 <editor-vector3-field
                         label="Rotation"
                         unit="degrees"
+                        [compactNumbers]="true"
                         [(locked)]="rotationLinked"
                         [lockable]="true"
                         lockHint="Rotate all three axes by the same angle"
@@ -76,6 +97,7 @@
                 />
                 <editor-vector3-field
                         label="Scale"
+                        [compactNumbers]="true"
                         [(locked)]="scaleLinked"
                         [lockable]="true"
                         lockHint="Scale all three axes by the same factor"
@@ -87,14 +109,18 @@
                         (editCancelled)="editCancelled.emit()"
                 />
                 <div aria-label="Reset local transform" class="reset-transform" role="group">
-                    <button type="button" [disabled]="!editable()"
-                            (click)="transformResetRequested.emit('all')">Reset Transform</button>
-                    <button type="button" [disabled]="!editable()"
-                            (click)="transformResetRequested.emit('position')">Reset Position</button>
-                    <button type="button" [disabled]="!editable()"
-                            (click)="transformResetRequested.emit('rotation')">Reset Rotation</button>
-                    <button type="button" [disabled]="!editable()"
-                            (click)="transformResetRequested.emit('scale')">Reset Scale</button>
+                    <button type="button" aria-label="Reset Transform" title="Reset all transform values"
+                            [disabled]="!editable()" (click)="transformResetRequested.emit('all')">Reset
+                    </button>
+                    <button type="button" aria-label="Reset Position" title="Reset Position" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('position')">Position
+                    </button>
+                    <button type="button" aria-label="Reset Rotation" title="Reset Rotation" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('rotation')">Rotation
+                    </button>
+                    <button type="button" aria-label="Reset Scale" title="Reset Scale" [disabled]="!editable()"
+                            (click)="transformResetRequested.emit('scale')">Scale
+                    </button>
                 </div>
             </section>
             @if (selected.component_views !== undefined) {
@@ -115,14 +141,9 @@
         </div>
     } @empty {
         @if (batchSelection().length < 2) {
-            <p class="placeholder" tabindex="-1">Select an entity to inspect its properties.</p>
+            <p class="placeholder" tabindex="-1">Select an object in the Hierarchy or Scene to inspect its
+                properties.</p>
         }
-    }
-    @if (editError(); as error) {
-        <div class="edit-error" role="alert">
-            <p class="error">{{ error }}</p>
-            <button class="discard-edit" type="button" (click)="editCancelled.emit()">Discard edit</button>
-        </div>
     }
 </ng-template>
 

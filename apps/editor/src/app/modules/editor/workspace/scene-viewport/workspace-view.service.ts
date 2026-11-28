@@ -3,6 +3,7 @@ import {EditorService} from '../../../../core/editor/editor.service';
 import type {ViewportView} from '../../../../core/editor/viewport-editor.models';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
+import {WorkspaceNavigation, type WorkspaceLocation} from '../workspace-navigation';
 
 interface AuthoringAvailability {
     readonly prop: () => boolean;
@@ -30,6 +31,7 @@ export class WorkspaceViewService {
     readonly animationOrigin = this.animationScope.asReadonly();
     private readonly editor = inject(EditorService);
     private readonly viewport = inject(ViewportEditorService);
+    private readonly navigation = inject(WorkspaceNavigation, {optional: true});
     readonly gameStatus = this.viewport.gameStatus;
     readonly restartAvailable = computed(() =>
         this.gameView() && this.gameStatus() !== null && this.editor.viewport()?.attached === true &&
@@ -102,13 +104,29 @@ export class WorkspaceViewService {
         this.authoringAvailability.set(availability);
     }
 
-    selectView(kind: WorkspaceViewKind, origin?: 'scene' | 'prop'): void {
+    selectView(kind: WorkspaceViewKind, origin?: 'scene' | 'prop', recordNavigation = true): void {
         if (!this.availableViews().includes(kind)) return;
+        const from = this.navigationLocation();
         if (kind === 'audio-workspace' && origin !== undefined) this.audioOriginState.set(origin);
-        if (kind === 'animation-workspace' && !this.animationView()) {
-            this.animationScope.set(this.propView() ? 'prop' : 'scene');
+        if (kind === 'animation-workspace' && (origin !== undefined || !this.animationView())) {
+            this.animationScope.set(origin ?? (this.propView() ? 'prop' : 'scene'));
         }
         this.activeView.set(kind);
+        if (recordNavigation && !this.editor.playing() && this.editor.snapshot()) {
+            this.navigation?.record(from, this.navigationLocation());
+        }
+    }
+
+    setAnimationScope(origin: 'scene' | 'prop'): void {
+        this.animationScope.set(origin);
+    }
+
+    navigationLocation(): Extract<WorkspaceLocation, { kind: 'view' }> {
+        const view = this.activeViewKind();
+        const origin = view === 'animation-workspace' ? this.animationOrigin()
+            : view === 'audio-workspace' ? this.audioOrigin()
+                : 'scene';
+        return {kind: 'view', view, origin};
     }
 
     closePropView(): void {

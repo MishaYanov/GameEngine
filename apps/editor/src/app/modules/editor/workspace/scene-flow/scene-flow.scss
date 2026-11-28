@@ -1,0 +1,136 @@
+.flow-navigation {
+  margin-block-end: var(--space-3);
+}
+
+.flow-layout {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(0, 3fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.listing {
+  display: grid;
+  gap: var(--space-1);
+  align-items: start;
+}
+
+.listing button {
+  display: grid;
+  gap: var(--space-1);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.listing span,
+.hint {
+  color: var(--color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.edit-grid,
+.coordinates {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.coordinates {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+label {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+}
+
+.check {
+  display: flex;
+  align-items: end;
+  gap: var(--space-1);
+}
+
+button,
+input:not([type='checkbox']),
+select {
+  min-height: var(--layout-subject-control-height, 1.75rem);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text);
+  background: var(--color-control);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+button:enabled:hover {
+  background: var(--color-control-hover);
+}
+
+button[aria-pressed='true'] {
+  border-color: var(--color-focus);
+  font-weight: 600;
+}
+
+:where(button, input, select):focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  background: var(--color-control-disabled);
+  color: var(--color-text-disabled);
+}
+
+.region-map {
+  position: relative;
+  height: 9rem;
+  margin-block-end: var(--space-2);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.region-cell {
+  position: absolute;
+  min-width: 1px;
+  min-height: 1px;
+  overflow: hidden;
+  padding: 0 var(--space-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.region-cell.resident {
+  border-color: var(--color-info);
+  background: var(--color-control-hover);
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+@media (max-width: 36rem) {
+  .flow-layout,
+  .edit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -2,13 +2,13 @@
 use super::*;
 use crate::{
 	editor::prefab_sources::PropDraftEdit,
-	editor::prop_preview::{PropPreviewFrame, PropSceneEnvironment},
+	editor::prop_preview::{PropPreviewDisplay, PropPreviewFrame, PropSceneEnvironment},
 	viewport_tools::{adaptive_grid_spacing, pick_nearest, EditorCamera, PickTarget},
 };
 use bridge::viewport::ViewportProjection;
 use glam::Vec2;
 use renderer::{vulkan::Light, EditorGrid, EditorVisuals};
-use runtime::{scene::EntityId, Bounds3, EntityKey};
+use runtime::{scene::{EntityId, RenderVisibility}, Bounds3, EntityKey};
 
 #[path = "prop_preview/translate.rs"]
 mod translate;
@@ -30,10 +30,7 @@ impl PropGpuPreview {
 		let mut targets = Vec::new();
 		for id in scene.entity_ids() {
 			if let (Some(key), Some(bounds)) = (scene.key(id), scene.world_bounds(id)?) {
-				targets.push(PickTarget {
-					key: key.as_str().into(),
-					bounds,
-				});
+				targets.push(PickTarget::new(key.as_str().into(), bounds));
 			}
 		}
 		let bounds = targets
@@ -137,10 +134,11 @@ impl Worker {
 			let workspace = slot.as_ref()?;
 			workspace.active_prop_preview().map(|frame| {
 				let environment = workspace.prop_scene_environment(&frame.state.token);
-				(frame, workspace.asset_root.clone(), environment)
+				let display = workspace.prop_preview_display(&frame.state.token);
+				(frame, workspace.asset_root.clone(), environment, display)
 			})
 		});
-		let Some((frame, asset_root, environment)) = current else {
+		let Some((frame, asset_root, environment, display)) = current else {
 			let returning_to_scene = self.prop_navigation.take().is_some();
 			if returning_to_scene {
 				self.release_keyboard_focus();
@@ -170,7 +168,9 @@ impl Worker {
 		}
 		self.authored_load = None;
 		self.play_load = None;
-		if let Err(message) = self.draw_prop_preview(&frame, asset_root, environment.as_deref()) {
+		if let Err(message) =
+			self.draw_prop_preview(&frame, asset_root, environment.as_deref(), display)
+		{
 			let closed = self.shared.lock().ok().is_some_and(|mut slot| {
 				slot.as_mut().is_some_and(|workspace| {
 					workspace
@@ -202,6 +202,7 @@ impl Worker {
 		frame: &PropPreviewFrame,
 		asset_root: PathBuf,
 		environment: Option<&PropSceneEnvironment>,
+		display: Option<PropPreviewDisplay>,
 	) -> Result<(), String> {
 		if self
 			.gpu
@@ -218,7 +219,7 @@ impl Worker {
 					.ok_or("Native viewport window is not initialized")?,
 			);
 			let [width, height] = self.extent();
-			let renderer = WindowRenderer::new(window, width, height)?;
+			let renderer = WindowRenderer::new_editor(window, width, height)?;
 			let assets = AssetManager::new(&asset_root).map_err(|error| error.to_string())?;
 			// The first frame can be the Prop pane. Keep an empty deferred
 			// authored slot until the same renderer first enters Scene or Game.
@@ -362,16 +363,12 @@ impl Worker {
 				Vec::new()
 			},
 		})?;
-		let frustum = runtime::visibility::Frustum::from_view_projection(
-			glam::Mat4::from_cols_array(&uniform.view_projection),
-		)?;
 		if let Some((key, pose)) = &frame.pose {
 			if preview.pose_revision != Some(pose.revision) {
 				preview.scene.set_animation_pose(key, Some(pose))?;
 				preview.pose_revision = Some(pose.revision);
 			}
 		}
-		let (objects, _) = preview.scene.try_render_visible(Some(&frustum))?;
 		if !current() {
 			self.dirty = true;
 			return Ok(());
@@ -397,7 +394,24 @@ impl Worker {
 				&Default::default(),
 			)?;
 		}
-		let status = gpu.renderer.draw(&uniform, &objects)?;
+		let shading = display.map(|display| editor_shading_mode(display.shading));
+		let visibility = RenderVisibility::from_camera(&gpu.renderer, &uniform, shading)?;
+		let marked = frame.state.selection.as_ref()
+			.filter(|_| display.is_some_and(|display| display.show_vertices))
+			.map_or(&[][..], std::slice::from_ref);
+		let (objects, _) = preview.scene.try_render_view(
+			&visibility, marked, std::iter::empty(), [0.0; 3],
+		)?;
+		let status = match display {
+			Some(display) => gpu.renderer.draw_prop_preview_in_rect(
+				&uniform,
+				&objects,
+				[0, 0, width, height],
+				editor_shading_mode(display.shading),
+				display.show_normal_detail,
+			)?,
+			None => gpu.renderer.draw(&uniform, &objects)?,
+		};
 		if status == DrawStatus::NeedsRedraw {
 			self.dirty = true;
 			self.redraw_retry = Some(Instant::now() + FRAME);
@@ -530,13 +544,13 @@ impl Worker {
 					self.dirty = true;
 				}
 			}
-			("pointer_up", Some("left"), _, _) if navigation.translation.is_some() => {
-				let drag = navigation
+			("pointer_up", Some("left"), _, point) if navigation.translation.is_some() => {
+				let mut drag = navigation
 					.translation
 					.take()
 					.expect("checked Prop translation");
 				self.dirty = true;
-				if drag.moved() {
+				if point.is_none_or(|point| drag.update(point).is_ok()) && drag.moved() {
 					let updated = self.shared.lock().ok().and_then(|mut slot| {
 						slot.as_mut()?
 							.apply_prop_preview_position(
@@ -552,6 +566,7 @@ impl Worker {
 					}
 				}
 			}
+			("pointer_up" | "pointer_leave", _, _, _) if navigation.translation.is_some() => {}
 			("pointer_up" | "pointer_leave" | "blurred", _, _, _)
 			| ("key_down", _, Some("Escape"), _) => {
 				self.dirty |= navigation.captured();

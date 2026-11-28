@@ -1,0 +1,205 @@
+@use './asset-tools' as tools;
+
+.asset-toolbar,
+.asset-navigation,
+.asset-pane-actions,
+.asset-authoring-tools,
+.asset-filters,
+.asset-scopes,
+.folder-location,
+.folder-actions,
+.folder-location :is(ol, li),
+.asset-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.asset-toolbar,
+.asset-navigation {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-pane-edge);
+}
+
+.asset-toolbar {
+  background: var(--color-drawer);
+}
+
+.asset-search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 13rem;
+  min-width: 0;
+  max-width: 24rem;
+  min-height: var(--space-8);
+  padding-inline: var(--space-2);
+  gap: var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+}
+
+.asset-search:focus-within {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.asset-search input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  outline: none;
+}
+
+.asset-search input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.asset-authoring-tools,
+.asset-filters {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.asset-authoring-tools > editor-prefab-authoring:has(button) {
+  padding-inline-start: var(--space-1);
+  border-inline-start: var(--border-width) solid var(--color-pane-edge);
+}
+
+.asset-navigation {
+  padding-block: 2px;
+}
+
+.asset-scope {
+  color: var(--color-text-secondary);
+}
+
+.folder-location {
+  min-width: 0;
+}
+
+.folder-location[hidden] {
+  display: none;
+}
+
+.folder-actions {
+  flex: none;
+  gap: 2px;
+}
+
+.folder-location ol {
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.folder-location li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+}
+
+.folder-location [aria-current='location'] {
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+}
+
+button {
+  min-height: var(--space-7);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: var(--cursor-action);
+}
+
+button:enabled:hover {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+button:enabled:active {
+  background: var(--color-control-pressed);
+}
+
+button:disabled {
+  color: var(--color-text-disabled);
+  cursor: default;
+}
+
+button:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.more-filters {
+  margin: 0;
+}
+
+.more-filters summary {
+  max-inline-size: min(100%, 12rem);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+
+.more-filters summary:hover {
+  background: var(--color-control-hover);
+}
+
+.more-filters[open] {
+  flex-basis: 100%;
+}
+
+.extra-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+button.asset-icon-button {
+  @include tools.icon-button;
+}
+
+.asset-filters button {
+  white-space: nowrap;
+}
+
+.asset-filters button[aria-pressed='true'],
+.more-filters summary.selected-filter,
+.asset-scopes button[aria-pressed='true'],
+.asset-grid button.selected {
+  border-color: var(--color-selection-edge);
+  background: var(--color-selected);
+  color: var(--color-text);
+}
+
+.asset-filters button[aria-pressed='true']:hover,
+.asset-grid button.selected:hover {
+  background: var(--color-selected-hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .refreshing editor-icon {
+    animation: asset-refresh 1s linear infinite;
+  }
+}
+
+@keyframes asset-refresh {
+  to {
+    transform: rotate(1turn);
+  }
+}
+

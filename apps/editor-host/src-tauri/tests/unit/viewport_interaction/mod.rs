@@ -401,13 +401,13 @@ fn cache_targets(controller: &mut ViewportInteraction, workspace: &EditorWorkspa
 		controller
 			.target_indices
 			.insert(entity.key.as_str().to_owned(), controller.targets.len());
-		controller.targets.push(PickTarget {
-			key: entity.key.as_str().to_owned(),
-			bounds: Bounds3::new([-0.5; 3], [0.5; 3])
+		controller.targets.push(PickTarget::new(
+			entity.key.as_str().to_owned(),
+			Bounds3::new([-0.5; 3], [0.5; 3])
 				.unwrap()
 				.transformed(world)
 				.unwrap(),
-		});
+		));
 	}
 	controller.initial_frame = false;
 	controller.target_revision = Some((

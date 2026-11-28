@@ -11,6 +11,7 @@ import type {CharacterControllerAttachment} from './character-controller.models'
 import type {AnimationAttachment} from './animation.models';
 import type {MachineDescriptor} from './state-machine.models';
 import type {ParticleEmitterComponent} from './particle-emitter.models';
+import type {SceneRoute, SequenceLibrary, WorldRegion} from './scene-flow.models';
 
 export type {ParticleEmitterComponent, ParticleEmitterSettings} from './particle-emitter.models';
 
@@ -54,6 +55,9 @@ export interface ProjectData {
     readonly physics_layers?: PhysicsLayers | null;
     readonly gameplay_module?: string | null;
     readonly gameplay_settings?: unknown;
+    readonly scene_routes?: readonly SceneRoute[];
+    readonly sequences?: SequenceLibrary;
+    readonly world_regions?: readonly WorldRegion[];
 }
 
 export interface SceneState extends SceneDescriptor {
@@ -314,6 +318,7 @@ export type EditorCommand =
     | { readonly type: 'create_particle_emitter' }
     | { readonly type: 'set_active_sky'; readonly key: EntityKey | null }
     | { readonly type: 'set_scene_environment'; readonly ambient_linear: Vec3; readonly sky_exposure_ev: number }
+    | { readonly type: 'set_scene_fog'; readonly fog: import('./sky.models').SceneFog | null }
     | { readonly type: 'create_player' }
     | { readonly type: 'create_audio_source' }
     | { readonly type: 'set_local_player'; readonly key: EntityKey | null }
@@ -332,6 +337,11 @@ export type EditorCommand =
     | { readonly type: 'cancel_transaction' }
     | { readonly type: 'undo' }
     | { readonly type: 'redo' }
+    | { readonly type: 'request_scene_route'; readonly route_id: string }
+    | {
+    readonly type: 'retry_scene_route'; readonly run_id: string;
+    readonly scene_generation: number; readonly attempt_id: number
+}
     | { readonly type: 'start_play' }
     | { readonly type: 'stop_play' }
     | { readonly type: 'apply_play_transforms'; readonly run_id: string; readonly scene_revision: number;
@@ -492,6 +502,21 @@ export interface ModelAsset {
     readonly source_path?: string | null;
     readonly mesh_count?: number | null;
     readonly meshes?: readonly ModelMesh[];
+}
+
+export interface ProjectAssetFile {
+    readonly name: string;
+    readonly path: string;
+    readonly kind: 'animation_clip' | 'animator_graph' | 'controls_graph' | 'input_actions' |
+        'sky_panorama' | 'texture' | 'game_audio' | 'rust_script';
+    readonly asset_id?: string | null;
+    readonly script_descriptor?: import('./object-scripts.models').ScriptDescriptor;
+}
+
+export interface RustScriptDocument {
+    readonly path: string;
+    readonly source: string;
+    readonly fingerprint: string;
 }
 
 export type PrimitiveKind = 'plane' | 'cube' | 'sphere' | 'capsule';

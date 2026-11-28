@@ -17,11 +17,21 @@ describe('ViewportToolbar', () => {
         TestBed.configureTestingModule({providers: [
             {provide: EditorService, useValue: {nativeAvailable: true, snapshot: signal({}), playing}},
             {provide: SceneEditingService, useValue: {withCommittedEdit}},
-            {provide: ViewportEditorService, useValue: {nativeAvailable: true, settings, state, authoringGesture: gesture, error: signal(null), action}},
+                {provide: ViewportEditorService,
+                    useValue: {
+                        nativeAvailable: true,
+                        settings,
+                        state,
+                        authoringGesture: gesture,
+                        error: signal(null),
+                        pending: signal(0),
+                        action
+                    }
+                },
         ]});
         const fixture = TestBed.createComponent(ViewportToolbar); await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
-        const button = (label: string) => [...root.querySelectorAll('button')].find(candidate => candidate.textContent.trim().startsWith(label))!;
+        const button = (label: string) => [...root.querySelectorAll('button')].find(candidate => candidate.getAttribute('aria-label') === label || candidate.textContent.trim().startsWith(label))!;
         return {fixture, root, playing, gesture, settings, state, action, withCommittedEdit, button};
     }
 
@@ -46,7 +56,10 @@ describe('ViewportToolbar', () => {
     });
 
     it('provides cancel during native gestures and preserves text-field key ownership', async () => {
-        const view = await create(); view.button('Navigation').click(); await view.fixture.whenStable();
+        const view = await create();
+        view.button('View').click();
+        view.button('Navigation').click();
+        await view.fixture.whenStable();
         const input = view.root.querySelector('input')!;
         input.dispatchEvent(new KeyboardEvent('keydown', {key: 'w', bubbles: true}));
         input.dispatchEvent(new KeyboardEvent('keydown', {key: 'f', bubbles: true}));
@@ -88,9 +101,33 @@ describe('ViewportToolbar', () => {
         expect(view.root.querySelector('[role="status"]')).toBeNull();
     });
 
+    it('changes shading and selected vertices independently of authored changes', async () => {
+        const view = await create();
+        const shading = view.root.querySelector<HTMLSelectElement>('label:has(option[value="wireframe"]) select')!;
+        const vertices = view.button('Show Vertices');
+        expect(shading.value).toBe('lit');
+        expect([...shading.options].map(option => option.text)).toEqual(['Lit', 'Unlit', 'Wireframe']);
+        expect(vertices.getAttribute('aria-pressed')).toBe('false');
+
+        shading.value = 'wireframe';
+        shading.dispatchEvent(new Event('change', {bubbles: true}));
+        vertices.click();
+        await view.fixture.whenStable();
+        expect(view.action).toHaveBeenCalledWith({type: 'set_shading', shading: 'wireframe'});
+        expect(view.action).toHaveBeenCalledWith({type: 'set_show_vertices', visible: true});
+        expect(view.withCommittedEdit).not.toHaveBeenCalled();
+
+        view.settings.update(settings => ({...settings, shading: 'wireframe', show_vertices: true}));
+        await view.fixture.whenStable();
+        expect(shading.value).toBe('wireframe');
+        expect(vertices.getAttribute('aria-pressed')).toBe('true');
+    });
+
     it('exposes labels and pressed states without accessibility violations', async () => {
         const view = await create();
-        view.button('Navigation').click(); await view.fixture.whenStable();
+        view.button('View').click();
+        view.button('Navigation').click();
+        await view.fixture.whenStable();
         const result = await axe.run(view.root, {rules: {'color-contrast': {enabled: false}}});
         expect(result.violations).toEqual([]);
     });

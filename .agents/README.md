@@ -1,55 +1,56 @@
-# Game Engine agent rules and skills
+# Game Engine agent guidance
 
-This bundle belongs to the full Rust, Angular, and Tauri project at `D:\Coding\Game Engine`. Start with the
-repository-root `AGENTS.md` and the [project workflow](rules/project.md).
+Open Codex at the repository root to use the project skills and custom subagents.
 
-## Rules
-
-- [Project workflow and source map](rules/project.md): ownership boundaries, source paths, development commands, and
-  verification.
-- [Angular and TypeScript rules](rules/angular-typescript.md): a copy of the existing `apps/editor/AGENTS.md`, including
-  accessibility requirements. The existing editor file remains authoritative; refresh this copy when it changes.
-- [Documentation maintenance rules](rules/documentation.md): the existing root documentation rules, captured before
-  adding the bundle entry point. The repository-root `AGENTS.md` remains authoritative.
+| Location                                                                                   | Purpose                                                             |
+|--------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| [Root instructions](../AGENTS.md)                                                          | Project entry point and documentation maintenance                   |
+| [Editor instructions](../apps/editor/AGENTS.md)                                            | Angular, TypeScript, and accessibility rules                        |
+| [Project workflow](rules/project.md)                                                       | Source map, development commands, and verification                  |
+| [Coordination rules](rules/coordination.md)                                                | Delegation, integration, and handoffs across chats and contributors |
+| [Project status](../project-status/README.md)                                              | Current baseline, open verification, and task notes                 |
+| [.agents/skills/](skills/)                                                                 | Reusable workflows for the current agent                            |
+| [.codex/agents/](../.codex/agents/)                                                        | Codex custom subagent definitions                                   |
+| [Editor runtime profile](../crates/authoring-agent/profiles/game-development-support.json) | Built-in authoring agent configuration packaged with the editor     |
 
 ## Skills
 
-| Skill                                                                | Use for                                                                                     | Origin                                                                                                                                                                        |
-|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [game-development-support](skills/game-development-support/SKILL.md) | Authoring workflows, viewport interactions, gameplay configuration, and playable milestones | Copied from the existing `agent-profiles/game-development-support/`; corrected the shared gameplay source path and made feature-support wording conditional on current source |
-| [logger-agent](skills/logger-agent/SKILL.md)                         | Logging instrumentation, runtime logging modes, and dedicated error persistence             | Copied from `~/.codex/skills/logger-agent/`; the shared Rust logger and its runtime modes already exist in this repository                                                    |
-| [rust-best-practices](skills/rust-best-practices/SKILL.md)           | Rust file ordering and idiomatic Rust implementation or review                              | Adapted from the Game Engine 2 agent bundle using primary Rust language and tooling sources                                                                                   |
-| [skill-creator](skills/skill-creator/SKILL.md)                       | Creating and maintaining reusable skills                                                    | Copied from `~/.codex/skills/.system/skill-creator/`, including scripts, references, UI metadata, assets, and license                                                         |
+| Skill                                                                | Use for                                                                                     |
+|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| [game-development-support](skills/game-development-support/SKILL.md) | Authoring workflows, viewport interactions, gameplay configuration, and playable milestones |
+| [logger-agent](skills/logger-agent/SKILL.md)                         | Logging instrumentation, runtime logging modes, and dedicated error persistence             |
+| [rust-best-practices](skills/rust-best-practices/SKILL.md)           | Rust file ordering and idiomatic implementation or review                                   |
+| [skill-creator](skills/skill-creator/SKILL.md)                       | Creating and maintaining reusable skills with the bundled tooling                           |
+| [grill-me](skills/grill-me/SKILL.md)                                 | A design interview when a feature or structure decision is stuck                            |
+| [codebase-design](skills/codebase-design/SKILL.md)                   | Compare interfaces, ownership, dependencies, and test seams                                 |
 
-Read only the skill relevant to the current task. Example requests can invoke `$game-development-support`,
-`$logger-agent`, or `$skill-creator`; if a client does not expose a skill, point it directly at that skill's local
-`SKILL.md`.
+Invoke a skill by name, such as `$rust-best-practices`, or read its `SKILL.md` directly.
 
-From a Codex session opened at the repository root, invoke `$rust-best-practices` or ask the [
-`rust_best_practices` subagent](../.codex/agents/rust-best-practices.toml) to organize or review a Rust change.
+`grill-me` combines the upstream entry point and interview procedure for Codex. `codebase-design` retains the upstream
+design references and uses the engine's existing terms for components, services, and crates. Both are based on
+[Matt Pocock's skills at `d653911`](https://github.com/mattpocock/skills/tree/d65391149dbb5fe76478e76fa8d5122b2aa5a70e)
+and include the upstream MIT license.
 
-From Codex opened at the repository root, ask `editor_best_practices` to review or implement an Angular editor
-change. It follows the [editor best practices agent profile](agents/editor-best-practices.toml), covering file
-placement,
-member visibility and accessors, state ownership, and behavior-preserving splits.
+## Codex subagents
 
-Additional project subagents
-
-- [`rust_crates`](agents/rust-crates.toml) for crate boundaries, dependency direction, and cross-crate Rust APIs.
-- [`graphics_design`](agents/graphics-design.toml) for editor visuals, design-system components, icons, and assets.
-- [`tauri`](agents/tauri.toml) for editor IPC, native state and lifecycle, and desktop configuration.
+| Name                                                                 | Use for                                                                      |
+|----------------------------------------------------------------------|------------------------------------------------------------------------------|
+| [editor_best_practices](../.codex/agents/editor-best-practices.toml) | Angular structure, accessors, state ownership, and responsibility boundaries |
+| [graphics_design](../.codex/agents/graphics-design.toml)             | Editor visuals, design-system components, themes, icons, and assets          |
+| [rust_best_practices](../.codex/agents/rust-best-practices.toml)     | Rust source layout and behavior-preserving changes                           |
+| [rust_crates](../.codex/agents/rust-crates.toml)                     | Crate boundaries, dependencies, and cross-crate APIs                         |
+| [tauri](../.codex/agents/tauri.toml)                                 | Editor IPC, native lifecycles, and desktop configuration                     |
+| [project_orchestrator](../.codex/agents/project-orchestrator.toml)   | Reconcile project status and write task handoffs when delegated              |
+| [documentation](../.codex/agents/documentation.toml)                 | Check docs coverage and maintain authorized engine docs                      |
+| [verification](../.codex/agents/verification.toml)                   | Run acceptance checks and report the evidence                                |
+| [performance](../.codex/agents/performance.toml)                     | Measure performance and verify targeted optimizations                        |
+| [security_review](../.codex/agents/security-review.toml)             | Defensive review of trust, data, and release boundaries                      |
 
 ## Maintenance
 
-Keep project-wide guidance in `rules/` and task-specific workflows in `skills/`. Use `.agents/skills/` for new project
-skills. Update source maps and commands when the implementation moves. The older `agent-profiles/` files are preserved;
-this bundle's game skill includes the source-path correction described above.
+Keep project-wide workflow guidance in `rules/`, skills in `skills/`, and each Codex subagent in its own
+`.codex/agents/*.toml` file. Update the root or editor `AGENTS.md` for rules owned by those entry points.
 
 Validate a changed skill from the repository root with
-`python .agents/skills/skill-creator/scripts/quick_validate.py .agents/skills/<skill-name>`. The copied validator
-requires Python and PyYAML. Also check links, source paths, and behavior; structural validation does not establish that
-instructions or feature claims are correct.
-
-This bundle packages project guidance and relevant local skills. It does not export application configuration,
-credentials, conversation history, or unrelated plugin skills. Packaging it does not authorize application
-instrumentation or an engine documentation/site update.
+`python .agents/skills/skill-creator/scripts/quick_validate.py .agents/skills/<skill-name>`.
+The bundled validator requires Python and PyYAML. Check referenced paths and workflow behavior as well.

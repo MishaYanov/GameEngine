@@ -59,9 +59,10 @@ impl RootMotionPlan {
 		let mut tracks = BTreeMap::new();
 		let mut visited = BTreeSet::new();
 		for state in &graph.states {
-			let AnimationClipRef::Imported { clip_index, .. } = state.clip else {
+			let AnimationClipRef::Imported { source, clip_index } = &state.clip else {
 				return Err("Root motion requires imported clips".into());
 			};
+			let clip_index = asset.resolve_clip_index(source, *clip_index)?;
 			if !visited.insert(clip_index) {
 				continue;
 			}

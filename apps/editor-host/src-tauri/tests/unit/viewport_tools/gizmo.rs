@@ -65,6 +65,128 @@ fn handles_hit_visible_axes_and_uniform_scale_center() {
 }
 
 #[test]
+fn a_visible_arrow_tip_takes_precedence_over_an_overlapping_plane() {
+	let camera = EditorCamera {
+		yaw: 0.28274334,
+		pitch: 0.28274334,
+		..EditorCamera::default()
+	};
+	let extent = [800, 600];
+	let projection = ViewportProjection::Perspective;
+	let gizmo = Gizmo::new(Vec3::ZERO, Quat::IDENTITY, 2.0);
+	// This point on the blue arrow is also inside the projected XY square.
+	let tip = camera.project(Vec3::Z * 1.98, extent, projection).unwrap();
+	assert_eq!(
+		gizmo.hit_test(
+			&camera,
+			extent,
+			projection,
+			ViewportTool::Move,
+			pixel(tip),
+			9.0,
+		),
+		Some(Handle::Axis(2))
+	);
+}
+
+#[test]
+fn straight_on_view_draws_just_the_two_working_axes_and_plane() {
+	let camera = EditorCamera {
+		yaw: 0.0,
+		pitch: 0.0,
+		..EditorCamera::default()
+	};
+	let extent = [800, 600];
+	let projection = ViewportProjection::Orthographic;
+	let gizmo = Gizmo::new(Vec3::ZERO, Quat::IDENTITY, 2.0);
+	let segments = gizmo.visible_segments(&camera, extent, projection, ViewportTool::Move);
+	assert!(!segments.is_empty());
+	assert!(segments.iter().all(|segment| matches!(
+		segment.handle,
+		Handle::Axis(0 | 1) | Handle::Plane(0, 1) | Handle::Screen
+	)));
+	let point = camera
+		.project(Vec3::new(0.66, 0.66, 0.0), extent, projection)
+		.unwrap();
+	assert_eq!(
+		gizmo.hit_test(
+			&camera,
+			extent,
+			projection,
+			ViewportTool::Move,
+			pixel(point),
+			9.0,
+		),
+		Some(Handle::Plane(0, 1))
+	);
+}
+
+#[test]
+fn a_camera_facing_move_or_scale_icon_is_clickable_at_its_rendered_edges() {
+	let camera = camera();
+	let extent = [1200, 800];
+	for projection in [
+		ViewportProjection::Perspective,
+		ViewportProjection::Orthographic,
+	] {
+		let size = camera.gizmo_size(Vec3::ZERO, extent, projection, 80.0);
+		let gizmo = Gizmo::new(Vec3::ZERO, Quat::IDENTITY, size);
+		for (tool, handle) in [
+			(ViewportTool::Move, Handle::Screen),
+			(ViewportTool::Scale, Handle::UniformScale),
+		] {
+			let icon: Vec<_> = gizmo
+				.visible_segments(&camera, extent, projection, tool)
+				.into_iter()
+				.filter(|segment| segment.handle == handle)
+				.collect();
+			assert_eq!(icon.len(), 4);
+			for edge in icon {
+				let center = (edge.a + edge.b) * 0.5;
+				let point = camera.project(center, extent, projection).unwrap();
+				assert_eq!(
+					gizmo.hit_test(&camera, extent, projection, tool, pixel(point), 9.0),
+					Some(handle),
+				);
+			}
+		}
+	}
+}
+
+#[test]
+fn a_straight_on_rotate_view_only_draws_and_picks_the_facing_ring() {
+	let camera = EditorCamera {
+		yaw: 0.0,
+		pitch: 0.0,
+		..EditorCamera::default()
+	};
+	let extent = [800, 600];
+	let projection = ViewportProjection::Orthographic;
+	let gizmo = Gizmo::new(Vec3::ZERO, Quat::IDENTITY, 2.0);
+	let tool = ViewportTool::Rotate;
+	let segments = gizmo.visible_segments(&camera, extent, projection, tool);
+	assert_eq!(segments.len(), 64);
+	assert!(segments
+		.iter()
+		.all(|segment| segment.handle == Handle::Rotate(2)));
+	let encoded = |point| pixel(camera.project(point, extent, projection).unwrap());
+	assert_eq!(
+		gizmo.hit_test(
+			&camera,
+			extent,
+			projection,
+			tool,
+			encoded(Vec3::X * 2.0),
+			9.0
+		),
+		Some(Handle::Rotate(2))
+	);
+	assert!(gizmo
+		.hit_test(&camera, extent, projection, tool, encoded(Vec3::X), 9.0)
+		.is_none());
+}
+
+#[test]
 fn local_gizmo_basis_rotates_the_handle_geometry() {
 	let gizmo = Gizmo::new(
 		Vec3::ZERO,

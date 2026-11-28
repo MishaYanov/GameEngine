@@ -5,7 +5,9 @@ import {
     validParticleEmitterSettings,
 } from '../../../../core/editor/particle-emitter.models';
 
-export type ParticleDraft = Record<ParticleNumberKey | 'color', string>;
+export type ParticleDraft = Record<ParticleNumberKey | 'color' | 'sprite_asset_id', string> & {
+    linger_on_despawn: boolean;
+};
 export const PARTICLE_FIELDS = PARTICLE_NUMBER_FIELDS;
 
 export const PARTICLE_PRESETS = [
@@ -51,6 +53,8 @@ export function draftFromSettings(settings: ParticleEmitterSettings): ParticleDr
         size: String(settings.size),
         seed: String(settings.seed),
         color: colorToHex(settings.color),
+        sprite_asset_id: settings.sprite_asset_id ?? '',
+        linger_on_despawn: settings.linger_on_despawn ?? false,
     };
 }
 
@@ -83,11 +87,15 @@ export function settingsFromDraft(
         size: Number(draft.size),
         seed: Number(draft.seed),
         color: color === colorToHex(exactColor) ? exactColor : [channel(1), channel(3), channel(5)],
+        ...(draft.sprite_asset_id === '' ? {} : {sprite_asset_id: draft.sprite_asset_id}),
+        ...(draft.linger_on_despawn ? {linger_on_despawn: true} : {}),
     };
     return validParticleEmitterSettings(settings) ? settings : null;
 }
 
 export function sameParticleSettings(first: ParticleEmitterSettings, second: ParticleEmitterSettings): boolean {
     return PARTICLE_FIELDS.every(({key}) => first[key] === second[key]) &&
-        first.color.every((channel, index) => channel === second.color[index]);
+        first.color.every((channel, index) => channel === second.color[index]) &&
+        first.sprite_asset_id === second.sprite_asset_id &&
+        Boolean(first.linger_on_despawn) === Boolean(second.linger_on_despawn);
 }

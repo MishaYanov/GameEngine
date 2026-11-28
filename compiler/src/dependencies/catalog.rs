@@ -1,5 +1,6 @@
 //! Resolve catalog identities and freeze catalog input and output.
 
+use engine_core::animation::AnimationClipRef;
 use engine_core::asset_catalog::{
 	AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES,
 };
@@ -9,6 +10,13 @@ use super::{
 };
 
 impl Closure<'_> {
+	pub(super) fn record_particle_sprite(&mut self, id: &AssetId) -> Result<(), String> {
+		if self.particle_sprites.contains(id) { return Ok(()); }
+		self.record_expected(id, AssetKind::Texture)?;
+		bridge::particle_sprite::read_project(self.root, id)?;
+		self.particle_sprites.insert(id.clone());
+		Ok(())
+	}
 	pub(super) fn record_expected(&mut self, id: &AssetId, kind: AssetKind) -> Result<(), String> {
 		if self
 			.catalog
@@ -21,6 +29,27 @@ impl Closure<'_> {
 			));
 		}
 		self.record(id)
+	}
+
+	pub(super) fn record_animator_clip(&mut self, clip: &AnimationClipRef) -> Result<(), String> {
+		match clip {
+			AnimationClipRef::Imported { source, clip_index } => {
+				self.animation_asset(source)?
+					.resolve_clip_index(source, *clip_index)?;
+				self.record(&source.asset_id)
+			}
+			AnimationClipRef::Authored {
+				asset_id,
+				expected_sha256,
+			} => {
+				if self.catalog.by_id(asset_id).is_none_or(|asset| {
+					asset.kind != AssetKind::AnimationClip || &asset.fingerprint != expected_sha256
+				}) {
+					return Err("Missing or changed clip revision".into());
+				}
+				self.record(asset_id)
+			}
+		}
 	}
 
 	pub(super) fn record(&mut self, id: &AssetId) -> Result<(), String> {
@@ -68,6 +97,23 @@ impl Closure<'_> {
 			return Ok(());
 		}
 		let bytes = self.file_for_kind(Path::new(&asset.path), Some(asset.kind))?;
+		if asset.kind == AssetKind::RustScript {
+			let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
+			let metadata = bridge::script_assets::metadata(&asset, text)?;
+			for sprite in &metadata.particle_sprites {
+				self.record_particle_sprite(sprite)?;
+			}
+			let wasm = gameplay_catalog::project_scripts::compile(&asset.path, text)?;
+			self.generate(bridge::script_assets::artifact_path(id).into(), wasm)?;
+			let mut asset = asset;
+			asset.bytes = bytes.len() as u64;
+			asset.fingerprint = format!("{:x}", Sha256::digest(&bytes));
+			asset.dependencies = metadata.particle_sprites;
+			asset.dependencies.sort_unstable();
+			asset.dependencies.dedup();
+			self.catalog.replace(asset)?;
+			return Ok(());
+		}
 		if bytes.len() as u64 != asset.bytes
 			|| format!("{:x}", Sha256::digest(&bytes)) != asset.fingerprint
 		{
@@ -108,30 +154,11 @@ impl Closure<'_> {
 			AssetKind::AnimatorGraph => {
 				let graph = engine_core::animation::AnimatorGraph::from_json(&bytes)?;
 				for state in graph.states {
-					use engine_core::animation::AnimationClipRef;
-					let (id, fingerprint, kind) = match &state.clip {
-						AnimationClipRef::Imported { source, .. } => {
-							(&source.asset_id, &source.expected_sha256, AssetKind::Model)
-						}
-						AnimationClipRef::Authored {
-							asset_id,
-							expected_sha256,
-						} => (asset_id, expected_sha256, AssetKind::AnimationClip),
-					};
-					if self
-						.catalog
-						.by_id(id)
-						.is_none_or(|entry| &entry.fingerprint != fingerprint || entry.kind != kind)
-					{
-						return Err(format!(
-							"Animator state {:?} refers to a missing or changed clip revision",
-							state.id
-						));
-					}
-					self.record(id)?;
+					self.record_animator_clip(&state.clip)
+						.map_err(|error| format!("Animator state {:?}: {error}", state.id))?;
 				}
 			}
-			AssetKind::Texture => {}
+			AssetKind::Texture | AssetKind::RustScript => {}
 		}
 		Ok(())
 	}

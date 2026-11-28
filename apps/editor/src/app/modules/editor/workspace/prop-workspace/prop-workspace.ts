@@ -153,6 +153,25 @@ export class PropWorkspace {
         if (selected === 'neutral' || selected === 'scene') void this.preview.setEnvironment(selected);
     }
 
+    protected selectPreviewShading(select: HTMLSelectElement): void {
+        const shading = select.value;
+        const display = this.preview.display();
+        select.value = display.shading;
+        if (shading === 'lit' || shading === 'unlit' || shading === 'wireframe') {
+            void this.preview.setDisplay({...display, shading});
+        }
+    }
+
+    protected togglePreviewVertices(): void {
+        const display = this.preview.display();
+        void this.preview.setDisplay({...display, showVertices: !display.showVertices});
+    }
+
+    protected togglePreviewNormalDetail(): void {
+        const display = this.preview.display();
+        void this.preview.setDisplay({...display, showNormalDetail: !display.showNormalDetail});
+    }
+
     constructor() {
         afterNextRender(() => this.heading()?.nativeElement.focus({preventScroll: true}));
     }

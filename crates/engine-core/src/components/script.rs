@@ -4,13 +4,22 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{EntityKey, scene_data::EntityData};
+use crate::{EntityKey, asset_catalog::AssetId, scene_data::EntityData};
 
 use super::ComponentId;
 
 pub const MAX_SCRIPTS_PER_OBJECT: usize = 8;
+pub const MAX_RUST_SCRIPT_BYTES: usize = 64 * 1024;
 const MAX_ENTRIES: usize = 32;
 const MAX_PROPERTY_TEXT_BYTES: usize = 256;
+
+pub fn project_script_id(asset: &AssetId) -> String {
+	format!("asset.{}", asset.as_str())
+}
+
+pub fn project_script_asset(id: &str) -> Option<AssetId> {
+	AssetId::new(id.strip_prefix("asset.")?).ok()
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

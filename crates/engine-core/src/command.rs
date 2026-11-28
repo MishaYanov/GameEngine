@@ -1,5 +1,6 @@
 //! Input-independent transport contracts. Scene payloads are validated by the domain.
 use crate::EntityKey;
+use crate::components::SceneFog;
 use crate::project::ProjectData;
 use crate::scene_catalog::SceneId;
 use crate::scene_data::{
@@ -159,6 +160,10 @@ pub enum EditorCommandDto {
 	SetSceneEnvironment {
 		ambient_linear: [f32; 3],
 		sky_exposure_ev: f32,
+	},
+	SetSceneFog {
+		#[serde(deserialize_with = "Option::deserialize")]
+		fog: Option<SceneFog>,
 	},
 	SetLocalPlayer {
 		key: Option<EntityKey>,
@@ -336,6 +341,14 @@ pub enum EditorCommandDto {
 	SetPaused {
 		paused: bool,
 	},
+	RequestSceneRoute {
+		route_id: crate::project::SceneRouteId,
+	},
+	RetrySceneRoute {
+		run_id: String,
+		scene_generation: u64,
+		attempt_id: u64,
+	},
 	SetPlayInput {
 		movement: [f32; 3],
 	},
@@ -389,6 +402,15 @@ pub struct PlayStatusDto {
 	pub paused: bool,
 	#[serde(default)]
 	pub pending_scene_id: Option<SceneId>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub failed_scene_id: Option<SceneId>,
+	/// Only authored route failures can be retried through Scene Flow.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub failed_scene_attempt_id: Option<u64>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub sequence: Option<crate::sequence::SequencePresentation>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub resident_regions: Vec<SceneId>,
 	#[serde(default)]
 	pub gameplay: Option<GameplayStatus>,
 }

@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
 	clips::decode_clips,
+	identity::decode_character,
 	mesh::decode_mesh,
 	rig::{MAX_RIG_NODES, decode_rig},
 };
@@ -52,6 +53,7 @@ pub fn decode(bytes: &[u8]) -> Result<AnimationAsset, String> {
 		.ok_or("Animation GLB has no scene")?;
 	let source_scene = scene.index() as u32;
 	let rig = decode_rig(scene, bin)?;
+	let character = decode_character(doc, &rig)?;
 	// Geometry, textures, and clips must all charge this same decoded byte budget.
 	let mut remaining = MAX_ANIMATION_BYTES;
 	let (primitives, images) = decode_mesh(rig.mesh, bin, rig.skin.joints.len(), &mut remaining)?;
@@ -59,6 +61,7 @@ pub fn decode(bytes: &[u8]) -> Result<AnimationAsset, String> {
 	let mut asset = AnimationAsset {
 		source_sha256: format!("{:x}", Sha256::digest(bytes)),
 		source_scene,
+		character,
 		nodes: rig.nodes,
 		skin: rig.skin,
 		clips,

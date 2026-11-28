@@ -816,9 +816,17 @@ fn particle_batch_is_submitted_as_one_world_draw_and_can_be_cleared() {
 			position: [0.; 3],
 			size: 0.6,
 			color: [1.0, 0.3, 0.1],
+			sprite_asset_id: None,
 		};
-		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[particle, particle]).unwrap();
-		let batch = draw.as_ref().and_then(ParticleDraw::object).unwrap();
+		ParticleDraw::prepare(
+			&mut draw,
+			&renderer,
+			&camera,
+			&[particle.clone(), particle.clone()],
+			None,
+		)
+			.unwrap();
+		let batch = draw.iter().flat_map(ParticleDraw::objects).next().unwrap();
 		let status = renderer.draw(&camera, &[batch]).unwrap();
 		let stats = renderer.last_metrics();
 		renderer.wait_idle().unwrap();
@@ -831,16 +839,17 @@ fn particle_batch_is_submitted_as_one_world_draw_and_can_be_cleared() {
 		let foreground = ParticleSample {
 			position: [0., 0., 1.],
 			color: [0.1, 0.45, 1.0],
-			..particle
+			..particle.clone()
 		};
-		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[foreground, particle]).unwrap();
-		let batch = draw.as_ref().and_then(ParticleDraw::object).unwrap();
+		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[foreground, particle], None)
+			.unwrap();
+		let batch = draw.iter().flat_map(ParticleDraw::objects).next().unwrap();
 		let status = renderer.draw(&camera, &[batch]).unwrap();
 		renderer.wait_idle().unwrap();
 		assert_eq!(status, renderer::DrawStatus::Rendered);
 
-		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[]).unwrap();
-		assert!(draw.as_ref().and_then(ParticleDraw::object).is_none());
+		ParticleDraw::prepare(&mut draw, &renderer, &camera, &[], None).unwrap();
+		assert!(draw.iter().flat_map(ParticleDraw::objects).next().is_none());
 		let status = renderer.draw(&camera, &[]).unwrap();
 		let stats = renderer.last_metrics();
 		renderer.wait_idle().unwrap();
@@ -848,4 +857,129 @@ fn particle_batch_is_submitted_as_one_world_draw_and_can_be_cleared() {
 		assert_eq!(stats.draw_calls, 0);
 		renderer.retire_resources(draw).unwrap();
 	});
+}
+
+#[test]
+#[ignore = "requires native Windows Vulkan and LunarG screenshot layer"]
+fn particle_png_keeps_top_row_orientation_and_alpha_cutout() {
+	use runtime::particle_draw::{ParticleDraw, ParticleSample};
+
+	const CHILD: &str = "GAME_NATIVE_PARTICLE_CAPTURE";
+	if let Some(directory) = std::env::var_os(CHILD).map(PathBuf::from) {
+		let source = directory.join("source.png");
+		let asset_root = directory.join("assets");
+		fs::create_dir(&asset_root).unwrap();
+		image::RgbaImage::from_fn(16, 16, |_, row| {
+			image::Rgba([255, 255, 255, if row < 8 { 0 } else { 255 }])
+		})
+			.save(&source)
+			.unwrap();
+		let texture = runtime::assets::project_assets::prepare_particle_sprite_import(
+			&asset_root,
+			&source,
+			"effect.png",
+		)
+			.unwrap()
+			.publish()
+			.unwrap();
+		with_native_window(|events| {
+			let window = Arc::new(
+				events
+					.create_window(
+						Window::default_attributes()
+							.with_visible(false)
+							.with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
+					)
+					.unwrap(),
+			);
+			let mut renderer = WindowRenderer::new(window, 320, 240).unwrap();
+			let mut assets = AssetManager::new(&asset_root).unwrap();
+			let camera = CameraUniform::perspective(
+				[0., 0., 3.],
+				[0.; 3],
+				[0., 1., 0.],
+				1.0,
+				4.0 / 3.0,
+				0.1,
+				20.0,
+			);
+			let solid = ParticleSample {
+				position: [0.; 3],
+				size: 1.5,
+				color: [0., 1., 0.],
+				sprite_asset_id: None,
+			};
+			let sprite = ParticleSample {
+				position: [0., 0., 0.5],
+				size: 1.2,
+				color: [1., 0., 0.],
+				sprite_asset_id: Some(Arc::new(texture.id)),
+			};
+			let second = ParticleSample {
+				position: [1.8, 0., 0.5],
+				..sprite.clone()
+			};
+			let mut draw = None;
+			ParticleDraw::prepare(
+				&mut draw,
+				&renderer,
+				&camera,
+				&[sprite, solid, second],
+				Some(&mut assets),
+			)
+				.unwrap();
+			let objects: Vec<_> = draw.iter().flat_map(ParticleDraw::objects).collect();
+			assert_eq!(
+				objects
+					.iter()
+					.map(|object| object.index_range())
+					.collect::<Vec<_>>(),
+				[0..6, 6..18]
+			);
+			assert_eq!(
+				renderer.draw(&camera, &objects).unwrap(),
+				renderer::DrawStatus::Rendered
+			);
+			assert_eq!(renderer.last_metrics().triangles, 6);
+			renderer.wait_idle().unwrap();
+		});
+		return;
+	}
+	let directory = evidence_directory("particle-sprite");
+	let output = Command::new(std::env::current_exe().unwrap())
+		.args([
+			"--ignored",
+			"--exact",
+			"camera_native_tests::particle_png_keeps_top_row_orientation_and_alpha_cutout",
+			"--nocapture",
+		])
+		.env(CHILD, &directory)
+		.env("LOCALAPPDATA", &directory)
+		.env("VK_INSTANCE_LAYERS", "VK_LAYER_LUNARG_screenshot")
+		.env("VK_SCREENSHOT_DIR", &directory)
+		.env("VK_SCREENSHOT_FRAMES", "0")
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"{}\n{}",
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr)
+	);
+	let capture = fs::read_dir(&directory)
+		.unwrap()
+		.map(|entry| entry.unwrap().path())
+		.find(|path| path.extension().is_some_and(|extension| extension == "ppm"))
+		.unwrap();
+	let image = image::open(capture).unwrap().to_rgb8();
+	let above = image.get_pixel(160, 100).0;
+	let below = image.get_pixel(160, 140).0;
+	assert!(
+		above[1] > 100 && above[0] < 25,
+		"transparent top row should reveal the green diamond: {above:?}"
+	);
+	assert!(
+		below[0] > 100 && below[1] < 25,
+		"opaque bottom row should draw red: {below:?}"
+	);
 }

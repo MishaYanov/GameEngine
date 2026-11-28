@@ -1,4 +1,15 @@
-import {afterRenderEffect, Component, DestroyRef, DOCUMENT, ElementRef, inject, input, viewChild} from '@angular/core';
+import {
+    afterRenderEffect,
+    Component,
+    DestroyRef,
+    DOCUMENT,
+    effect,
+    ElementRef,
+    inject,
+    input,
+    signal,
+    viewChild
+} from '@angular/core';
 import type {ParticleEmitterSettings} from '../../../../core/editor/editor.models';
 import {ParticlePreview} from './particle-preview';
 
@@ -21,10 +32,16 @@ import {ParticlePreview} from './particle-preview';
 })
 export class ParticlePreviewCanvas {
     readonly settings = input<ParticleEmitterSettings | null>(null);
+    readonly sprite = input<Blob | null>(null);
     readonly running = input(true);
     readonly restart = input(0);
     private readonly canvas = viewChild.required<ElementRef<HTMLCanvasElement>>('canvas');
-    private readonly window = inject(DOCUMENT).defaultView;
+    private readonly document = inject(DOCUMENT);
+    private readonly window = this.document.defaultView;
+    private readonly spriteBitmap = signal<ImageBitmap | null>(null);
+    private spritePreview: HTMLCanvasElement | null = null;
+    private spriteTint = '';
+    private preparedBitmap: ImageBitmap | null = null;
     private context: CanvasRenderingContext2D | null = null;
     private preview: ParticlePreview | null = null;
     private configuration: ParticleEmitterSettings | null = null;
@@ -35,11 +52,29 @@ export class ParticlePreviewCanvas {
     private previousTime: number | null = null;
 
     constructor() {
+        effect(onCleanup => {
+            const sprite = this.sprite();
+            this.spriteBitmap.set(null);
+            if (!sprite || typeof createImageBitmap !== 'function') return;
+            let current = true;
+            let bitmap: ImageBitmap | null = null;
+            onCleanup(() => {
+                current = false;
+                bitmap?.close();
+            });
+            void createImageBitmap(sprite).then(decoded => {
+                if (current) {
+                    bitmap = decoded;
+                    this.spriteBitmap.set(decoded);
+                } else decoded.close();
+            }, () => undefined);
+        });
         afterRenderEffect(() => {
             const canvas = this.canvas().nativeElement;
             const settings = this.settings();
             const restart = this.restart();
             const running = this.running();
+            const bitmap = this.spriteBitmap();
             this.stop();
             if (!this.window) return;
             if (!this.observing) {
@@ -56,6 +91,7 @@ export class ParticlePreviewCanvas {
                 this.restartToken = restart;
                 this.preview = settings ? new ParticlePreview(settings) : null;
             }
+            this.prepareSprite(bitmap, settings?.color ?? [1, 1, 1]);
             this.resize();
             if (running && this.preview && this.preview.settings.rate_per_second > 0) {
                 this.frame = this.window.requestAnimationFrame(this.animate);
@@ -66,6 +102,34 @@ export class ParticlePreviewCanvas {
             this.resizeObserver?.disconnect();
             this.window?.removeEventListener('resize', this.resize);
         });
+    }
+
+    private prepareSprite(bitmap: ImageBitmap | null, color: ParticleEmitterSettings['color']): void {
+        const tint = color.join(',');
+        if (bitmap === this.preparedBitmap && tint === this.spriteTint) return;
+        this.preparedBitmap = bitmap;
+        this.spriteTint = tint;
+        if (!bitmap) {
+            this.spritePreview = null;
+            return;
+        }
+        const canvas = this.spritePreview ?? this.document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d', {willReadFrequently: true});
+        if (!context) return;
+        context.drawImage(bitmap, 0, 0);
+        const image = context.getImageData(0, 0, canvas.width, canvas.height);
+        const [red, green, blue] = color.map(tintLookup);
+        const pixels = image.data;
+        for (let index = 0; index < pixels.length; index += 4) {
+            pixels[index] = red[pixels[index]];
+            pixels[index + 1] = green[pixels[index + 1]];
+            pixels[index + 2] = blue[pixels[index + 2]];
+            pixels[index + 3] = pixels[index + 3] < 128 ? 0 : 255;
+        }
+        context.putImageData(image, 0, 0);
+        this.spritePreview = canvas;
     }
 
     private readonly resize = (): void => {
@@ -127,7 +191,25 @@ export class ParticlePreviewCanvas {
             const y = origin - particle.y * scale;
             const x = center + (particle.x + particle.z * .48) * scale;
             const side = Math.max(1, particle.size * scale);
-            context.fillRect(x - side / 2, y - side / 2, side, side);
+            const radius = side / 2;
+            if (this.spritePreview) {
+                context.drawImage(this.spritePreview, x - radius, y - radius, side, side);
+            } else {
+                context.beginPath();
+                context.moveTo(x, y - radius);
+                context.lineTo(x + radius, y);
+                context.lineTo(x, y + radius);
+                context.lineTo(x - radius, y);
+                context.fill();
+            }
         }
     }
+}
+
+function tintLookup(tint: number): Uint8ClampedArray {
+    return Uint8ClampedArray.from({length: 256}, (_, byte) => {
+        const srgb = byte / 255;
+        const linear = (srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4) * tint;
+        return 255 * (linear <= 0.0031308 ? linear * 12.92 : 1.055 * linear ** (1 / 2.4) - 0.055);
+    });
 }

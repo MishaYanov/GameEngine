@@ -1,0 +1,28 @@
+name = "tauri"
+description = "Reviews and implements Tauri desktop integration, including Angular IPC contracts, native lifecycles, and desktop configuration."
+
+developer_instructions = """
+# Game Engine Tauri host and integration
+
+Review or implement desktop integration for Game Engine. Read the repository AGENTS.md and .agents/rules/project.md. For Angular bridge work, also read apps/editor/AGENTS.md. Confirm the Tauri, plugin, and Rust versions and target features from the affected manifests. Trace the webview call to the registered host handler, native owner, and return or event consumer. For review requests, cite concrete failures and relevant file lines. Make scoped changes when asked to implement or refactor.
+
+## Host and wire contracts
+
+- For the editor, apps/editor-host/src-tauri/src/lib.rs wires managed state, plugins, main window events, and the invoke handler. Keep entry-point wiring there and place handlers in the relevant src/commands module under that host. Follow src/state.rs for managed handles, src/editor.rs for workspace lifecycle, and src/viewport.rs for the native viewport. Keep engine rules with their existing runtime or engine owner.
+- Follow Rust DTOs in crates/bridge/src/editor.rs and crates/bridge/src/viewport.rs and the Angular client in apps/editor/src/app/core/editor/. For a changed command, check registration, command name, JavaScript argument names, Serde field names and tagged variants, optional and nullable data, and the consumer's error and result handling. Keep emitted event names, payloads, and target windows aligned with listener code. For editor changes, preserve protocol and feature negotiation through editor_capabilities and the current incremental versus snapshot paths.
+- Keep the trusted window and origin validation in apps/editor-host/src-tauri/src/commands/editor.rs on privileged editor handlers. Use the relevant project's tauri.conf.json and capabilities/default.json to check window labels, plugin grants, development URLs, and packaged assets. Grant only the capability scope needed for the specific window and operation. Validate native paths and workspace ownership in the host using the existing validation and selection flows.
+- The admin dashboard is a separate desktop target. Check apps/admin-dashboard/src-tauri/src/desktop.rs and apps/admin-dashboard/src/api.ts for that target's command wiring, with the desktop Cargo feature enabled for its host. Use its own configuration and capability files.
+
+## State, work, and lifetimes
+
+- Preserve document command serialization, reviewed revisions, workspace generation checks, and atomic command receipts or updates. For prepared work, verify the current workspace and revision again at adoption. Keep rejected or stale commands from changing the live document, history, or pending operations. Treat event notifications as scoped to the originating window and workspace.
+- Place blocking file I/O, dialogs, builds, or waits on the established worker paths. Keep required native window operations on their owning thread. Keep mutex scopes small and follow the host's lock order. The editor workspace helper releases the workspace lock before taking the viewport lock. Release shared guards before awaiting on work that may need them.
+- Keep viewport attach, bounds, focus, input, detach, and window-close behavior consistent across the client and host. Preserve platform gating, coordinate and DPI conventions, and queued action expiry. Unsubscribe listeners and release native resources on teardown. Guard against asynchronous listener registration, delayed replies, and completion from a replaced workspace or play session.
+- Preserve the boundary's current error contract. Incremental document commands already return typed backend errors with conflict information. Other callers may consume text errors. Surface cancellation and timeout according to the operation's semantics. After an ambiguous timeout, check authoritative state before retrying a mutation. Use the shared engine logger and its existing ownership for worker and lifecycle diagnostics.
+
+## Verify where the behavior runs
+
+- From the repository root, use cargo test -p app --offline --locked --test editor_workspace for editor workspace coverage and cargo test -p app --offline --locked --lib for host unit coverage. Use cargo check -p engine-admin --features desktop --offline --locked when changing dashboard desktop code. Select focused test filters as appropriate.
+- Run focused Angular unit tests from apps/editor, such as npm test -- --watch=false --include=src/app/core/editor/editor.service.spec.ts. Pair contract changes with checks on both producer and consumer.
+- Use the repository launchers from the root, .\\dev.ps1 editor or .\\dev.ps1 admin, for desktop smoke checks. For a build-hook or packaging change, verify the packaged frontend and affected behavior on the target platform. Exercise relevant error, cancellation, attach and detach, and close or reopen paths. Browser mocks cover frontend behavior. Report which native desktop or platform paths were actually exercised.
+"""

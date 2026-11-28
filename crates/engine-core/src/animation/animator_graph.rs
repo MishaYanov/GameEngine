@@ -1,5 +1,5 @@
 //! Versioned Animator definitions. Ordered edges define runtime priority.
-use super::{AnimationClipRef, AnimationSourceRef, VisualTargetId};
+use super::{AnimationClipRef, AnimationSourceRef, FootIkSettings, VisualTargetId};
 use crate::{EntityKey, asset_catalog::AssetId, input::valid_game_action_id};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,6 +19,8 @@ pub struct AnimatorSettings {
 	/// Imported glTF node whose planar translation is resolved by the character motor.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub root_motion_source_node: Option<u32>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub foot_ik: Option<FootIkSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +127,17 @@ impl AnimatorParameterSource {
 
 impl AnimatorSettings {
 	pub fn validate(&self) -> Result<(), String> {
+		if let Some(foot) = &self.foot_ik {
+			let AnimatorBinding::Imported { source } = &self.binding else {
+				return Err("Foot IK requires an imported Animator binding".into());
+			};
+			foot.validate(
+				source
+					.character
+					.as_ref()
+					.ok_or("Foot IK requires persistent Character joint IDs")?,
+			)?;
+		}
 		if self.root_motion_source_node.is_some()
 			&& !matches!(self.binding, AnimatorBinding::Imported { .. })
 		{
@@ -311,7 +324,7 @@ impl AnimatorGraph {
 				(
 					AnimatorBinding::Imported { source: rig },
 					AnimationClipRef::Imported { source, .. },
-				) => rig == source,
+				) => rig.same_rig(source),
 				(AnimatorBinding::Visual { .. }, AnimationClipRef::Authored { .. }) => true,
 				_ => false,
 			};

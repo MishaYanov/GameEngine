@@ -5,6 +5,7 @@ export type ViewportPivot = 'pivot' | 'center';
 export type ViewportProjection = 'perspective' | 'orthographic';
 export type ViewportPlane = 'xz' | 'xy' | 'yz';
 export type ViewportView = 'scene' | 'game';
+export type ViewportShading = 'lit' | 'unlit' | 'wireframe';
 export type ViewportOrientation = 'free' | 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right';
 export type EditorWarmingMode = 'off' | 'references' | 'models';
 
@@ -26,6 +27,8 @@ export interface ViewportSettings {
     readonly pivot: ViewportPivot;
     readonly grid: boolean;
     readonly colliders: boolean;
+    readonly shading: ViewportShading;
+    readonly show_vertices: boolean;
     readonly grid_spacing: number;
     readonly snap: boolean;
     readonly move_snap: number;
@@ -50,6 +53,7 @@ export interface ViewportEditorState {
     readonly collider_error?: string | null;
     readonly transform_preview?: ViewportTransformPreview | null;
     readonly game_status?: PlayStatus | null;
+    readonly world_gpu_asset_bytes?: number;
     readonly scene_warming_result?: SceneWarmingResult | null;
     readonly orbit_status?: {
         readonly blocker: string | null;
@@ -65,6 +69,10 @@ export interface PlayStatus {
     readonly scene_id: string;
     readonly paused: boolean;
     readonly pending_scene_id: string | null;
+    readonly failed_scene_id?: string;
+    readonly failed_scene_attempt_id?: number;
+    readonly resident_regions?: readonly string[];
+    readonly sequence?: { readonly instance: string; readonly subtitle: string | null };
     readonly gameplay: {
         readonly objective: string;
         readonly detail: string | null;
@@ -79,6 +87,8 @@ export type ViewportAction =
     | {readonly type: 'set_pivot'; readonly pivot: ViewportPivot}
     | {readonly type: 'set_grid'; readonly visible: boolean}
     | {readonly type: 'set_colliders'; readonly visible: boolean}
+    | { readonly type: 'set_shading'; readonly shading: ViewportShading }
+    | { readonly type: 'set_show_vertices'; readonly visible: boolean }
     | {readonly type: 'set_grid_spacing'; readonly spacing: number}
     | {readonly type: 'set_snap'; readonly enabled: boolean}
     | {readonly type: 'set_snap_increments'; readonly translation: number; readonly rotation_degrees: number; readonly scale: number}
@@ -116,5 +126,5 @@ export interface ViewportTransformPreview {
 export const DEFAULT_VIEWPORT_SETTINGS: ViewportSettings = {
     tool: 'move', space: 'world', pivot: 'pivot', grid: true, colliders: false, grid_spacing: 1,
     snap: false, move_snap: 1, rotation_snap_degrees: 15, scale_snap: 0.1,
-    projection: 'perspective', plane: 'xz', view: 'scene',
+    projection: 'perspective', plane: 'xz', view: 'scene', shading: 'lit', show_vertices: false,
 };

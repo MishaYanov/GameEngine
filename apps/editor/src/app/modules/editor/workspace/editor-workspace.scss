@@ -28,10 +28,6 @@
   --workspace-hierarchy-max: 30%;
 }
 
-.workspace-authoring-drawer.workspace-authoring-hidden {
-  display: none;
-}
-
 .workspace-controls {
   display: flex;
   flex: none;
@@ -48,6 +44,10 @@
 }
 
 .problems-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
   min-height: var(--layout-subject-control-height);
   padding-inline: var(--space-2);
   border: var(--border-width) solid var(--color-border);
@@ -224,22 +224,6 @@ scene-viewport {
 
 scene-viewport[hidden] {
   display: none;
-}
-
-@container (max-width: 45rem) {
-  .workspace-main {
-    --workspace-hierarchy-max: 48%;
-    --workspace-inspector-max: 48%;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    overflow: auto;
-  }
-
-  .workspace-center {
-    order: -1;
-    flex: 1 0 100%;
-    min-height: 24rem;
-  }
 }
 
 :host-context(html[data-theme='workbench']) .workspace-main {

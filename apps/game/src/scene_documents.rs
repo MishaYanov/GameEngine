@@ -54,15 +54,21 @@ impl GameApp {
 			.transpose()?
 			.or_else(|| self.project.clone())
 			.ok_or("Project configuration is not initialized")?;
-		let path = play::resolve_scene_path(asset_root, project.startup_scene_path()?)?;
+		let relative = Path::new(project.startup_scene_path()?);
+		let (path, parsed) = match &self.asset_manager {
+			Some(assets) => {
+				scene_io::load_confined_data_from_canonical_root(assets.root(), relative)?
+			}
+			None => scene_io::load_confined_data(asset_root, relative)?,
+		};
 		let renderer = self
 			.renderer
 			.as_ref()
 			.ok_or("Renderer is not initialized")?;
 
-		let mut loaded = scene_io::load(&path, asset_root, renderer)?;
+		let mut loaded = scene_io::load_parsed(&parsed, asset_root, renderer)?;
 		let mut editor = SceneEditor::for_project(&loaded.scene, &loaded.camera, project.clone())?;
-		editor.set_module_resolver(Arc::new(gameplay_catalog::resolve))?;
+		editor.set_module_resolver(gameplay_catalog::project_resolver(asset_root, gameplay_catalog::project_scripts::ScriptSource::Packaged))?;
 		let audio_catalog = bridge::feedback_audio::load(asset_root)?;
 		let playback = editor
 			.project()

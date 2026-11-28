@@ -45,6 +45,12 @@ pub fn inspect_scene_dependencies(
 		return Err("Asset root must be a directory without symbolic links".into());
 	}
 	let catalog = super::catalog::read_catalog(&root)?;
+	let mut script_descriptors = gameplay_catalog::script_descriptors();
+	if scene.entities.iter().any(|entity| entity.scripts.iter().any(|script| {
+		engine_core::components::project_script_asset(&script.settings.script_id).is_some()
+	})) {
+		script_descriptors.extend(gameplay_catalog::project_scripts::descriptors(&root)?);
+	}
 	let mut verification = Verification {
 		closure: Closure::new(project, &root, catalog),
 		owners: scene
@@ -64,7 +70,7 @@ pub fn inspect_scene_dependencies(
 			.iter()
 			.map(|entity| (&entity.key, entity))
 			.collect(),
-		script_descriptors: gameplay_catalog::script_descriptors(),
+		script_descriptors,
 		problems: Vec::new(),
 	};
 	if let Err(message) = linked_prefab::validate_scene_links(scene) {
@@ -376,32 +382,13 @@ impl Verification<'_> {
 		graph: &AnimatorGraph,
 		open: &Option<DependencyOpen>,
 	) {
-		let mut seen = HashSet::new();
 		for state in &graph.states {
-			let (id, fingerprint, kind) = match &state.clip {
-				AnimationClipRef::Imported { source, .. } => {
-					(&source.asset_id, &source.expected_sha256, AssetKind::Model)
-				}
-				AnimationClipRef::Authored {
-					asset_id,
-					expected_sha256,
-				} => (asset_id, expected_sha256, AssetKind::AnimationClip),
+			let id = match &state.clip {
+				AnimationClipRef::Imported { source, .. } => &source.asset_id,
+				AnimationClipRef::Authored { asset_id, .. } => asset_id,
 			};
-			if !seen.insert((id, fingerprint)) {
-				continue;
-			}
 			let target = self.target(id);
-			let matches_pin = self
-				.closure
-				.catalog
-				.by_id(id)
-				.is_some_and(|asset| asset.kind == kind && &asset.fingerprint == fingerprint);
-			let result = if matches_pin {
-				self.closure.record(id)
-			} else {
-				Err("Clip identity or captured revision is unavailable".into())
-			};
-			if let Err(message) = result {
+			if let Err(message) = self.closure.record_animator_clip(&state.clip) {
 				self.asset_error(
 					entity,
 					component,

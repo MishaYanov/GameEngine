@@ -1,13 +1,50 @@
-import {Component, computed, inject, input, output, signal} from '@angular/core';
+import {afterNextRender, Component, computed, inject, Injector, input, output, signal} from '@angular/core';
 import type {WorkspaceAction} from '../../../../core/editor/editor-actions';
 import {editorShortcutLabel} from '../../../../core/editor/editor-keymap';
 import {CommandBuilder} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import type {WorkspaceViewKind} from '../../../../core/editor/workspace/workspace-view';
-import {EditorIcon} from '../../../../shared/icons/editor-icon';
+import {EditorIcon, type EditorIconName} from '../../../../shared/icons/editor-icon';
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceDraftReview} from '../workspace-draft-review';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
+
+interface ToolbarEdit {
+    readonly action: WorkspaceAction;
+    readonly label: string;
+    readonly icon: EditorIconName;
+    readonly keys?: string;
+    readonly shortcut?: string;
+    readonly empty?: string;
+}
+
+const SCENE_EDITS: readonly ToolbarEdit[] = [
+    {
+        action: 'save', label: 'Save Scene', icon: 'save', keys: 'Control+S Meta+S',
+        shortcut: editorShortcutLabel('document.save'), empty: 'All changes saved'
+    },
+    {action: 'saveAll', label: 'Save All', icon: 'saveAll', empty: 'All changes saved'},
+    {
+        action: 'undo', label: 'Undo', icon: 'undo', keys: 'Control+Z Meta+Z',
+        shortcut: editorShortcutLabel('document.undo'), empty: 'History is at the oldest edit'
+    },
+    {
+        action: 'redo', label: 'Redo', icon: 'redo', keys: 'Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z',
+        shortcut: 'Ctrl/Cmd + Y or Ctrl/Cmd + Shift + Z', empty: 'History is at the latest edit'
+    },
+];
+
+const SELECTION_EDITS: readonly ToolbarEdit[] = [
+    {
+        action: 'duplicate', label: 'Duplicate', icon: 'copy', keys: 'Control+D Meta+D',
+        shortcut: editorShortcutLabel('selection.duplicate'), empty: 'Select an object'
+    },
+    {action: 'deleteSelection', label: 'Delete', icon: 'trash', keys: 'Delete', empty: 'Select an object'},
+    {
+        action: 'frameSelection', label: 'Frame Selection', icon: 'locate', keys: 'F',
+        shortcut: 'F in the Scene view', empty: 'Select an object'
+    },
+];
 
 @Component({
     selector: 'workspace-toolbar',
@@ -22,12 +59,29 @@ export class WorkspaceToolbar {
     readonly paletteRequested = output<void>();
     readonly viewSelected = output<WorkspaceViewKind>();
 
-    protected readonly paletteShortcut = editorShortcutLabel('palette.open');
+    protected readonly editGroups = [
+        {label: 'Scene edits', actions: SCENE_EDITS},
+        {label: 'Selected entities', actions: SELECTION_EDITS},
+    ];
+    protected readonly paletteTitle = `Commands (${editorShortcutLabel('palette.open')})`;
     protected readonly editorService = inject(EditorService);
     protected readonly sceneEditing = inject(SceneEditingService, {optional: true});
     private readonly drafts = inject(WorkspaceDraftReview);
+    private readonly injector = inject(Injector);
     private readonly viewportEditor = inject(ViewportEditorService, {optional: true});
     protected readonly actionError = signal<string | null>(null);
+    protected readonly playAction = computed(() => this.editorService.playing() ? 'stop' : 'play');
+    protected readonly unsaved = computed(() =>
+        this.editorService.dirty() || this.sceneEditing?.hasChanges() === true);
+    private readonly saveIssues = computed(() =>
+        this.editorService.savedFiles().filter(file => file.outcome !== 'written').length);
+    protected readonly saveIssue = computed(() => this.saveIssues() > 0);
+    protected readonly saveSummary = computed(() => {
+        const issues = this.saveIssues();
+        if (issues > 0) return issues === 1 ? '1 file needs attention' : `${issues} files need attention`;
+        const count = this.editorService.savedFiles().length;
+        return count === 1 ? '1 file saved' : `${count} files saved`;
+    });
     protected readonly saveOutcomes = {
         written: 'Saved',
         conflict: 'Changed on disk',
@@ -60,7 +114,7 @@ export class WorkspaceToolbar {
         switch (action) {
             case 'save':
             case 'saveAll':
-                return this.editorService.dirty() || this.sceneEditing?.hasChanges() === true;
+                return this.unsaved();
             case 'undo':
                 return this.editorService.snapshot()?.can_undo === true || this.sceneEditing?.hasChanges() === true;
             case 'redo':
@@ -74,6 +128,17 @@ export class WorkspaceToolbar {
             case 'play':
                 return true;
         }
+    }
+
+    protected editTitle(item: ToolbarEdit): string {
+        const label = item.shortcut ? `${item.label} (${item.shortcut})` : item.label;
+        if (!this.canEditScene() || this.sceneEditing?.ready() === false || this.canPerform(item.action)) return label;
+        return item.empty ? `${label} · ${item.empty}` : label;
+    }
+
+    protected dismissSaveReport(playControl: HTMLButtonElement): void {
+        this.editorService.clearSaveReport();
+        afterNextRender(() => playControl.focus(), {injector: this.injector});
     }
 
     private async runAction(action: WorkspaceAction): Promise<void> {

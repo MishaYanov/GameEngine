@@ -100,6 +100,10 @@ impl RuntimeLifecycle {
 									NativeBehaviorSpec::KeyDoor { .. } => "key_door",
 									NativeBehaviorSpec::Collectible { .. } => "collectible",
 									NativeBehaviorSpec::TimedSpawner { .. } => "timed_spawner",
+									NativeBehaviorSpec::Projectile { .. } => "projectile",
+									NativeBehaviorSpec::ProjectileLauncher { .. } => {
+										"projectile_launcher"
+									}
 									NativeBehaviorSpec::StateMachine { .. } => "state_machine",
 								}
 								.into(),

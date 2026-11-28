@@ -3,7 +3,7 @@ use bridge::viewport::{
 	SceneWarmingMode, SceneWarmingResultDto, WarmingCacheDto, WarmingCacheState,
 	WarmingLoadIdentityDto, WarmingSessionRowDto, WarmingViewportDto,
 };
-use runtime::particle_draw::ParticleDraw;
+use runtime::{particle_draw::ParticleDraw, scene::RenderVisibility};
 
 impl Worker {
 	pub(super) fn draw(&mut self) -> Result<(), String> {
@@ -134,6 +134,23 @@ impl Worker {
 						Some(session.render_document())
 					};
 					let game_camera = self.interaction.game_camera(workspace);
+					let animation_preview = workspace.active_animation_preview();
+					let settings = &self.interaction.settings;
+					let editor_shading = (game_camera.is_none()
+						&& animation_preview.is_none()
+						&& settings.view == bridge::viewport::ViewportView::Scene)
+						.then(|| editor_shading_mode(settings.shading));
+					// Play can transition independently of the scene that owns the selection.
+					let marked_entities = if editor_shading.is_some()
+						&& settings.show_vertices
+						&& session
+						.play_scene_id()
+						.is_none_or(|id| id == session.active_scene_id())
+					{
+						session.selection().to_vec()
+					} else {
+						Vec::new()
+					};
 					let scene_id = (!session.is_playing()
 						&& self.interaction.settings.view == bridge::viewport::ViewportView::Scene)
 						.then(|| session.active_scene_id().clone());
@@ -152,9 +169,11 @@ impl Worker {
 						warming: workspace.scene_warming.context(),
 						warmed,
 						animations: session.animations().cloned(),
-						animation_preview: workspace.active_animation_preview(),
+						animation_preview,
 						document,
 						game_camera,
+						editor_shading,
+						marked_entities,
 						revision,
 						generation,
 						scene_id,
@@ -182,6 +201,8 @@ impl Worker {
 			animation_preview,
 			mut document,
 			game_camera,
+			editor_shading,
+			marked_entities,
 			revision,
 			generation,
 			scene_id,
@@ -346,7 +367,7 @@ impl Worker {
 					.ok_or("Native viewport window is not initialized")?,
 			);
 			let [width, height] = self.extent();
-			let mut renderer = WindowRenderer::new(Arc::clone(&window), width, height)?;
+			let mut renderer = WindowRenderer::new_editor(Arc::clone(&window), width, height)?;
 			let mut assets = AssetManager::new(&asset_root).map_err(|error| error.to_string())?;
 			let data = document
 				.take()
@@ -543,7 +564,7 @@ impl Worker {
 			self.last_status = Instant::now() - Duration::from_secs(1);
 		}
 		self.prepared_extent = Some([width, height]);
-		let (uniform, game_rect) = if let Some(camera) = game_camera {
+		let (uniform, game_rect) = if let Some(camera) = &game_camera {
 			let rect = GameContentRect::fit(width, height).ok_or("Invalid Game viewport extent")?;
 			(
 				CameraUniform::from_view_projection(camera.view_projection(rect.aspect())?),
@@ -585,24 +606,35 @@ impl Worker {
 			gpu.scene.sky_settings(),
 			gpu.scene.environment(),
 		)?;
-		let frustum = runtime::visibility::Frustum::from_view_projection(
-			glam::Mat4::from_cols_array(&uniform.view_projection),
-		)?;
+		let visibility = RenderVisibility::from_camera(&gpu.renderer, &uniform, editor_shading)?;
 		ParticleDraw::prepare(
 			&mut gpu.particle_draw,
 			&gpu.renderer,
 			&uniform,
 			&self.particle_samples,
+			Some(&mut gpu.assets),
 		)?;
-		let (mut objects, _) = gpu.scene.try_render_visible(Some(&frustum))?;
-		if let Some(object) = gpu.particle_draw.as_ref().and_then(ParticleDraw::object) {
-			objects.push(object);
-		}
-		let frame_status = match game_rect {
-			Some(rect) => gpu
+		let (mut objects, _) = if let Some(camera) = game_camera {
+			let shared = self.shared.lock().map_err(|_| "Editor document lock is poisoned")?;
+			let lods = shared.as_ref().into_iter().flat_map(|workspace| {
+				let session = workspace.backend.session();
+				session.project().world_lods.iter().filter(move |lod| session.play_scene_id() == Some(&lod.world))
+			}).cloned().collect::<Vec<_>>();
+			drop(shared);
+			gpu.scene.try_render_view(&visibility, &[], &lods, camera.position)?
+		} else {
+			gpu.scene.try_render_view(&visibility, &marked_entities, std::iter::empty(), [0.0; 3])?
+		};
+		objects.extend(gpu.particle_draw.iter().flat_map(ParticleDraw::objects));
+		let frame_status = match (game_rect, editor_shading) {
+			(Some(rect), _) => gpu
 				.renderer
 				.draw_in_rect(&uniform, &objects, rect.pixels())?,
-			None => gpu.renderer.draw(&uniform, &objects)?,
+			(None, Some(mode)) => {
+				gpu.renderer
+					.draw_editor_in_rect(&uniform, &objects, [0, 0, width, height], mode)?
+			}
+			(None, None) => gpu.renderer.draw(&uniform, &objects)?,
 		};
 		let presented_at = (frame_status == DrawStatus::Rendered).then(Instant::now);
 		if !loading {

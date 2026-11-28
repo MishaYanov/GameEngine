@@ -53,6 +53,7 @@ pub enum AssetKind {
 	InputActions,
 	Model,
 	Prefab,
+	RustScript,
 	Scene,
 	SkyPanorama,
 	Texture,
@@ -82,6 +83,12 @@ pub struct PersistentAsset {
 impl PersistentAsset {
 	pub fn validate(&self) -> Result<(), String> {
 		validate_model_path(&self.path)?;
+		if self.kind == AssetKind::RustScript
+			&& (!self.path.to_ascii_lowercase().ends_with(".rs")
+			|| self.bytes > crate::components::MAX_RUST_SCRIPT_BYTES as u64)
+		{
+			return Err("Rust script assets require a .rs file within 64 KiB".into());
+		}
 		if self.kind == AssetKind::AnimatorGraph
 			&& (!self
 				.path

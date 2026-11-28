@@ -95,6 +95,45 @@ async function setup() {
 	};
 }
 describe('native animation authoring', () => {
+    it('asks the author to choose a clip when a standard GLB changes', async () => {
+        const p = await setup();
+        const revised = {...review.metadata.source, expected_sha256: 'b'.repeat(64)};
+        p.inspectAnimation.mockResolvedValueOnce({...review, metadata: {...review.metadata, source: revised}});
+        p.button('Review Animation Asset').click();
+        await p.fixture.whenStable();
+        expect(p.changes).toEqual([]);
+        expect(p.button('Use these clips').disabled).toBe(true);
+        const picker = Array.from(p.root.querySelectorAll('select')).find(field => field.options[0]?.text === 'Choose clip')!;
+        picker.value = '0';
+        picker.dispatchEvent(new Event('change'));
+        await p.fixture.whenStable();
+        p.button('Use these clips').click();
+        expect(p.changes).toEqual([{...settings, source: revised}]);
+    });
+    it('preserves playback by clip identity when a Character re-export reorders clips', async () => {
+        const p = await setup();
+        const captured = {...settings.source, character: {clips: ['idle', 'walk'], joints: {'1': 'hip', '2': 'leg'}}};
+        const revised = {
+            ...captured, expected_sha256: 'b'.repeat(64), character: {
+                clips: ['walk', 'idle'], joints: {'4': 'leg', '5': 'hip'},
+            }
+        };
+        p.fixture.componentRef.setInput('value', {...settings, source: captured});
+        p.inspectAnimation.mockResolvedValueOnce({
+            ...review, metadata: {
+                ...review.metadata, source: revised, clips: [
+                    {index: 0, name: 'Travel', duration_seconds: 2}, {index: 1, name: 'Rest', duration_seconds: 1},
+                ]
+            }
+        });
+        p.button('Review Animation Asset').click();
+        await p.fixture.whenStable();
+        expect(p.changes).toEqual([{
+            ...settings,
+            source: revised,
+            playback: {kind: 'single_clip', clip_index: 1, looping: true}
+        }]);
+    });
 	it('validates bounded metadata, source pins, speed ratios and preview times', () => {
 		expect(readAnimationReview(review)).toEqual(review);
 		expect(validAnimationSettings({ ...settings, speed_numerator: 16, speed_denominator: 1 })).toBe(

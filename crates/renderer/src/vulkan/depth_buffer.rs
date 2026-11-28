@@ -80,6 +80,37 @@ impl VulkanDepthBuffer {
 		device: &VulkanDevice,
 		extent: vk::Extent2D,
 	) -> Result<Self, VulkanDepthBufferError> {
+		Self::create(
+			instance,
+			device,
+			extent,
+			Self::FORMAT,
+			vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+		)
+	}
+
+	pub(crate) fn sampled(
+		instance: &Instance,
+		device: &VulkanDevice,
+		extent: vk::Extent2D,
+		format: vk::Format,
+	) -> Result<Self, VulkanDepthBufferError> {
+		Self::create(
+			instance,
+			device,
+			extent,
+			format,
+			vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+		)
+	}
+
+	fn create(
+		instance: &Instance,
+		device: &VulkanDevice,
+		extent: vk::Extent2D,
+		format: vk::Format,
+		usage: vk::ImageUsageFlags,
+	) -> Result<Self, VulkanDepthBufferError> {
 		let ash_device = device.raw().clone();
 
 		let image_info = vk::ImageCreateInfo::default()
@@ -93,10 +124,10 @@ impl VulkanDepthBuffer {
 			})
 			.mip_levels(1)
 			.array_layers(1)
-			.format(Self::FORMAT)
+			.format(format)
 			.tiling(vk::ImageTiling::OPTIMAL)
 			.initial_layout(vk::ImageLayout::UNDEFINED)
-			.usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+			.usage(usage)
 			.samples(vk::SampleCountFlags::TYPE_1)
 			.sharing_mode(vk::SharingMode::EXCLUSIVE);
 
@@ -142,10 +173,16 @@ impl VulkanDepthBuffer {
 			device,
 			"depth_image",
 			image,
-			u64::from(extent.width) * u64::from(extent.height) * 4,
+			u64::from(extent.width)
+				* u64::from(extent.height)
+				* if format == vk::Format::D16_UNORM {
+				2
+			} else {
+				4
+			},
 			requirements.size,
 			memory_type_index,
-			&format!("{}x{} D32_SFLOAT", extent.width, extent.height),
+			&format!("{}x{} {format:?}", extent.width, extent.height),
 		);
 
 		if let Err(error) = unsafe { ash_device.bind_image_memory(image, memory, 0) } {
@@ -168,7 +205,7 @@ impl VulkanDepthBuffer {
 		let view_info = vk::ImageViewCreateInfo::default()
 			.image(image)
 			.view_type(vk::ImageViewType::TYPE_2D)
-			.format(Self::FORMAT)
+			.format(format)
 			.subresource_range(subresource_range);
 
 		let view = match unsafe { ash_device.create_image_view(&view_info, None) } {
@@ -176,9 +213,8 @@ impl VulkanDepthBuffer {
 
 			Err(error) => {
 				unsafe {
-					ash_device.free_memory(memory, None);
-
 					ash_device.destroy_image(image, None);
+					ash_device.free_memory(memory, None);
 				}
 
 				return Err(error.into());
@@ -197,7 +233,7 @@ impl VulkanDepthBuffer {
 			view,
 
 			extent,
-			format: Self::FORMAT,
+			format,
 		})
 	}
 

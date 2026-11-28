@@ -10,24 +10,17 @@
                 <fieldset [disabled]="!available()" class="gameplay-roles">
                     <legend>Scene roles</legend>
                     @if (cameraRoleSupported()) {
-                        <label>Game Camera
-                            <select #camera (change)="assignSceneRole('camera', camera)">
-                                <option [selected]="!snapshot.document.default_game_camera" value="" disabled>Unassigned</option>
-                                @for (object of cameras(); track object.key) {
-                                    <option [value]="object.key" [selected]="object.key === snapshot.document.default_game_camera">{{ object.name }}</option>
-                                }
-                            </select>
-                        </label>
+                        <editor-search-picker label="Game Camera" placeholder="Find a camera…"
+                                              [options]="cameraOptions()"
+                                              [value]="snapshot.document.default_game_camera ?? null"
+                                              [disabled]="!available()" (picked)="assignSceneRole('camera', $event)"/>
                     }
                     @if (skyRoleSupported()) {
-                        <label>Scene Sky
-                            <select #sky (change)="assignSceneRole('sky', sky)">
-                                <option [selected]="!snapshot.document.environment?.active_sky" value="">Unassigned</option>
-                                @for (object of skies(); track object.key) {
-                                    <option [value]="object.key" [selected]="object.key === snapshot.document.environment?.active_sky">{{ object.name }}</option>
-                                }
-                            </select>
-                        </label>
+                        <editor-search-picker label="Scene Sky" placeholder="Find a sky…"
+                                              [options]="skyOptions()"
+                                              [value]="snapshot.document.environment?.active_sky ?? null"
+                                              [disabled]="!available()" [clearable]="true"
+                                              (picked)="assignSceneRole('sky', $event)"/>
                     }
                 </fieldset>
             }
@@ -35,16 +28,9 @@
                 <editor-scene-environment-inspector [editable]="available()"/>
             }
             <div class="scene-actions">
-                <label>Scene
-                    <select #scene (change)="switchScene(scene)" [disabled]="!available()">
-                        @for (entry of snapshot.scenes; track entry.id) {
-                            <option [selected]="entry.id === (warmTarget() ?? snapshot.active_scene_id)"
-                                    [value]="entry.id">
-                                {{ entry.asset_path }}{{ entry.dirty ? ' *' : '' }}
-                            </option>
-                        }
-                    </select>
-                </label>
+                <editor-search-picker class="scene-picker" label="Scene" placeholder="Find a scene…"
+                                      [options]="sceneOptions()" [value]="warmTarget() ?? snapshot.active_scene_id"
+                                      [disabled]="!available()" (picked)="switchScene($event)"/>
                 <button (click)="toggleWarming()" [attr.aria-pressed]="warming()" [disabled]="!prepareAvailable()"
                         type="button">Prepare scene
                 </button>
@@ -143,26 +129,12 @@
                     <legend>Gameplay Roles</legend>
 
                     @for (role of gameplayRoles(); track role.name; let index = $index) {
-                        @let boundEntity = roleBinding(role.name);
                         <div class="gameplay-role">
-                            <label>
-                                {{ role.label }}
-
-                                <select
-                                    #roleSelect
-                                    (change)="setRole(role.name, roleSelect)"
-                                    [attr.aria-describedby]="'gameplay-role-hint-' + index"
-                                    [attr.data-scene-binding]="role.name"
-                                >
-                                    <option [selected]="!boundEntity" value="">Unassigned</option>
-
-                                    @for (entity of snapshot.document.entities; track entity.key) {
-                                        <option [selected]="entity.key === boundEntity" [value]="entity.key">
-                                            {{ entity.name }} ({{ entity.key }})
-                                        </option>
-                                    }
-                                </select>
-                            </label>
+                            <editor-search-picker [label]="role.label" placeholder="Find an object…"
+                                                  [options]="bindingOptions()" [value]="roleBinding(role.name) ?? null"
+                                                  [attr.data-scene-binding]="role.name" [clearable]="true"
+                                                  [describedBy]="'gameplay-role-hint-' + index"
+                                                  [disabled]="!available()" (picked)="setRole(role.name, $event)"/>
                             <p [id]="'gameplay-role-hint-' + index">{{ role.requirement_hint }}</p>
                         </div>
                     }
@@ -181,10 +153,40 @@
     }
 </editor-dialog>
 
-@if (!informationOpen()) {
+<editor-dialog [(open)]="newSceneOpen" [renderFields]="false" [closeBlocked]="pending()"
+               [config]="confirmationConfig" title="New Scene">
+    <div class="new-scene-form">
+        <label for="new-scene-name">Scene name</label>
+        <input #sceneName id="new-scene-name" [value]="newSceneName()" (input)="newSceneName.set(sceneName.value)"
+               (keydown.enter)="$event.preventDefault(); createNewScene()"
+               [disabled]="pending()" aria-describedby="new-scene-path" maxlength="80"
+               placeholder="Boss room" autocomplete="off" autofocus/>
+        <p id="new-scene-path">
+            @if (newScenePath(); as path) {
+                File: <strong>{{ path }}</strong> · Save All to save it in the project.
+            } @else {
+                Use letters, numbers, spaces, dashes, or underscores.
+            }
+        </p>
+        @if (newSceneExists()) {
+            <p role="alert" class="error">A scene already uses this file name. Pick another name.</p>
+        }
+        @if (error(); as failure) {
+            <p role="alert" class="error">{{ failure }}</p>
+        }
+        @if (pending()) {
+            <p role="status">Creating the scene…</p>
+        }
+    </div>
+    <button dialog-actions type="button" (click)="createNewScene()"
+            [disabled]="!available() || !newScenePath() || newSceneExists()">Create Scene
+    </button>
+</editor-dialog>
+
+@if (!informationOpen() && !newSceneOpen()) {
     @if (sceneSwitch.error(); as failure) {
         <p class="error" role="alert">{{ failure }}</p>
-    } @else if (sceneSwitch.message(); as status) {
+    } @else if (message() ?? sceneSwitch.message(); as status) {
         <p class="status" role="status">{{ status }}</p>
     }
 }

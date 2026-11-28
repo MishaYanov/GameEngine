@@ -5,7 +5,9 @@ import {
     DEFAULT_GAME_INPUT,
     evaluateGameInput,
     GAME_KEYS,
+    GAME_MOUSE_BUTTONS,
     type GameInputProfile,
+    type GameMouseButton,
     gameKeyFromCode,
     MAX_GAME_ACTIONS,
     MOVEMENT_AXES,
@@ -21,6 +23,7 @@ interface ActionDraft {
     row: number;
     id: string;
     key: string;
+    mouseButton: GameMouseButton | '';
     parameter: string;
 }
 
@@ -47,6 +50,7 @@ export class GameInputManager {
     protected readonly error = signal<string | null>(null);
     protected readonly axes = MOVEMENT_AXES;
     protected readonly keys = GAME_KEYS;
+    protected readonly mouseButtons = GAME_MOUSE_BUTTONS;
     protected readonly actionLimit = MAX_GAME_ACTIONS;
     protected readonly dialogConfig = {width: '48rem'};
     protected readonly draft = signal<InputDraft>({movement: {...DEFAULT_GAME_INPUT.movement}, actions: []});
@@ -69,12 +73,15 @@ export class GameInputManager {
     private nextRow = 0;
     private readonly profile = computed<GameInputProfile>(() => {
         const {movement, actions} = this.draft();
+        const mouseActions = actions.flatMap(({id, mouseButton}) =>
+            mouseButton ? [{id: id.trim(), button: mouseButton}] : []);
         return {
             schema_version: 1,
             movement,
             actions: actions.map(({id, key, parameter}) => ({
                 id: id.trim(), key, animation_parameter: parameter.trim() || null,
             })),
+            ...(mouseActions.length ? {mouse_actions: mouseActions} : {}),
         };
     });
     protected readonly validation = computed(() => validateGameInput(this.profile()));
@@ -99,16 +106,25 @@ export class GameInputManager {
         });
     }
 
-    show(): void {
+    canOpenInputActionsAsset(): boolean {
+        return this.available() && this.inputActions?.supported() === true;
+    }
+
+    show(assetId?: string): boolean {
         const snapshot = this.editor.snapshot();
-        if (!snapshot || this.open() || !this.available()) return;
+        if (!snapshot || this.open() || !this.available() || (assetId && !this.canOpenInputActionsAsset())) return false;
         const profile = snapshot.project.input_profile ?? DEFAULT_GAME_INPUT;
         this.projectGeneration = this.editor.workspaceGeneration();
         this.savedProfile.set(this.profileSignature(profile));
+        const mouseButtons = new Map((profile.mouse_actions ?? []).map(({id, button}) => [id, button]));
         this.draft.set({
             movement: {...profile.movement},
             actions: (profile.actions ?? []).map(binding => ({
-                row: this.nextRow++, id: binding.id, key: binding.key, parameter: binding.animation_parameter ?? '',
+                row: this.nextRow++,
+                id: binding.id,
+                key: binding.key,
+                mouseButton: mouseButtons.get(binding.id) ?? '',
+                parameter: binding.animation_parameter ?? '',
             })),
         });
         this.message.set(null);
@@ -120,10 +136,11 @@ export class GameInputManager {
             ?? snapshot.document?.entities.find(entity =>
                 entity.player_controller?.enabled && entity.player_controller.settings.local)?.player_controller;
         const input = this.inputActions?.supported() ? controller?.settings.input : undefined;
-        const preferred = input?.kind === 'asset' ? input.asset_id : null;
+        const preferred = assetId ?? (input?.kind === 'asset' ? input.asset_id : null);
         this.preferredAsset.set(preferred);
         this.showingAssets.set(preferred !== null);
         this.open.set(true);
+        return true;
     }
 
     canLeaveProject(): boolean {
@@ -170,7 +187,8 @@ export class GameInputManager {
     protected addAction(): void {
         if (this.draft().actions.length >= MAX_GAME_ACTIONS || this.pending()) return;
         this.draft.update(draft => ({
-            ...draft, actions: [...draft.actions, {row: this.nextRow++, id: '', key: 'space', parameter: ''}],
+            ...draft,
+            actions: [...draft.actions, {row: this.nextRow++, id: '', key: 'space', mouseButton: '', parameter: ''}],
         }));
     }
 
@@ -249,6 +267,7 @@ export class GameInputManager {
         return JSON.stringify([
             MOVEMENT_AXES.map(axis => profile.movement[axis.field]),
             (profile.actions ?? []).map(({id, key, animation_parameter}) => [id, key, animation_parameter || null]),
+            (profile.mouse_actions ?? []).map(({id, button}) => [id, button]).sort(),
         ]);
     }
 }

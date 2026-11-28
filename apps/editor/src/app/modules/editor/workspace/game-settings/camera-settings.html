@@ -34,7 +34,11 @@
         }
     </section>
 } @else {
-    <button (click)="show()" [disabled]="!available()" type="button">Game Camera…</button>
+    <button (click)="show()" [disabled]="!available()" aria-label="Game Camera…" title="Game Camera…"
+            class="game-camera-trigger" type="button">
+        <editor-icon name="camera"/>
+        <span>Game Camera…</span>
+    </button>
 }
 <editor-dialog (closed)="focusPreviewControls()" (openChange)="!$event && !legacyPreviewing() && close()" [config]="{width: '36rem'}"
                [open]="open()" [renderFields]="false" title="Game Camera">

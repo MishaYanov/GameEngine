@@ -1,22 +1,42 @@
 <app-drawer [config]="drawerConfig" icon="object" label="Hierarchy" [maxWidth]="drawerMaxWidth()"
             preferenceKey="editor.scene-objects" resizeLabel="Resize Hierarchy" type="left">
     <editor-pane icon="object" title="Hierarchy">
+        <div pane-actions class="hierarchy-header-actions" role="group" aria-label="Create in the scene">
+            @if (creationActions().length) {
+                <button #createButton type="button" (click)="openCreateMenu(createButton)" [disabled]="!canCreate()"
+                        [editorContextMenu]="createMenu" editorContextMenuLabel="Create scene object"
+                        aria-label="Create Object" title="Create Object" aria-haspopup="menu"
+                        [attr.aria-expanded]="contextMenu.request()?.owner === createButton">
+                    <editor-icon name="plus"/>
+                </button>
+            }
+            @if (scene().projectOpen && foldersEnabled()) {
+                <button #newFolder (click)="createFolder()" [disabled]="disabled()" aria-label="New Folder…"
+                        title="New Folder…" type="button">
+                    <editor-icon name="folder"/>
+                </button>
+            }
+        </div>
         @if (scene().projectOpen) {
             <div class="hierarchy-content">
-                <button type="button" class="scene-root" [class.drop-target]="isDropTarget(null) && dropTarget()?.valid"
-                        [class.drop-rejected]="isDropTarget(null) && !dropTarget()?.valid"
-                        [disabled]="disabled()" aria-label="Move selected entity to Scene root"
-                        (click)="moveToRoot()" (dragleave)="dragLeft($event)" (dragover)="dragOver($event, null)"
-                        (drop)="dropped($event, null)">
+                <div class="scene-root" [class.drop-target]="isDropTarget(null) && dropTarget()?.valid"
+                     [class.drop-rejected]="isDropTarget(null) && !dropTarget()?.valid"
+                     (dragleave)="dragLeft($event)" (dragover)="dragOver($event, null)" (drop)="dropped($event, null)">
                     <editor-icon name="cube"/>
-                    <span [title]="sceneLabel()">{{ sceneLabel() }}</span><small>Scene root</small>
-                </button>
-                @if (foldersEnabled()) {
-                    <label class="hierarchy-search">
-                        <input #searchBox (input)="search.set(searchBox.value)" (keydown.escape)="$event.stopPropagation(); search.set('')"
+                    <span [title]="sceneLabel()">{{ sceneLabel() }}</span>
+                    <small>Scene root</small>
+                </div>
+                <div class="hierarchy-tools">
+                    @if (foldersEnabled()) {
+                        <input #searchBox class="hierarchy-search" (input)="search.set(searchBox.value)"
+                               (keydown.escape)="$event.stopPropagation(); search.set('')"
                                [value]="search()" aria-label="Search Hierarchy" placeholder="Search Hierarchy" type="search"/>
-                    </label>
-                }
+                    }
+                    <button class="hierarchy-collapse-all" (click)="collapseAll()" [disabled]="!canCollapseAll()"
+                            [title]="search().trim() ? 'Clear search and collapse all branches' : 'Collapse all folders and object branches'"
+                            type="button">Collapse All
+                    </button>
+                </div>
                 @if (rows().length) {
                     <div #tree aria-label="Entities in the active scene" aria-multiselectable="true" class="entity-list"
                          role="tree" tabindex="0"
@@ -70,28 +90,25 @@
                 } @else if (search().trim()) {
                     <p class="placeholder" role="status">No matching objects or folders.</p>
                 } @else {
-                    <p class="placeholder">This scene contains no entities.</p>
+                    <p class="placeholder">Empty scene. Use Create Object to add something.</p>
                 }
-                <div class="hierarchy-actions" role="group" aria-label="Hierarchy actions">
-                    @if (creationActions().length) {
-                        <button #createButton type="button" (click)="openCreateMenu(createButton)" [disabled]="!canCreate()"
-                                [editorContextMenu]="createMenu" editorContextMenuLabel="Create scene object"
-                                aria-haspopup="menu" [attr.aria-expanded]="contextMenu.request()?.owner === createButton">
-                            Create
+                <div class="hierarchy-actions" role="group" aria-label="Organize objects">
+                    <button (click)="beginParenting()" [disabled]="disabled() || !primary()" aria-label="Make Child Of…"
+                            title="Make Child Of…" type="button">
+                        <editor-icon name="link"/>
+                    </button>
+                    <button (click)="moveToRoot()" [disabled]="!canMoveToRoot()" aria-label="Move to Root"
+                            title="Move to Root" type="button">
+                        <editor-icon name="arrowUp"/>
+                    </button>
+                    @if (foldersEnabled()) {
+                        <button (click)="moveSelectionToFolder()" [disabled]="!canMoveSelection()"
+                                aria-label="Move to Folder…" title="Move to Folder…" type="button">
+                            <editor-icon name="folderMove"/>
                         </button>
                     }
-                    <button (click)="beginParenting()" [disabled]="disabled() || !primary()" type="button">Make Child Of…
-                    </button>
-                    <button (click)="moveToRoot()" [disabled]="!canMoveToRoot()"
-                            type="button">Move to Root
-                    </button>
-                    <button (click)="collapseAll()" [disabled]="!canCollapseAll()" type="button">Collapse All</button>
-                    @if (foldersEnabled()) {
-                        <button #newFolder (click)="createFolder()" [disabled]="disabled()" type="button">New Folder…</button>
-                        <button (click)="moveSelectionToFolder()" [disabled]="!canMoveSelection()" type="button">Move to Folder…</button>
-                    }
                 </div>
-                @if (parentingChild() && batchParentingEnabled()) {
+                @if (parentingChild() && !parentPickerOpen() && batchParentingEnabled()) {
                     <label class="parenting-option">
                         <input type="checkbox" [checked]="keepWorld()" (change)="setKeepWorld($event)"/>
                         Keep World Transform
@@ -102,8 +119,17 @@
                                              [disabled]="disabled()"
                                              (cancelled)="closeFolderEdit()" (submitted)="submitFolderEdit($event)"/>
                 }
+                @if (hiddenSelection(); as selected) {
+                    <p class="hierarchy-status" role="status">
+                        {{ selected.name }} is outside this search.
+                        <button type="button" (click)="revealEntity(selected.key)">Reveal Selection</button>
+                    </p>
+                }
                 @if (primary(); as selected) {
                     <p class="entity-details" [title]="selected.model_path">{{ selected.model_path }}</p>
+                }
+                @if (creationStatus(); as message) {
+                    <p class="hierarchy-status" role="status">{{ message }}</p>
                 }
                 @if (status(); as message) {
                     <p [class.drag-status]="dragActive()" class="hierarchy-status" role="status">{{ message }}</p>
@@ -117,3 +143,32 @@
         }
     </editor-pane>
 </app-drawer>
+
+<editor-dialog title="Make Child Of" icon="link" [open]="parentPickerOpen()"
+               [config]="parentPickerConfig" [renderFields]="false" closeLabel="Cancel"
+               (openChange)="!$event && cancelParentPicker()" (closed)="parentPickerClosed()">
+    @if (parentPickerOpen()) {
+        <div class="parent-picker">
+            <p [id]="parentPickerHintId">Choose the new parent for <strong>{{ parentingName() }}</strong>.</p>
+            <editor-search-picker label="Parent object" placeholder="Search scene objects…" [expanded]="true"
+                                  [autofocus]="true" [options]="parentOptions()"
+                                  [value]="canApplyParent() ? parentChoice() : null"
+                                  [describedBy]="parentPickerHintId" [resultLimit]="60" (picked)="pickParent($event)"/>
+            @if (parentChoiceName(); as parent) {
+                <p role="status">Selected parent: <strong>{{ parent }}</strong></p>
+            } @else if (parentChoice() !== null) {
+                <p role="status">The chosen destination changed. Select another parent.</p>
+            }
+            @if (batchParentingEnabled()) {
+                <label class="parenting-option">
+                    <input type="checkbox" [checked]="keepWorld()" (change)="setKeepWorld($event)"/>
+                    Keep World Transform
+                </label>
+            }
+        </div>
+    }
+    <button dialog-actions type="button" (click)="pickParentInHierarchy()">Pick in Hierarchy</button>
+    <button dialog-actions type="button" class="apply-parent" [disabled]="!canApplyParent()" (click)="applyParent()">
+        Apply Parent
+    </button>
+</editor-dialog>

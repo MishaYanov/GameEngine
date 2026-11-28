@@ -8,13 +8,20 @@ pub struct ModelPushConstants {
 	pub model: [f32; 16],
 	pub base_color_factor: [f32; 4],
 	// x bits: 1 unlit, 2 screen-space, 4 vertex color, 8 depth-free overlay,
-	// 16 instance vertex input (reserved for the frame batcher).
-	// Remaining words pad std430 to 16 bytes.
+	// 16 instance vertex input, 32 wireframe edge, 64 vertex marker, 128 wireframe surface,
+	// 256 alpha test, 512 material alpha cutoff, 1024 tangent-space normal map.
+	// y/z hold skin palette base/count. w holds the cutoff bits or marker viewport extent.
 	pub flags: [u32; 4],
+	/// Linear emissive RGB and normal map scale in the fourth component.
+	pub emissive_factor: [f32; 4],
 }
 
 impl ModelPushConstants {
 	pub const OFFSET: u32 = 0;
+
+	pub(crate) const ALPHA_TEST: u32 = 256;
+	pub(crate) const MATERIAL_ALPHA_CUTOFF: u32 = 512;
+	pub(crate) const NORMAL_MAP: u32 = 1024;
 
 	pub const SIZE: u32 = size_of::<Self>() as u32;
 
@@ -25,6 +32,7 @@ impl ModelPushConstants {
 			],
 			base_color_factor: [1.0; 4],
 			flags: [0; 4],
+			emissive_factor: [0.0; 4],
 		}
 	}
 
@@ -46,6 +54,7 @@ impl ModelPushConstants {
 			model: model.to_cols_array(),
 			base_color_factor: [1.0; 4],
 			flags: [0; 4],
+			emissive_factor: [0.0; 4],
 		}
 	}
 

@@ -11,6 +11,7 @@ import {EditorSettingsDialog} from '../editor-settings/editor-settings-dialog';
 import {EditorContextMenu} from '../../shared/components/context-menu/context-menu';
 import {watchDesktopClose} from './desktop-close-review';
 import {EditorDocumentRecovery} from './document-recovery/document-recovery';
+import type {NavigationDirection} from './workspace/workspace-navigation';
 
 enum OpenMessages {
     RESTORING = 'Checking for the open project…',
@@ -34,6 +35,12 @@ enum OpenMessages {
     ],
     templateUrl: './editor.html',
     styleUrl: './editor.scss',
+    host: {
+        '(window:keydown)': 'handleNavigationKey($event)',
+        '(window:pointerdown)': 'preventMouseNavigation($event)',
+        '(window:mouseup)': 'preventMouseNavigation($event)',
+        '(window:auxclick)': 'handleNavigationClick($event)',
+    },
 })
 export class Editor {
     protected readonly editorService = inject(EditorService);
@@ -105,7 +112,9 @@ export class Editor {
         if (this.destroyed || !this.canOpenProject()) return;
         try {
             // The route's canDeactivate guard reviews the workspace for both setup entries.
-            await this.router.navigate(['/setup'], {queryParams: {from: 'editor', template}});
+            await this.router.navigate(['/setup'], {
+                queryParams: {from: 'editor', template}, replaceUrl: this.editorService.nativeAvailable,
+            });
         } catch (error: unknown) {
             if (!this.destroyed) this.openError.set(error instanceof Error ? error.message : String(error));
         }
@@ -197,9 +206,34 @@ export class Editor {
         });
     }
 
-    reviewRouteDeparture(): Promise<boolean> {
+    reviewRouteDeparture(browserHistory = false): Promise<boolean> {
         if (!this.editorService.nativeAvailable) return Promise.resolve(true);
+        if (browserHistory) return Promise.resolve(false);
         return this.withReviewedWorkspace('open', () => undefined);
+    }
+
+    protected handleNavigationKey(event: KeyboardEvent): void {
+        if (!this.editorService.nativeAvailable || event.defaultPrevented || event.isComposing ||
+            event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const back = event.key === 'BrowserBack' || event.altKey && event.key === 'ArrowLeft';
+        const forward = event.key === 'BrowserForward' || event.altKey && event.key === 'ArrowRight';
+        if (!back && !forward) return;
+        event.preventDefault();
+        if (!event.repeat) this.navigateWorkspace(back ? 'back' : 'forward');
+    }
+
+    protected preventMouseNavigation(event: MouseEvent): void {
+        if (this.editorService.nativeAvailable && (event.button === 3 || event.button === 4)) event.preventDefault();
+    }
+
+    protected handleNavigationClick(event: MouseEvent): void {
+        if (!this.editorService.nativeAvailable || (event.button !== 3 && event.button !== 4)) return;
+        event.preventDefault();
+        this.navigateWorkspace(event.button === 3 ? 'back' : 'forward');
+    }
+
+    protected navigateWorkspace(direction: NavigationDirection): void {
+        void this.workspace()?.navigateHistory(direction);
     }
 
     private async withReviewedWorkspace(intent: 'open' | 'exit', proceed: () => void | Promise<void>): Promise<boolean> {

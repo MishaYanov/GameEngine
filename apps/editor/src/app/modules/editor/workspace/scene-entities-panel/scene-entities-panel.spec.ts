@@ -19,6 +19,33 @@ const floorFolders: SceneOrganization = {
 };
 
 describe('SceneEntitiesPanel hierarchy', () => {
+    const dialogPrototype = HTMLDialogElement.prototype;
+    const originalShow = Object.getOwnPropertyDescriptor(dialogPrototype, 'showModal');
+    const originalClose = Object.getOwnPropertyDescriptor(dialogPrototype, 'close');
+
+    beforeAll(() => {
+        Object.defineProperty(dialogPrototype, 'showModal', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                this.setAttribute('open', '');
+            },
+        });
+        Object.defineProperty(dialogPrototype, 'close', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                this.removeAttribute('open');
+                this.dispatchEvent(new Event('close'));
+            },
+        });
+    });
+
+    afterAll(() => {
+        if (originalShow) Object.defineProperty(dialogPrototype, 'showModal', originalShow);
+        else Reflect.deleteProperty(dialogPrototype, 'showModal');
+        if (originalClose) Object.defineProperty(dialogPrototype, 'close', originalClose);
+        else Reflect.deleteProperty(dialogPrototype, 'close');
+    });
+
     let fixture: ComponentFixture<SceneEntitiesPanel>;
     let component: SceneEntitiesPanel;
     let root: HTMLElement;
@@ -87,7 +114,36 @@ describe('SceneEntitiesPanel hierarchy', () => {
         return dragRow(row(key));
     }
     function action(label: string): HTMLButtonElement {
-        return [...root.querySelectorAll<HTMLButtonElement>('.hierarchy-actions button')].find(button => button.textContent?.trim() === label)!;
+        return [...root.querySelectorAll<HTMLButtonElement>(
+            '.hierarchy-actions button, .hierarchy-header-actions button, .hierarchy-tools button')]
+            .find(button => button.getAttribute('aria-label') === label || button.textContent?.trim() === label)!;
+    }
+
+
+    function parentDialog(): HTMLDialogElement {
+        return root.querySelector('dialog[open]')!;
+    }
+
+    function parentInput(): HTMLInputElement {
+        return parentDialog().querySelector('input[role="combobox"]')!;
+    }
+
+    function parentButton(label: string): HTMLButtonElement {
+        return [...parentDialog().querySelectorAll('button')].find(button => button.textContent?.trim() === label)!;
+    }
+
+    async function searchParent(query: string): Promise<void> {
+        const input = parentInput();
+        input.value = query;
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+    }
+
+    async function selectParent(query: string): Promise<void> {
+        await searchParent(query);
+        const input = parentInput();
+        input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
     }
 
     function folder(id: string): HTMLButtonElement {
@@ -114,6 +170,21 @@ describe('SceneEntitiesPanel hierarchy', () => {
         throw new Error(`Missing entity context action: ${id}`);
     }
 
+    it('keeps a hidden selection visible as feedback and reveals it without selecting another object', async () => {
+        await openFolders(floorFolders, ['floor1']);
+        const search = root.querySelector<HTMLInputElement>('input[aria-label="Search Hierarchy"]')!;
+        search.value = 'Floor 2';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(root.querySelector('[data-key="floor1"]')).toBeNull();
+        expect(root.textContent).toContain('Floor 1 is outside this search.');
+        [...root.querySelectorAll('button')].find(button => button.textContent.trim() === 'Reveal Selection')!.click();
+        await fixture.whenStable();
+        expect(row('floor1').getAttribute('aria-selected')).toBe('true');
+        expect(search.value).toBe('');
+        expect(requested).not.toHaveBeenCalled();
+    });
+
     it('uses the same creation actions at scene root and scopes object creation to the selected folder', async () => {
         await openFolders();
         fixture.componentRef.setInput('creationActions', ['create_empty', 'create_directional_light']);
@@ -122,8 +193,8 @@ describe('SceneEntitiesPanel hierarchy', () => {
         const created = vi.fn();
         component.creationRequested.subscribe(created);
 
-        const emptyAtRoot = contextAction(action('Create'), 'hierarchy.create_empty');
-        const lightAtRoot = contextAction(action('Create'), 'hierarchy.create_directional_light');
+        const emptyAtRoot = contextAction(action('Create Object'), 'hierarchy.create_empty');
+        const lightAtRoot = contextAction(action('Create Object'), 'hierarchy.create_directional_light');
         const emptyInFolder = contextAction(folder('floor'), 'hierarchy.create_empty');
         expect(emptyAtRoot.label).toBe(emptyInFolder.label);
         const lightInFolder = contextAction(folder('floor'), 'hierarchy.create_directional_light');
@@ -146,7 +217,7 @@ describe('SceneEntitiesPanel hierarchy', () => {
         await openFolders();
         fixture.componentRef.setInput('creationActions', ['create_cube']);
         await fixture.whenStable();
-        const trigger = action('Create');
+        const trigger = action('Create Object');
         const created = vi.fn();
         component.creationRequested.subscribe(created);
         trigger.focus();
@@ -170,7 +241,10 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: null});
 
         contextAction(row('child'), 'entity.set-parent').execute();
-        row('other').click();
+        await fixture.whenStable();
+        expect(parentDialog().textContent).toContain('Choose the new parent for child.');
+        await selectParent('other');
+        parentButton('Apply Parent').click();
         expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: 'other'});
         expect(row('parent').getAttribute('aria-selected')).toBe('true');
     });
@@ -255,7 +329,7 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(root.textContent).toContain('Open a project to view its scene entities.');
         expect(root.querySelector('[role="tree"]')).toBeNull();
         await open([]);
-        expect(root.textContent).toContain('This scene contains no entities.');
+        expect(root.textContent).toContain('Empty scene. Use Create Object to add something.');
         expect(root.querySelector('[role="treeitem"]')).toBeNull();
     });
 
@@ -391,9 +465,79 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(reparented).not.toHaveBeenCalled();
     });
 
+
+    it('searches outside the virtual and filtered tree and applies the chosen parent explicitly', async () => {
+        const distant = entity('distant', null, 'Knight Anchor');
+        const source = entity('source', null, 'Edited Cube');
+        const others = Array.from({length: 75}, (_, index) => entity(`object-${index}`));
+        await openFolders(floorFolders, ['source'], [...others, distant, source, entity('descendant', 'source', 'Cube Door')]);
+        const hierarchySearch = root.querySelector<HTMLInputElement>('input[aria-label="Search Hierarchy"]')!;
+        hierarchySearch.value = 'Edited Cube';
+        hierarchySearch.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(root.querySelector('[data-key="distant"]')).toBeNull();
+
+        const opener = action('Make Child Of…');
+        opener.focus();
+        opener.click();
+        await fixture.whenStable();
+        expect(parentDialog().textContent).toContain('Edited Cube');
+        expect(parentInput().getAttribute('aria-describedby')).toBeTruthy();
+        expect(parentDialog().querySelectorAll('[role="option"]')).toHaveLength(60);
+        expect(parentDialog().textContent).toContain('Refine your search');
+
+        await searchParent('Cube Door');
+        expect(parentDialog().querySelectorAll('[role="option"]')).toHaveLength(0);
+        expect(parentButton('Apply Parent').disabled).toBe(true);
+        await selectParent('Knight Anchor');
+        expect(reparented).not.toHaveBeenCalled();
+        expect(parentDialog().textContent).toContain('Selected parent: Knight Anchor');
+
+        parentButton('Apply Parent').click();
+        await fixture.whenStable();
+        expect(reparented).toHaveBeenCalledExactlyOnceWith({key: 'source', parent: 'distant'});
+        expect(requested).not.toHaveBeenCalled();
+        expect(root.querySelector('dialog[open]')).toBeNull();
+    });
+
+    it('abandons a chosen parent after switching scenes with reused object keys', async () => {
+        await open(nested, ['child']);
+        action('Make Child Of…').click();
+        await fixture.whenStable();
+        await selectParent('other');
+        const apply = parentButton('Apply Parent');
+        fixture.componentRef.setInput('contextKey', 'second-scene');
+        await fixture.whenStable();
+
+        expect(root.querySelector('dialog[open]')).toBeNull();
+        apply.click();
+        expect(reparented).not.toHaveBeenCalled();
+    });
+
+    it('filters the common current parent and rechecks the chosen destination when its ancestry changes', async () => {
+        await open(nested, ['child']);
+        action('Make Child Of…').click();
+        await fixture.whenStable();
+        await searchParent('parent');
+        expect(parentDialog().querySelectorAll('[role="option"]')).toHaveLength(0);
+        await selectParent('other');
+        expect(parentButton('Apply Parent').disabled).toBe(false);
+
+        await open(nested.map(item => item.key === 'other' ? {...item, parent: 'child'} : item), ['child']);
+        expect(parentButton('Apply Parent').disabled).toBe(true);
+        expect(parentDialog().textContent).toContain('The chosen destination changed');
+        parentButton('Apply Parent').click();
+        expect(reparented).not.toHaveBeenCalled();
+        parentButton('Cancel').click();
+        await fixture.whenStable();
+        expect(root.querySelector('dialog[open]')).toBeNull();
+    });
+
     it('provides keyboard parent selection and an explicit Move to Root alternative', async () => {
         await open(nested, ['child']);
         action('Make Child Of…').click(); await fixture.whenStable();
+        parentButton('Pick in Hierarchy').click();
+        await fixture.whenStable();
         await keydown('End'); await keydown('Enter');
         expect(reparented).toHaveBeenLastCalledWith({key: 'child', parent: 'other'});
         expect(requested).not.toHaveBeenCalled();
@@ -406,11 +550,14 @@ describe('SceneEntitiesPanel hierarchy', () => {
         await open([...floors, entity('parent')], ['floor1', 'floor2']);
         action('Make Child Of…').click();
         await fixture.whenStable();
-        const keepWorld = root.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+        const keepWorld = parentDialog().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
         expect(keepWorld.checked).toBe(true);
         keepWorld.click();
         await fixture.whenStable();
-        row('parent').click();
+        fixture.componentRef.setInput('selectedKeys', ['floor1']);
+        await fixture.whenStable();
+        await selectParent('parent');
+        parentButton('Apply Parent').click();
         await fixture.whenStable();
         expect(reparented).toHaveBeenCalledExactlyOnceWith({
             key: 'floor1', keys: ['floor1', 'floor2'], parent: 'parent', keepWorld: false,
@@ -419,9 +566,23 @@ describe('SceneEntitiesPanel hierarchy', () => {
 
     it('cancels keyboard parenting with Escape', async () => {
         await open(nested, ['child']); action('Make Child Of…').click(); await fixture.whenStable();
+        parentButton('Pick in Hierarchy').click();
+        await fixture.whenStable();
         await keydown('Escape'); await keydown('End'); await keydown('Enter');
         expect(reparented).not.toHaveBeenCalled();
         expect(requested).toHaveBeenLastCalledWith('other');
+    });
+
+    it('closes the parent picker when the scene becomes read-only', async () => {
+        await open(nested, ['child']);
+        action('Make Child Of…').click();
+        await fixture.whenStable();
+        await selectParent('other');
+        fixture.componentRef.setInput('disabled', true);
+        await fixture.whenStable();
+
+        expect(root.querySelector('dialog[open]')).toBeNull();
+        expect(reparented).not.toHaveBeenCalled();
     });
 
     it('blocks selection and parent changes during disabled authoring states', async () => {
@@ -541,12 +702,14 @@ describe('SceneEntitiesPanel hierarchy', () => {
         search.value = 'floor';
         search.dispatchEvent(new Event('input', {bubbles: true}));
         await fixture.whenStable();
-        expect(action('Collapse All').disabled).toBe(true);
+        expect(action('Collapse All').disabled).toBe(false);
         expect(contextAction(tree(), 'folder.expand-branch').disabled).toBe(true);
         expect(row('grandchild').getAttribute('aria-selected')).toBe('true');
-        search.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        action('Collapse All').click();
         await fixture.whenStable();
+        expect(search.value).toBe('');
         expect(folder('floor').getAttribute('aria-expanded')).toBe('false');
+        expect(root.querySelector('[data-key="grandchild"]')).toBeNull();
 
         contextAction(tree(), 'folder.expand-branch').execute();
         await fixture.whenStable();
@@ -556,6 +719,26 @@ describe('SceneEntitiesPanel hierarchy', () => {
         expect(row('other').getAttribute('aria-expanded')).toBe('false');
         expect(requested).not.toHaveBeenCalled();
         expect(selectedSet).not.toHaveBeenCalled();
+    });
+
+    it('shows Collapse All above the tree and restores a collapsed tree from a search with no matches', async () => {
+        await openFolders({...floorFolders, root_membership: {floor1: 'floor'}});
+        const collapse = action('Collapse All');
+        expect(collapse.closest('.hierarchy-tools')).toBeTruthy();
+        expect(collapse.textContent?.trim()).toBe('Collapse All');
+        const search = root.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.value = 'missing object';
+        search.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        expect(tree()).toBeNull();
+
+        collapse.click();
+        await fixture.whenStable();
+        expect(search.value).toBe('');
+        expect(folder('floor').getAttribute('aria-expanded')).toBe('false');
+        expect(tree().getAttribute('aria-activedescendant')).toBe(folder('floor').id);
+        expect(document.activeElement).toBe(tree());
+        expect(collapse.disabled).toBe(true);
     });
 
     it('moves roots dropped on a folder but preserves a transform child and a stale drag', async () => {

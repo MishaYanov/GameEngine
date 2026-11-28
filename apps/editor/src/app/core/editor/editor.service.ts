@@ -4,7 +4,7 @@ import {
     type ControlActionSample, type ControlGraph, type ControlGraphAsset, type ControlGraphCapture, type ControlGraphDocument,
     type ControlGraphProbe, readControlGraphCatalog, readControlGraphDocument, readControlGraphProbe,
 } from './controls-graph.models';
-import {computed, DestroyRef, inject, Service, signal} from '@angular/core';
+import {computed, DestroyRef, inject, linkedSignal, Service, signal} from '@angular/core';
 import {EDITOR_TRANSPORT} from './editor-transport';
 import type {UnlistenFn} from '@tauri-apps/api/event';
 import {
@@ -77,6 +77,7 @@ import type {
     PlayTransformReviewDto,
     ProjectBuildPreparation,
     ProjectBuildResult,
+    ProjectAssetFile,
     SceneId,
     Vec3,
     ViewportBounds,
@@ -110,6 +111,10 @@ export interface EditorCommandOutcome {
 
 const COMMAND_OUTCOME_LIMIT = 64;
 
+function isModelCatalogueAsset(asset: ModelAsset | ProjectAssetFile): asset is ModelAsset {
+    return asset.kind === undefined || asset.kind === 'model' || asset.kind === 'prefab' || asset.kind === 'audio_clip';
+}
+
 /** One authoritative document queue. UI drafts and input bindings stay in their owners. */
 @Service()
 export class EditorService {
@@ -139,10 +144,23 @@ export class EditorService {
     readonly dirty = computed(() => this.snapshotState()?.dirty ?? false);
     readonly playing = computed(() => this.snapshotState()?.mode === 'play');
     private readonly capabilitiesState = signal<EditorCapabilities | null>(null);
-    readonly capabilities = this.capabilitiesState.asReadonly();
+    readonly capabilities = computed(() => {
+        const native = this.capabilitiesState();
+        if (!native) return null;
+        const scripts = this.catalogueFilesState().flatMap(file => file.script_descriptor ? [file.script_descriptor] : []);
+        if (!scripts.length || !validScriptDescriptors(scripts)) return native;
+        return {...native, object_scripts: [...native.object_scripts ?? [], ...scripts]};
+    });
     private readonly assetsState = signal<readonly ModelAsset[] | null>(null);
     readonly modelAssets = this.assetsState.asReadonly();
+    private readonly catalogueFilesState = linkedSignal({
+        source: this.workspaceGeneration,
+        computation: (): readonly ProjectAssetFile[] => [],
+    });
+    readonly catalogueFiles = this.catalogueFilesState.asReadonly();
     private assetCatalogStale = false;
+    private readonly assetCatalogVersionState = signal(0);
+    readonly assetCatalogVersion = this.assetCatalogVersionState.asReadonly();
     private readonly authoredClipCatalogVersionState = signal(0);
     readonly authoredClipCatalogVersion = this.authoredClipCatalogVersionState.asReadonly();
     private readonly collisionsState = signal<CollisionSnapshot | null>(null);
@@ -307,6 +325,32 @@ export class EditorService {
 
     switchScene(sceneId: SceneId, expectedGeneration?: number, expectedRevision?: number): Promise<EditorSnapshot> {
         return this.execute({type: 'switch_scene', scene_id: sceneId}, expectedGeneration, expectedRevision);
+    }
+
+    authoringScope(workspaceGeneration: number): Promise<WorkspaceAssetScope> {
+        return this.enqueue('editor_authoring_scope', async () => {
+            this.requireGeneration(workspaceGeneration);
+            const scope = await this.native<{
+                workspace_generation: number;
+                revision: number
+            }>('editor_authoring_scope');
+            this.requireGeneration(workspaceGeneration);
+            if (!Number.isSafeInteger(scope?.workspace_generation) || scope.workspace_generation < 1 ||
+                !Number.isSafeInteger(scope.revision) || scope.revision < 0) {
+                throw new Error('The editor returned an invalid authoring scope.');
+            }
+            return {workspaceGeneration, nativeGeneration: scope.workspace_generation, revision: scope.revision};
+        }, false, workspaceGeneration);
+    }
+
+    createScene(path: string, scope: WorkspaceAssetScope): Promise<EditorSnapshot> {
+        return this.snapshotOperation('editor_create_scene', {
+            path,
+            expectedGeneration: scope.nativeGeneration
+        }, false, {
+            expectedGeneration: scope.workspaceGeneration,
+            expectedRevision: scope.revision,
+        });
     }
 
     registerScene(path: string): Promise<EditorSnapshot> {
@@ -564,10 +608,17 @@ export class EditorService {
         const current = () => !this.destroyed && this.workspaceGeneration() === generation &&
             this.assetRequest?.promise === promise;
         // Discovery reads the asset root. Keep it independent of the document command queue.
-        const promise: Promise<readonly ModelAsset[]> = this.native<readonly ModelAsset[]>('editor_assets')
-            .then(models => {
+        const promise: Promise<readonly ModelAsset[]> = this.native<readonly (ModelAsset | ProjectAssetFile)[]>('editor_assets')
+            .then(catalogue => {
+                const models: ModelAsset[] = [];
+                const files: ProjectAssetFile[] = [];
+                for (const asset of catalogue) {
+                    if (isModelCatalogueAsset(asset)) models.push(asset);
+                    else files.push(asset);
+                }
                 if (current()) {
                     this.assetsState.set(models);
+                    this.catalogueFilesState.set(files);
                     this.assetCatalogStale = false;
                 }
                 return models;
@@ -583,7 +634,7 @@ export class EditorService {
     }
 
     listInputActions(scope: InputActionsScope): Promise<readonly InputActionsAsset[]> {
-        return this.workspaceAssetOperation('editor_list_input_actions', {}, scope, readInputActionsCatalog);
+        return this.readWorkspaceAssetCatalog('editor_list_input_actions', scope, readInputActionsCatalog);
     }
 
     openInputActions(assetId: string, scope: InputActionsScope): Promise<InputActionsDocument> {
@@ -593,20 +644,28 @@ export class EditorService {
     saveInputActions(
         destination: string, map: InputActionMap, capture: InputActionsCapture | null, scope: InputActionsScope,
     ): Promise<InputActionsDocument> {
-        return this.workspaceAssetOperation('editor_save_input_actions', {destination, map, capture}, scope, readInputActionsDocument);
+        return this.workspaceAssetOperation('editor_save_input_actions', {
+            destination,
+            map,
+            capture
+        }, scope, readInputActionsDocument).then(asset => {
+            this.invalidateAssetCatalog();
+            return asset;
+        });
     }
 
     moveInputActions(destination: string, capture: InputActionsCapture, scope: InputActionsScope): Promise<InputActionsAsset> {
-        return this.workspaceAssetOperation('editor_move_input_actions', {destination, capture}, scope, readInputActionsAsset);
+        return this.workspaceAssetOperation('editor_move_input_actions', {
+            destination,
+            capture
+        }, scope, readInputActionsAsset).then(asset => {
+            this.invalidateAssetCatalog();
+            return asset;
+        });
     }
 
-    async listAnimators(scope: WorkspaceAssetScope): Promise<readonly AnimatorAsset[]> {
-        this.requireGeneration(scope.workspaceGeneration);
-        const entries = await this.native<unknown>('editor_list_animators', {
-            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
-        });
-        this.requireGeneration(scope.workspaceGeneration);
-        return readAnimatorCatalog(entries);
+    listAnimators(scope: WorkspaceAssetScope): Promise<readonly AnimatorAsset[]> {
+        return this.readWorkspaceAssetCatalog('editor_list_animators', scope, readAnimatorCatalog);
     }
 
     openAnimator(assetId: string, scope: WorkspaceAssetScope): Promise<AnimatorDocument> {
@@ -616,20 +675,22 @@ export class EditorService {
     saveAnimator(
         destination: string, graph: AnimatorGraph, capture: AnimatorAssetCapture | null, scope: WorkspaceAssetScope,
     ): Promise<AnimatorDocument> {
-        return this.workspaceAssetOperation('editor_save_animator', {destination, graph, capture}, scope, readAnimatorDocument);
+        return this.workspaceAssetOperation('editor_save_animator', {
+            destination,
+            graph,
+            capture
+        }, scope, readAnimatorDocument).then(asset => {
+            this.invalidateAssetCatalog();
+            return asset;
+        });
     }
 
     validateAnimatorActor(entityKey: EntityKey, scope: WorkspaceAssetScope): Promise<AnimatorActorValidation> {
         return this.workspaceAssetOperation('editor_validate_animator_actor', {entityKey}, scope, readAnimatorValidation);
     }
 
-    async listControlGraphs(scope: WorkspaceAssetScope): Promise<readonly ControlGraphAsset[]> {
-        this.requireGeneration(scope.workspaceGeneration);
-        const entries = await this.native<unknown>('editor_list_control_graphs', {
-            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
-        });
-        this.requireGeneration(scope.workspaceGeneration);
-        return readControlGraphCatalog(entries);
+    listControlGraphs(scope: WorkspaceAssetScope): Promise<readonly ControlGraphAsset[]> {
+        return this.readWorkspaceAssetCatalog('editor_list_control_graphs', scope, readControlGraphCatalog);
     }
 
     openControlGraph(assetId: string, scope: WorkspaceAssetScope): Promise<ControlGraphDocument> {
@@ -639,7 +700,14 @@ export class EditorService {
     saveControlGraph(
         destination: string, graph: ControlGraph, capture: ControlGraphCapture | null, scope: WorkspaceAssetScope,
     ): Promise<ControlGraphDocument> {
-        return this.workspaceAssetOperation('editor_save_control_graph', {destination, graph, capture}, scope, readControlGraphDocument);
+        return this.workspaceAssetOperation('editor_save_control_graph', {
+            destination,
+            graph,
+            capture
+        }, scope, readControlGraphDocument).then(asset => {
+            this.invalidateAssetCatalog();
+            return asset;
+        });
     }
 
     async probeControlsGraph(
@@ -653,6 +721,17 @@ export class EditorService {
         });
         this.requireGeneration(scope.workspaceGeneration);
         return readControlGraphProbe(result);
+    }
+
+    private async readWorkspaceAssetCatalog<T>(
+        operation: string, scope: WorkspaceAssetScope, read: (value: unknown) => T,
+    ): Promise<T> {
+        this.requireGeneration(scope.workspaceGeneration);
+        const entries = await this.native<unknown>(operation, {
+            expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+        });
+        this.requireGeneration(scope.workspaceGeneration);
+        return read(entries);
     }
 
     private workspaceAssetOperation<T>(
@@ -690,8 +769,12 @@ export class EditorService {
         return this.chooseExternalAssetSource('editor_choose_external_sky_png', scope);
     }
 
+    chooseParticlePng(scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>): Promise<string | null> {
+        return this.chooseExternalAssetSource('editor_choose_particle_png', scope);
+    }
+
     private async chooseExternalAssetSource(
-        operation: 'editor_choose_external_glb' | 'editor_choose_external_wav' | 'editor_choose_external_sky_png',
+        operation: 'editor_choose_external_glb' | 'editor_choose_external_wav' | 'editor_choose_external_sky_png' | 'editor_choose_particle_png',
         scope: Pick<WorkspaceAssetScope, 'workspaceGeneration' | 'nativeGeneration'>,
     ): Promise<string | null> {
         const generation = scope.workspaceGeneration;
@@ -796,6 +879,40 @@ export class EditorService {
 
     importExternalWav(sourcePath: string, destinationPath: string, scope: WorkspaceAssetScope): Promise<AssetOperation> {
         return this.mutateAsset('editor_import_external_wav', {sourcePath, destinationPath}, scope);
+    }
+
+    importParticleSprite(sourcePath: string, destinationPath: string, scope: WorkspaceAssetScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_import_particle_sprite', {sourcePath, destinationPath}, scope);
+    }
+
+    async openRustScript(assetId: string, scope: WorkspaceAssetScope): Promise<import('./editor.models').RustScriptDocument> {
+        this.requireGeneration(scope.workspaceGeneration);
+        const document = await this.native<import('./editor.models').RustScriptDocument>('editor_open_rust_script', {
+            assetId, expectedGeneration: scope.nativeGeneration, expectedRevision: scope.revision,
+        });
+        this.requireGeneration(scope.workspaceGeneration);
+        return document;
+    }
+
+    saveRustScript(destinationPath: string, source: string, replacement: { id: string; fingerprint: string } | null,
+                   scope: WorkspaceAssetScope): Promise<AssetOperation> {
+        return this.mutateAsset('editor_save_rust_script', {
+            destinationPath, source,
+            replacementId: replacement?.id ?? null, expectedFingerprint: replacement?.fingerprint ?? null
+        }, scope);
+    }
+
+    async particleSprite(assetId: string, generation: number, revision: number): Promise<Blob> {
+        const scope = await this.authoringScope(generation);
+        if (scope.revision !== revision) throw new Error('Particle sprite belongs to a different scene revision.');
+        const bytes = await this.native<ArrayBuffer>('editor_particle_sprite', {
+            assetId, expectedGeneration: scope.nativeGeneration, expectedRevision: revision,
+        });
+        this.requireGeneration(generation);
+        if (!(bytes instanceof ArrayBuffer) || bytes.byteLength < 8 || bytes.byteLength > 4 * 1024 * 1024) {
+            throw new Error('The Editor returned an invalid particle sprite.');
+        }
+        return new Blob([bytes], {type: 'image/png'});
     }
 
     reimportAsset(
@@ -1318,6 +1435,7 @@ export class EditorService {
         // Dropping an older request also prevents it from repopulating this cache.
         this.assetCatalogStale = true;
         this.assetRequest = null;
+        this.assetCatalogVersionState.update(version => version + 1);
     }
 
     private accept(snapshot: EditorSnapshot): EditorSnapshot {

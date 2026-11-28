@@ -32,6 +32,7 @@
                         type="number"
                         step="any"
                         [value]="displayValue(axis.index)"
+                        [attr.title]="compactNumbers() && activeAxis() !== axis.index ? preciseValue(axis.index) : null"
                         [attr.aria-label]="label() + ' ' + axis.name + (unit() ? ' (' + unit() + ')' : '')"
                         [attr.aria-invalid]="invalidAxis() === axis.index ? 'true' : null"
                         [attr.aria-describedby]="invalidAxis() === axis.index ? errorId : null"

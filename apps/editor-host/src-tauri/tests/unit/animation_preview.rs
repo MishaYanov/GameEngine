@@ -438,6 +438,8 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 		.open_authored_clip_asset(&saved.asset.asset_id)
 		.unwrap();
 	assert_eq!(reopened.clip, clip);
+	assert_eq!(reopened.asset.asset_id, saved.asset.asset_id);
+	assert_eq!(reopened.asset.path, saved.asset.path);
 	assert_eq!(reopened.asset.fingerprint, saved.asset.fingerprint);
 	let revision = workspace.backend.session().revision();
 	let preview = workspace
@@ -577,6 +579,10 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 		.save_clip_timeline_draft(&timeline.draft_id, 5, revision)
 		.unwrap();
 	assert!(!committed.draft.dirty);
+	assert_eq!(committed.draft.asset.asset_id, saved.asset.asset_id);
+	assert_eq!(committed.draft.asset.path, saved.asset.path);
+	assert_eq!(committed.draft.asset.revision, saved.asset.revision + 1);
+	assert_ne!(committed.draft.asset.fingerprint, saved.asset.fingerprint);
 	workspace
 		.close_clip_timeline_draft(&timeline.draft_id, false)
 		.unwrap();
@@ -586,6 +592,8 @@ fn visual_clip_save_reopen_and_preview_keep_scene_and_invalid_assets_separate() 
 		.unwrap();
 	assert_eq!(reopened.clip.markers[0].id, marker);
 	assert_eq!(reopened.clip.markers[0].label, "Door click");
+	assert_eq!(reopened.asset.asset_id, saved.asset.asset_id);
+	assert_eq!(reopened.asset.fingerprint, committed.draft.asset.fingerprint);
 	assert_eq!(workspace.backend.session().authored_document(), before);
 
 	let mut invalid = clip.clone();

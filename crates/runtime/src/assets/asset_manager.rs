@@ -5,10 +5,12 @@ use std::{
 	io,
 	path::{Path, PathBuf},
 	sync::Arc,
+	time::Instant,
 };
 
+use engine_core::asset_catalog::AssetCatalog;
 use renderer::{
-	WindowRenderer,
+	TextureColorSpace, WindowRenderer,
 	vulkan::{
 		Vertex, VulkanMaterial, VulkanMesh, VulkanMeshError, VulkanTexture, VulkanTextureError,
 	},
@@ -26,6 +28,7 @@ mod sky;
 mod source_cache;
 mod upload;
 
+use crate::scene_load_timing::{AssetLoadBenchmark, micros};
 use gpu_budget::GpuBudget;
 use source_cache::SourceCache;
 use upload::mesh_bytes;
@@ -39,6 +42,7 @@ pub struct AssetManager {
 	animated_models: HashMap<String, Arc<Model>>,
 	source_fingerprints: HashMap<PathBuf, String>,
 	source_cache: SourceCache,
+	scene_load_benchmark: Option<AssetLoadBenchmark>,
 	gpu_budget: GpuBudget,
 	sky_texture: Option<sky::SkyTextureSlot>,
 	sky_decode: Option<sky::SkyDecode>,
@@ -61,6 +65,7 @@ impl AssetManager {
 			animated_models: HashMap::new(),
 			source_fingerprints: HashMap::new(),
 			source_cache: SourceCache::default(),
+			scene_load_benchmark: None,
 			gpu_budget: GpuBudget::default(),
 			sky_texture: None,
 			sky_decode: None,
@@ -111,22 +116,53 @@ impl AssetManager {
 					+ p.indices.len() * 4
 			})
 			.sum();
+		let mut seen = HashSet::new();
+		let images = asset
+			.primitives
+			.iter()
+			.flat_map(|primitive| {
+				primitive
+					.base_color_image
+					.map(|index| (index, false))
+					.into_iter()
+					.chain(primitive.normal_map.map(|map| (map.image, true)))
+			})
+			.filter(|id| seen.insert(*id));
+		let mut image_uploads = Vec::new();
+		let mut image_bytes = 0;
+		for (index, linear) in images {
+			let image = asset.images.get(index).ok_or_else(|| {
+				AssetManagerError::Gltf(GltfLoaderError::InvalidImageReference(index))
+			})?;
+			let id = format!(
+				"animation:{}:{index}:{}",
+				asset.source_sha256,
+				if linear { "linear" } else { "srgb" }
+			);
+			if !self.image_textures.contains_key(&id) {
+				image_bytes += image.rgba.len();
+			}
+			image_uploads.push((id, index, linear));
+		}
 		self.gpu_budget.admit(
-			bytes + asset.images.iter().map(|i| i.rgba.len()).sum::<usize>() + 4,
-			asset.primitives.len() + asset.images.len() + 1,
+			bytes + image_bytes + 4,
+			asset.primitives.len() + image_uploads.len() + 1,
 		)?;
-		// Construct/copy each decoded image only on its first cache miss, even
-		// when hundreds of primitives share the same material image.
-		let mut textures = Vec::with_capacity(asset.images.len());
-		for (index, image) in asset.images.iter().enumerate() {
-			let image_id = format!("animation:{}:{index}", asset.source_sha256);
-			let texture = if let Some(texture) = self.image_textures.get(&image_id) {
+		let mut textures = HashMap::with_capacity(image_uploads.len());
+		for (id, index, linear) in image_uploads {
+			let texture = if let Some(texture) = self.image_textures.get(&id) {
 				texture.clone()
 			} else {
+				let image = &asset.images[index];
 				let image = ImageAsset::from_rgba8(image.width, image.height, image.rgba.clone())?;
-				self.load_image_texture(renderer, image_id, &image)?
+				let color_space = if linear {
+					TextureColorSpace::Linear
+				} else {
+					TextureColorSpace::Srgb
+				};
+				self.load_image_texture_in_color_space(renderer, id, &image, color_space)?
 			};
-			textures.push(texture);
+			textures.insert((index, linear), texture);
 		}
 		let white = if asset
 			.primitives
@@ -152,10 +188,10 @@ impl AssetManager {
 			let vertices: Vec<_> = primitive
 				.vertices
 				.iter()
-				.map(|v| Vertex {
-					position: v.position,
-					normal: v.normal,
-					uv: v.uv,
+				.map(|v| {
+					Vertex::new(v.position, v.uv)
+						.with_normal(v.normal)
+						.with_normal_map(v.tangent, v.normal_uv)
 				})
 				.collect();
 			let influences: Vec<_> = primitive
@@ -176,13 +212,18 @@ impl AssetManager {
 				+ primitive.indices.len() * 4;
 			self.gpu_budget.track_mesh(&mesh, logical_bytes);
 			let texture = match primitive.base_color_image {
-				Some(index) => textures[index].clone(),
+				Some(index) => textures[&(index, false)].clone(),
 				None => white
 					.as_ref()
 					.expect("untextured primitive preflight")
 					.clone(),
 			};
-			let material = VulkanMaterial::new(texture, primitive.double_sided, primitive.color);
+			let mut material =
+				VulkanMaterial::new(texture, primitive.double_sided, primitive.color);
+			if let Some(normal) = primitive.normal_map {
+				material =
+					material.with_normal_map(textures[&(normal.image, true)].clone(), normal.scale);
+			}
 			parts.push(ModelPart::new(mesh, material));
 		}
 		let model = Arc::new(Model::skinned(parts, asset));
@@ -241,8 +282,15 @@ impl AssetManager {
 		)
 		.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
 		if let Some(model) = self.models.get(&model_key) {
+			if let Some(benchmark) = &mut self.scene_load_benchmark {
+				benchmark.cache_hits += 1;
+			}
 			return Ok(Arc::clone(model));
 		}
+		let import_started = self.scene_load_benchmark.as_mut().map(|benchmark| {
+			benchmark.cache_misses += 1;
+			Instant::now()
+		});
 		if self.models.len() >= Self::GPU_RESOURCE_LIMIT {
 			return Err(AssetManagerError::ResourceBudget(
 				"model cache entry limit reached; retire unused models first".into(),
@@ -262,6 +310,11 @@ impl AssetManager {
 				resources.import_mesh(mesh_index)?,
 			)
 		};
+		if let Some((benchmark, started)) = self.scene_load_benchmark.as_mut().zip(import_started) {
+			benchmark.static_import_us = benchmark
+				.static_import_us
+				.saturating_add(micros(started.elapsed()));
+		}
 		self.upload_model(
 			renderer,
 			full_path,
@@ -280,7 +333,14 @@ impl AssetManager {
 		source_fingerprint: String,
 	) -> Result<Arc<Model>, AssetManagerError> {
 		self.preflight_model_upload(&full_path, &imported_parts)?;
-		self.upload_model_resources(renderer, &full_path, &imported_parts)?;
+		let upload_started = self.scene_load_benchmark.as_ref().map(|_| Instant::now());
+		let uploaded = self.upload_model_resources(renderer, &full_path, &imported_parts);
+		if let Some((benchmark, started)) = self.scene_load_benchmark.as_mut().zip(upload_started) {
+			benchmark.static_upload_us = benchmark
+				.static_upload_us
+				.saturating_add(micros(started.elapsed()));
+		}
+		uploaded?;
 		let mut parts = Vec::with_capacity(imported_parts.len());
 		let mut bounds: Option<crate::Bounds3> = None;
 
@@ -308,7 +368,18 @@ impl AssetManager {
 				None => "builtin:white".to_string(),
 			};
 			let mesh = self.load_mesh(renderer, mesh_key, &imported.mesh)?;
-			let material = self.load_material(renderer, &image_key, &imported.material)?;
+			let mut material = self
+				.load_material(renderer, &image_key, &imported.material)?
+				.with_surface(imported.surface);
+			if let Some(normal) = &imported.normal_map {
+				let texture = self.load_image_texture_in_color_space(
+					renderer,
+					upload::normal_image_key(&full_path, normal.image_index),
+					&normal.image,
+					TextureColorSpace::Linear,
+				)?;
+				material = material.with_normal_map(texture, normal.scale);
+			}
 			engine_logger::debug!(
 				"Prepared primitive {}: {} indices, double-sided {}",
 				imported.primitive_index,
@@ -338,21 +409,26 @@ impl AssetManager {
 		renderer: &WindowRenderer,
 		reference: &engine_core::asset_registry::AssetRef,
 	) -> Result<Arc<Model>, AssetManagerError> {
-		self.load_asset_prepared(renderer, reference, None)
+		self.load_asset_prepared(renderer, reference, &mut None, None)
 	}
 
 	pub(crate) fn load_asset_prepared(
 		&mut self,
 		renderer: &WindowRenderer,
 		reference: &engine_core::asset_registry::AssetRef,
+		catalog: &mut Option<AssetCatalog>,
 		warming: Option<&mut PreparedModelBatch>,
 	) -> Result<Arc<Model>, AssetManagerError> {
-		let (reference, warming) =
-			super::project_assets::resolve_asset_with_model(&self.root, reference, |model| {
+		let (reference, warming) = super::project_assets::resolve_asset_with_model(
+			&self.root,
+			reference,
+			catalog,
+			|model| {
 				warming
 					.zip(model)
 					.map(|(batch, asset)| (batch, CurrentModel::from(asset)))
-			})
+			},
+		)
 			.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
 		self.load_model_mesh_prepared(
 			renderer,
@@ -369,8 +445,17 @@ impl AssetManager {
 		&self,
 		reference: &engine_core::asset_registry::AssetRef,
 	) -> Result<bool, AssetManagerError> {
-		let reference = super::project_assets::resolve_asset(&self.root, reference)
-			.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
+		self.asset_exists_with_catalog(reference, &mut None)
+	}
+
+	pub(crate) fn asset_exists_with_catalog(
+		&self,
+		reference: &engine_core::asset_registry::AssetRef,
+		catalog: &mut Option<AssetCatalog>,
+	) -> Result<bool, AssetManagerError> {
+		let (reference, ()) =
+			super::project_assets::resolve_asset_with_model(&self.root, reference, catalog, |_| ())
+				.map_err(|error| AssetManagerError::Gltf(GltfLoaderError::Resource(error)))?;
 		if !Path::new(&reference.path)
 			.extension()
 			.and_then(|extension| extension.to_str())
@@ -604,6 +689,18 @@ impl AssetManager {
 				.map(|m| m.parts().len())
 				.sum::<usize>()
 	}
+	pub(crate) fn start_scene_load_benchmark(&mut self) {
+		self.scene_load_benchmark = Some(AssetLoadBenchmark::default());
+	}
+
+	pub(crate) fn finish_scene_load_benchmark(&mut self) -> Option<AssetLoadBenchmark> {
+		self.scene_load_benchmark.take()
+	}
+
+	pub(crate) fn retained_source_bytes(&self) -> usize {
+		self.source_cache.retained_bytes()
+	}
+
 	pub fn loaded_model_count(&self) -> usize {
 		self.models.len() + self.animated_models.len()
 	}
@@ -657,6 +754,16 @@ impl AssetManager {
 	/// otherwise-unused GPU allocations alive. CPU source snapshots are retained
 	/// only for live model paths or externally retained hierarchy metadata.
 	pub fn prune_unused(&mut self) {
+		self.prune_resources(false);
+	}
+
+	/// Measure one bounded idle CPU source in the repeated scene-switch smoke
+	/// test. GPU allocations retain the ordinary ownership and pruning policy.
+	pub fn prune_after_scene_switch_benchmark(&mut self) {
+		self.prune_resources(true);
+	}
+
+	fn prune_resources(&mut self, retain_recent_source: bool) {
 		self.animated_models
 			.retain(|_, model| Arc::strong_count(model) > 1);
 		self.models.retain(|_, model| {
@@ -681,7 +788,12 @@ impl AssetManager {
 		self.image_textures
 			.retain(|_, texture| Arc::strong_count(texture) > 1);
 		self.gpu_budget.sweep();
-		self.source_cache.prune_unused(&retained_paths);
+		self.source_cache
+			.prune_unused(&retained_paths, retain_recent_source);
+	}
+
+	pub(crate) fn cached_image_texture(&self, id: &str) -> Option<Arc<VulkanTexture>> {
+		self.image_textures.get(id).cloned()
 	}
 
 	pub fn load_image_texture(
@@ -690,8 +802,16 @@ impl AssetManager {
 		id: impl Into<String>,
 		image: &ImageAsset,
 	) -> Result<Arc<VulkanTexture>, AssetManagerError> {
-		let id = id.into();
+		self.load_image_texture_in_color_space(renderer, id.into(), image, TextureColorSpace::Srgb)
+	}
 
+	fn load_image_texture_in_color_space(
+		&mut self,
+		renderer: &WindowRenderer,
+		id: String,
+		image: &ImageAsset,
+		color_space: TextureColorSpace,
+	) -> Result<Arc<VulkanTexture>, AssetManagerError> {
 		if let Some(texture) = self.image_textures.get(&id) {
 			return Ok(Arc::clone(texture));
 		}
@@ -699,8 +819,12 @@ impl AssetManager {
 		let bytes = image.pixels().len();
 		self.gpu_budget.admit(bytes, 1)?;
 
-		let texture =
-			Arc::new(renderer.upload_rgba8(image.width(), image.height(), image.pixels())?);
+		let texture = Arc::new(renderer.upload_rgba8_with_color_space(
+			image.width(),
+			image.height(),
+			image.pixels(),
+			color_space,
+		)?);
 		texture.set_debug_label(&id);
 		self.gpu_budget.track_texture(&texture, bytes);
 

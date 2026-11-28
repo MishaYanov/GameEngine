@@ -11,15 +11,17 @@ pub(crate) use game_input::GameCameraCapture;
 use std::{
 	cell::{Ref, RefCell},
 	collections::{HashMap, HashSet},
+	sync::Arc,
+	time::Instant,
 };
 
 use bridge::editor::{
 	EditorCommandDto as Command, EditorCommandRequest, TransformDto, TransformEditDto,
-	TransformSpace, ViewportInputDto,
+	TransformSpace, ViewportInputDto, ViewportModifiersDto,
 };
 use bridge::viewport::*;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-use renderer::{EditorGrid, EditorLine, EditorVisuals};
+use renderer::{vulkan::EditorPickGeometry, EditorGrid, EditorLine, EditorVisuals};
 use runtime::camera_input::{CameraInputOwner, CameraIntent};
 use runtime::{scene::Scene, simulation_session::TickOutcome, BackendError, Bounds3};
 
@@ -43,7 +45,24 @@ struct Navigation {
 	previous: Vec2,
 	button: Option<&'static str>,
 	walk_origin: Option<EditorCamera>,
+	context_press: Option<ContextPress>,
 }
+struct ContextPress {
+	started: Instant,
+	origin: Vec2,
+	threshold: f32,
+	fly_motion: Vec2,
+	revision: u64,
+}
+
+pub(crate) struct SceneContextClick {
+	pub workspace_generation: u64,
+	pub revision: u64,
+	pub scene_id: runtime::scene_catalog::SceneId,
+	pub normalized: [f64; 2],
+	pub position: Option<[f32; 3]>,
+}
+
 struct Click {
 	start: [f64; 2],
 	current: [f64; 2],
@@ -83,6 +102,7 @@ pub(crate) struct ViewportInteraction {
 	target_revision: Option<(u64, u64)>,
 	initial_frame: bool,
 	navigation: Option<Navigation>,
+	context_click: Option<SceneContextClick>,
 	drag: Option<GizmoDrag>,
 	drag_visual: Option<Gizmo>,
 	drag_delta: Vec3,
@@ -94,6 +114,7 @@ pub(crate) struct ViewportInteraction {
 	placement: Option<Placement>,
 	import: Option<AssetTicket>,
 	keys: HashSet<String>,
+	captured_primary_held: bool,
 	play_gamepad: runtime::input::GamepadOwner,
 	revision: u64,
 	focused: bool,
@@ -103,6 +124,7 @@ pub(crate) struct ViewportInteraction {
 	camera_preview_active: bool,
 	game_status_revision: Option<(u64, u64)>,
 	game_status: Option<bridge::editor::PlayStatusDto>,
+	world_gpu_asset_bytes: Option<u64>,
 	orbit_status: Option<OrbitStatusDto>,
 	scene_warming_result: Option<SceneWarmingResultDto>,
 	last_extent: [u32; 2],
@@ -125,6 +147,7 @@ impl Default for ViewportInteraction {
 			target_revision: None,
 			initial_frame: true,
 			navigation: None,
+			context_click: None,
 			drag: None,
 			drag_visual: None,
 			drag_delta: Vec3::ZERO,
@@ -136,6 +159,7 @@ impl Default for ViewportInteraction {
 			placement: None,
 			import: None,
 			keys: HashSet::new(),
+			captured_primary_held: false,
 			play_gamepad: runtime::input::GamepadOwner::default(),
 			revision: 0,
 			focused: false,
@@ -145,6 +169,7 @@ impl Default for ViewportInteraction {
 			camera_preview_active: false,
 			game_status_revision: None,
 			game_status: None,
+			world_gpu_asset_bytes: None,
 			orbit_status: None,
 			scene_warming_result: None,
 			last_extent: [0; 2],
@@ -198,8 +223,17 @@ impl ViewportInteraction {
 			collider_error: self.collider_visuals.error().map(str::to_owned),
 			transform_preview: self.preview.clone(),
 			game_status: self.game_status.clone(),
+			world_gpu_asset_bytes: self.world_gpu_asset_bytes,
 			orbit_status: self.orbit_status.clone(),
 			scene_warming_result: self.scene_warming_result.clone(),
+		}
+	}
+
+	pub(crate) fn update_world_gpu_asset_bytes(&mut self, bytes: Option<u64>) {
+		let bytes = bytes.filter(|_| self.playing);
+		if self.world_gpu_asset_bytes != bytes {
+			self.world_gpu_asset_bytes = bytes;
+			self.changed();
 		}
 	}
 
@@ -256,6 +290,7 @@ impl ViewportInteraction {
 			self.click = None;
 			self.placement = None;
 			self.import = None;
+			self.clear_captured_primary();
 			self.keys.clear();
 			self.play_gamepad.reset();
 			if self.generation == Some(generation) {
@@ -294,8 +329,7 @@ impl ViewportInteraction {
 			// A pending click or fly gesture belongs to the previous camera.
 			self.end_navigation();
 			self.click = None;
-			self.keys.clear();
-			self.play_gamepad.reset();
+			self.clear_play_input(workspace);
 			self.hovered = None;
 			self.hover_handle = None;
 			self.changed();
@@ -321,20 +355,42 @@ impl ViewportInteraction {
 		}
 		self.targets.clear();
 		self.target_indices.clear();
+		// Repeated instances share the same local mesh data without keeping GPU meshes alive.
+		let mut model_surfaces = HashMap::<_, Option<Arc<[Arc<EditorPickGeometry>]>>>::new();
 		for id in scene.entity_ids() {
-			let determinant = scene.world_matrix(id)?.determinant();
-			if !scene.is_renderable(id) || !determinant.is_finite() || determinant == 0.0 {
+			if !scene.is_renderable(id) {
 				continue;
 			}
-			let (Some(key), Some(bounds)) = (scene.key(id), scene.world_bounds(id)?) else {
+			let world = scene.world_matrix(id)?;
+			let determinant = world.determinant();
+			if !determinant.is_finite() || determinant == 0.0 {
+				continue;
+			}
+			let (Some(key), Some(bounds), Some(instance)) =
+				(scene.key(id), scene.world_bounds(id)?, scene.get(id))
+			else {
 				continue;
 			};
-			self.target_indices
-				.insert(key.as_str().to_owned(), self.targets.len());
-			self.targets.push(PickTarget {
-				key: key.as_str().to_owned(),
-				bounds,
-			});
+			let model = instance.model();
+			let mut target = PickTarget::new(key.as_str().to_owned(), bounds);
+			let inverse = world.inverse();
+			if inverse.is_finite() {
+				let surface = model_surfaces.entry(std::ptr::from_ref(model)).or_insert_with(|| {
+					if model.parts().is_empty() || model.animation_asset().is_some() {
+						return None;
+					}
+					model
+						.parts()
+						.iter()
+						.map(|part| part.mesh().editor_pick_geometry().cloned())
+						.collect()
+				});
+				if let Some(parts) = surface {
+					target = target.with_surface(inverse, Arc::clone(parts));
+				}
+			}
+			self.target_indices.insert(target.key.clone(), self.targets.len());
+			self.targets.push(target);
 		}
 		self.target_revision = Some((generation, scene_revision));
 		if self.initial_frame {
@@ -432,6 +488,9 @@ impl ViewportInteraction {
 	) -> Result<(), String> {
 		self.sync(workspace)?;
 		action.validate()?;
+		if let Some(navigation) = self.navigation.as_mut() {
+			navigation.context_press = None;
+		}
 		if self.camera_preview_active
 			&& !matches!(
 				action,
@@ -444,6 +503,8 @@ impl ViewportInteraction {
 		if !matches!(
 			&action,
 			ViewportActionDto::AlignCameraToSceneView { .. }
+				| ViewportActionDto::SetShading { .. }
+				| ViewportActionDto::SetShowVertices { .. }
 				| ViewportActionDto::UpdatePlacement { .. }
 				| ViewportActionDto::CommitPlacement
 				| ViewportActionDto::CancelPlacement
@@ -517,6 +578,8 @@ impl ViewportInteraction {
 					self.settings.view = view;
 				}
 			}
+			ViewportActionDto::SetShading { shading } => self.settings.shading = shading,
+			ViewportActionDto::SetShowVertices { visible } => self.settings.show_vertices = visible,
 			ViewportActionDto::Orient { orientation } => {
 				self.end_navigation();
 				self.camera.orient(orientation);
@@ -616,6 +679,7 @@ impl ViewportInteraction {
 		extent: [u32; 2],
 		dpi: f64,
 	) -> Result<(), String> {
+		self.context_click = None;
 		self.sync(workspace)?;
 		if matches!(input.kind.as_str(), "focused" | "blurred") {
 			return self.set_keyboard_focus(input.kind == "focused", workspace);
@@ -627,6 +691,17 @@ impl ViewportInteraction {
 		let cursor = Vec2::new(point[0] as f32, point[1] as f32);
 		let ctrl = input.modifiers.control || input.modifiers.super_key;
 		match input.kind.as_str() {
+			"pointer_down" | "pointer_up" if self.focused && self.game_keyboard_active() => {
+				let inside_game = input.position.is_some_and(|[x, y]| {
+					x >= 0.0 && y >= 0.0 && x < f64::from(extent[0]) && y < f64::from(extent[1])
+				});
+				self.set_bound_game_mouse(
+					workspace,
+					input.button.as_deref(),
+					input.kind == "pointer_down",
+					inside_game,
+				)?;
+			}
 			"pointer_down" if self.settings.view == ViewportView::Scene => {
 				let button = input.button.as_deref().unwrap_or("");
 				if self.persistent_fly() && matches!(button, "left" | "right") {
@@ -636,7 +711,11 @@ impl ViewportInteraction {
 					self.end_navigation();
 					return Ok(());
 				}
-				if self.drag.is_some() || self.navigation.is_some() || self.click.is_some() {
+				if let Some(navigation) = self.navigation.as_mut() {
+					navigation.context_press = None;
+					return Ok(());
+				}
+				if self.drag.is_some() || self.click.is_some() {
 					return Ok(());
 				}
 				if self.placement.is_some() && self.import.is_none() {
@@ -667,14 +746,27 @@ impl ViewportInteraction {
 						previous: cursor,
 						button: Some(button),
 						walk_origin: None,
+						context_press: (button == "right"
+							&& self.can_open_context_menu(workspace, &input.modifiers)
+							&& input.position.is_some_and(|point| {
+							self.camera
+								.ray(point, extent, self.settings.projection)
+								.is_ok()
+						}))
+							.then(|| ContextPress {
+								started: Instant::now(),
+								origin: cursor,
+								threshold: 4.0 * dpi as f32,
+								fly_motion: Vec2::ZERO,
+								revision: workspace.backend.session().revision(),
+							}),
 					});
 					self.changed();
 				} else if button == "left" {
 					if self.import.is_some() {
 						return Ok(());
 					}
-					if self.can_author(workspace) && !workspace.backend.session().has_transaction()
-					{
+					if self.can_author(workspace) {
 						if let Some(gizmo) = self.gizmo(workspace, extent, dpi)? {
 							if let Some(handle) = gizmo.hit_test(
 								&self.camera,
@@ -684,6 +776,10 @@ impl ViewportInteraction {
 								point,
 								9.0 * dpi as f32,
 							) {
+								if workspace.backend.session().has_transaction() {
+									self.report("Finish the current edit before dragging a transform handle");
+									return Ok(());
+								}
 								let mut settings = self.settings.clone();
 								settings.snap |= ctrl;
 								let targets = self.transform_targets(workspace)?;
@@ -715,6 +811,7 @@ impl ViewportInteraction {
 								)?;
 								self.drag = Some(drag);
 								self.drag_visual = Some(gizmo);
+								self.hover_handle = Some(handle);
 								self.drag_delta = Vec3::ZERO;
 								self.move_targets = move_targets;
 								self.drag_generation = Some(workspace.generation);
@@ -742,6 +839,11 @@ impl ViewportInteraction {
 			}
 			"pointer_move" if self.settings.view == ViewportView::Scene => {
 				if let Some(navigation) = self.navigation.as_mut() {
+					if navigation.context_press.as_ref().is_some_and(|press| {
+						!cursor.is_finite() || cursor.distance(press.origin) >= press.threshold
+					}) {
+						navigation.context_press = None;
+					}
 					let delta = cursor - std::mem::replace(&mut navigation.previous, cursor);
 					let logical = delta / dpi as f32;
 					match navigation.mode {
@@ -756,39 +858,7 @@ impl ViewportInteraction {
 					}
 					self.changed();
 				}
-				if let Some(drag) = self.drag.as_mut() {
-					let (edits, space) = if drag.tool() == ViewportTool::Move {
-						let delta = drag.translation_delta(point)?;
-						self.drag_delta = delta;
-						let edits = self
-							.move_targets
-							.iter()
-							.map(|target| {
-								let mut transform = target.transform.clone();
-								transform.position = (Vec3::from_array(transform.position)
-									+ target.parent_inverse.transform_vector3(delta))
-								.to_array();
-								TransformEditDto {
-									key: target.key.clone(),
-									transform,
-								}
-							})
-							.collect();
-						(edits, TransformSpace::Local)
-					} else {
-						(drag.preview(point)?, TransformSpace::World)
-					};
-					if !edits.is_empty() {
-						self.execute(
-							workspace,
-							Command::SetTransforms {
-								edits,
-								space,
-								snap: false,
-							},
-						)?;
-					}
-				}
+				self.preview_drag_at(workspace, point)?;
 				if let Some(click) = self.click.as_mut() {
 					click.current = point;
 					self.changed();
@@ -828,6 +898,12 @@ impl ViewportInteraction {
 			"pointer_up" if self.settings.view == ViewportView::Scene => {
 				if let Some(navigation) = self.navigation.as_ref() {
 					if navigation.button.is_some() && navigation.button == input.button.as_deref() {
+						self.context_click = self.context_click_at_release(
+							workspace,
+							input,
+							extent,
+							navigation.context_press.as_ref(),
+						);
 						self.end_navigation();
 					}
 					return Ok(());
@@ -836,7 +912,10 @@ impl ViewportInteraction {
 					if input.button.as_deref() != Some("left") {
 						return Ok(());
 					}
-					// The window owner flushes its final pointer sample before this boundary.
+					// The release itself may carry a position newer than the last move event.
+					if let Some(point) = input.position {
+						self.preview_drag_at(workspace, point)?;
+					}
 					self.execute(workspace, Command::CommitTransaction)?;
 					self.drag = None;
 					self.drag_visual = None;
@@ -851,6 +930,9 @@ impl ViewportInteraction {
 				}
 			}
 			"wheel_lines" | "wheel_pixels" if self.settings.view == ViewportView::Scene => {
+				if let Some(navigation) = self.navigation.as_mut() {
+					navigation.context_press = None;
+				}
 				if self.drag.is_some() {
 					return Ok(());
 				}
@@ -888,12 +970,16 @@ impl ViewportInteraction {
 							previous: cursor,
 							button: None,
 							walk_origin: Some(self.camera.clone()),
+							context_press: None,
 						});
 						self.changed();
 					}
 					return Ok(());
 				}
 				if self.is_flying() {
+					if let Some(navigation) = self.navigation.as_mut() {
+						navigation.context_press = None;
+					}
 					if matches!(code, "Enter" | "NumpadEnter") && self.persistent_fly() {
 						self.end_navigation();
 					} else if matches!(

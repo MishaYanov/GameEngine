@@ -49,9 +49,9 @@ fn fixture() -> (Fixture, EditorWorkspace) {
 }
 
 #[test]
-fn prop_environment_is_token_scoped_and_restores_neutral_without_a_scene_edit() {
+fn prop_preview_preferences_are_token_scoped_without_a_scene_edit() {
 	use crate::editor::prop_preview::PropPreviewEnvironment;
-	use bridge::viewport::PropPreviewTargetDto;
+	use bridge::viewport::{PropPreviewTargetDto, ViewportShading};
 
 	let (_fixture, mut workspace) = fixture();
 	workspace
@@ -93,6 +93,13 @@ fn prop_environment_is_token_scoped_and_restores_neutral_without_a_scene_edit() 
 			.ambient_linear,
 		[0.2, 0.4, 0.6]
 	);
+	workspace
+		.set_prop_preview_display(&token, ViewportShading::Wireframe, true, false)
+		.unwrap();
+	let display = workspace.prop_preview_display(&token).unwrap();
+	assert_eq!(display.shading, ViewportShading::Wireframe);
+	assert!(display.show_vertices);
+	assert!(!display.show_normal_detail);
 	assert!(workspace.close_prop_preview(&token));
 	let new = workspace
 		.open_prop_preview(target, revision, workspace.generation, 2)
@@ -100,7 +107,14 @@ fn prop_environment_is_token_scoped_and_restores_neutral_without_a_scene_edit() 
 	assert!(workspace
 		.set_prop_preview_environment(&token, PropPreviewEnvironment::Scene)
 		.is_err());
+	assert!(workspace
+		.set_prop_preview_display(&token, ViewportShading::Unlit, true, false)
+		.is_err());
 	assert!(workspace.prop_scene_environment(&new.token).is_none());
+	let display = workspace.prop_preview_display(&new.token).unwrap();
+	assert_eq!(display.shading, ViewportShading::Lit);
+	assert!(!display.show_vertices);
+	assert!(display.show_normal_detail);
 	assert_eq!(workspace.backend.session().revision(), revision);
 	assert_eq!(
 		workspace

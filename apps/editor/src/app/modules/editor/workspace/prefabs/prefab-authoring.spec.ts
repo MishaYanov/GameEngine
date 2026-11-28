@@ -221,7 +221,7 @@ function configure() {
 }
 function controls(root: HTMLElement) {
 	const button = (text: string) =>
-		[...root.querySelectorAll('button')].find((button) => button.textContent.trim() === text)!;
+        [...root.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === text || button.textContent.trim() === text)!;
     const field = (text: string) => {
         const label = [...root.querySelectorAll('label')]
             .find((label) => label.firstChild?.textContent?.trim() === text)!;

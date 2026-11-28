@@ -202,6 +202,32 @@ impl Engine {
 		self.session.pending_play_scene()
 	}
 
+	pub fn commit_world_region(
+		&mut self,
+		prepared: crate::simulation_session::PreparedRegionChange,
+	) -> Result<CommandReceipt, BackendError> {
+		self.mutate_session(|session| session.commit_region_change(prepared).map(|_| ()))
+	}
+
+	pub fn pending_scene_transition(&self) -> Option<&crate::game_session::SceneTransitionAttempt> {
+		self.session.pending_scene_transition()
+	}
+
+	pub fn finish_unsuccessful_scene_transition(
+		&mut self,
+		attempt: &crate::game_session::SceneTransitionAttempt,
+		failed: bool,
+	) -> Result<CommandReceipt, BackendError> {
+		self.mutate_session(|session| session.finish_unsuccessful_scene_transition(attempt, failed))
+	}
+
+	pub fn retry_scene_transition(
+		&mut self,
+		attempt: &crate::game_session::SceneTransitionAttempt,
+	) -> Result<CommandReceipt, BackendError> {
+		self.mutate_session(|session| session.retry_scene_transition(attempt))
+	}
+
 	pub fn prepare_pending_play_scene(
 		&self,
 	) -> Result<(PreparedScene, Arc<SceneData>), BackendError> {

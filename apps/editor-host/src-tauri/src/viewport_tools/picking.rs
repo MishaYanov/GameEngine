@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use renderer::vulkan::EditorPickGeometry;
+
 use super::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -29,25 +33,79 @@ impl Ray {
 	}
 }
 
-#[derive(Debug, Clone)]
 pub struct PickTarget {
 	pub key: String,
 	pub bounds: Bounds3,
-}
-pub fn pick_nearest(ray: Ray, targets: &[PickTarget]) -> Option<&str> {
-	closest_target(ray, targets).map(|(target, _)| target.key.as_str())
+	surface: Option<PickSurface>,
 }
 
-fn closest_target(ray: Ray, targets: &[PickTarget]) -> Option<(&PickTarget, f32)> {
+struct PickSurface {
+	local_from_world: Mat4,
+	parts: Arc<[Arc<EditorPickGeometry>]>,
+}
+
+impl PickTarget {
+	pub fn new(key: String, bounds: Bounds3) -> Self {
+		Self {
+			key,
+			bounds,
+			surface: None,
+		}
+	}
+
+	pub fn with_surface(
+		mut self,
+		local_from_world: Mat4,
+		parts: Arc<[Arc<EditorPickGeometry>]>,
+	) -> Self {
+		self.surface = Some(PickSurface {
+			local_from_world,
+			parts,
+		});
+		self
+	}
+
+	fn bounds_distance(&self, ray: Ray) -> Option<f32> {
+		self.bounds.ray_distance(ray.origin, ray.direction, ray.max_distance)
+	}
+
+	fn surface_distance(&self, ray: Ray) -> Option<f32> {
+		let entry = self.bounds_distance(ray)?;
+		let Some(surface) = &self.surface else {
+			return Some(entry);
+		};
+		let origin = surface.local_from_world.transform_point3(ray.origin);
+		let direction = surface.local_from_world.transform_vector3(ray.direction);
+		let mut closest = None;
+		let mut limit = ray.max_distance;
+		for part in surface.parts.iter() {
+			if let Some(distance) = part.ray_distance(origin, direction, limit) {
+				closest = Some(distance);
+				limit = distance;
+			}
+		}
+		closest
+	}
+}
+
+pub fn pick_nearest(ray: Ray, targets: &[PickTarget]) -> Option<&str> {
+	closest_target(ray, targets, PickTarget::surface_distance)
+		.map(|(target, _)| target.key.as_str())
+}
+
+fn closest_target(
+	mut ray: Ray,
+	targets: &[PickTarget],
+	distance_to: impl Fn(&PickTarget, Ray) -> Option<f32>,
+) -> Option<(&PickTarget, f32)> {
 	let mut nearest = None;
-	let mut limit = ray.max_distance;
 	for target in targets {
-		if let Some(distance) = target.bounds.ray_distance(ray.origin, ray.direction, limit) {
-			if nearest.is_some() && distance >= limit {
+		if let Some(distance) = distance_to(target, ray) {
+			if nearest.is_some() && distance >= ray.max_distance {
 				continue;
 			}
 			nearest = Some((target, distance));
-			limit = distance;
+			ray.max_distance = distance;
 		}
 	}
 	nearest
@@ -87,7 +145,9 @@ pub fn placement_point(
 	plane: ViewportPlane,
 	snap: Option<f32>,
 ) -> Option<Vec3> {
-	let (mut point, normal) = if let Some((target, distance)) = closest_target(ray, targets) {
+	let (mut point, normal) = if let Some((target, distance)) =
+		closest_target(ray, targets, PickTarget::bounds_distance)
+	{
 		hit_surface(ray, target.bounds, distance)
 	} else {
 		let normal = plane_basis(plane).0;

@@ -8,18 +8,9 @@ fn world_bounds_picking_chooses_the_nearest_and_has_stable_ties() {
 		max_distance: 100.0,
 	};
 	let targets = vec![
-		PickTarget {
-			key: "far".into(),
-			bounds: bounds([-1.0, -1.0, -3.0], [1.0, 1.0, -2.0]),
-		},
-		PickTarget {
-			key: "near".into(),
-			bounds: bounds([-1.0, -1.0, 1.0], [1.0, 1.0, 2.0]),
-		},
-		PickTarget {
-			key: "tie".into(),
-			bounds: bounds([-1.0, -1.0, 1.0], [1.0, 1.0, 2.0]),
-		},
+		PickTarget::new("far".into(), bounds([-1.0, -1.0, -3.0], [1.0, 1.0, -2.0])),
+		PickTarget::new("near".into(), bounds([-1.0, -1.0, 1.0], [1.0, 1.0, 2.0])),
+		PickTarget::new("tie".into(), bounds([-1.0, -1.0, 1.0], [1.0, 1.0, 2.0])),
 	];
 	assert_eq!(pick_nearest(ray, &targets), Some("near"));
 	approx(
@@ -35,10 +26,7 @@ fn placement_uses_surface_height_and_snaps_only_its_tangent_coordinates() {
 		direction: -Vec3::Y,
 		max_distance: 100.0,
 	};
-	let targets = [PickTarget {
-		key: "platform".into(),
-		bounds: bounds([-2.0, 0.0, -2.0], [2.0, 1.2, 2.0]),
-	}];
+	let targets = [PickTarget::new("platform".into(), bounds([-2.0, 0.0, -2.0], [2.0, 1.2, 2.0]))];
 	let point = placement_point(ray, &targets, ViewportPlane::Xz, Some(1.0)).unwrap();
 	approx(point, Vec3::new(0.0, 1.2, 1.0));
 	approx(

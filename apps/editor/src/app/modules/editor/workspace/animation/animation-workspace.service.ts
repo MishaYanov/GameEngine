@@ -1,6 +1,10 @@
-import {computed, DestroyRef, effect, inject, Injectable, signal, untracked} from '@angular/core';
+import {computed, DestroyRef, effect, inject, Injectable, linkedSignal, signal, untracked} from '@angular/core';
 import {listen} from '@tauri-apps/api/event';
-import type {AnimationReview, AnimationSource} from '../../../../core/editor/animation.models';
+import {
+    canResolveAnimationSource,
+    resolveAnimationClip,
+    type AnimationReview
+} from '../../../../core/editor/animation.models';
 import {
     matchesAnimationTarget, reserveAnimationPreviewRequest, type ScopedAnimationPreview,
 } from '../../../../core/editor/animation-workspace.models';
@@ -11,13 +15,18 @@ import {type PropWorkspaceDocument, PropWorkspaceService} from '../prop-workspac
 import {SceneEditingService} from '../scene-editing.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import {ScopedPaneRequests, type PreparedScopedPane, type ScopedPaneTarget} from '../scoped-pane-request';
+import {WorkspaceDraftReview} from '../workspace-draft-review';
 import type {AnimationPaneRequest} from './animation-pane-request';
-import {type AnimationTargetOption, boundAnimationTarget, propAnimationTargets, sceneAnimationTarget} from './animation-workspace-target';
+import {
+    type AnimationTargetOption,
+    boundAnimationTarget,
+    propAnimationTargets,
+    sceneAnimationTargets
+} from './animation-workspace-target';
 
 interface AuthoredClipReveal {
     readonly document: ClipAssetDocument;
     readonly markerId: string;
-    readonly openTimeline: boolean;
     readonly current: () => boolean;
 }
 
@@ -71,14 +80,17 @@ export class AnimationWorkspaceService {
     private readonly props = inject(PropWorkspaceService);
     private readonly editing = inject(SceneEditingService);
     private readonly panes = inject(ScopedPaneRequests, {optional: true});
+    private readonly drafts = inject(WorkspaceDraftReview, {optional: true});
     private readonly viewport = inject(ViewportEditorService, {optional: true});
     private readonly preparedImport = signal<PreparedImportedClip | null>(null);
-    private readonly pinnedScope = signal<'scene' | 'prop' | null>(null);
     private readonly pin = signal<ScopedAnimationPreview | null>(null);
     private readonly failure = signal<string | null>(null);
     private readonly status = signal<'loading' | 'opening' | null>(null);
     private readonly context = signal<ReviewedPreview | null>(null);
-    private readonly targetKey = signal('');
+    private readonly targetKey = linkedSignal({
+        source: () => this.editor.workspaceGeneration(),
+        computation: () => '',
+    });
     private readonly retryVersion = signal(0);
     private readonly time = signal(0);
     private destroyed = false;
@@ -87,13 +99,25 @@ export class AnimationWorkspaceService {
     private nextOpen: OpenPreview | null = null;
     private nextSeek: ScrubPreview | null = null;
     private request = 0;
-    private reviewTimeline: (() => Promise<boolean>) | null = null;
+    private readonly draftReviewers = new Set<() => Promise<boolean>>();
+    private readonly savedClipOpening = signal(false);
+    private readonly savedClipError = signal<string | null>(null);
 
     private readonly authoredReveal = signal<AuthoredClipReveal | null>(null);
     readonly authoredClipReveal = this.authoredReveal.asReadonly();
+    readonly authoredOpening = this.savedClipOpening.asReadonly();
+    readonly authoredOpenError = this.savedClipError.asReadonly();
     readonly scope = signal<'scene' | 'prop'>('scene');
     readonly library = signal<'imported' | 'authored'>('imported');
     readonly authoredReady = signal(false);
+    readonly authoredTimelineOpen = linkedSignal({
+        source: () => [this.editor.workspaceGeneration(), this.views.animationView(), this.library()],
+        computation: () => false,
+    });
+    readonly authoredTimelinePreviewError = linkedSignal({
+        source: this.authoredTimelineOpen,
+        computation: (): string | null => null,
+    });
     readonly clipIndex = signal(0);
     readonly nativeAvailable = this.editor.nativeAvailable;
     readonly propAvailable = computed(() => this.props.document() !== null);
@@ -106,13 +130,15 @@ export class AnimationWorkspaceService {
                 ? propAnimationTargets(document, this.props.selectedObject(), this.props.selectedPlacement(), snapshot.active_scene_id)
                 : [];
         }
-        const option = sceneAnimationTarget(this.editing.entity(), snapshot.document.entities, snapshot.active_scene_id);
-        return option ? [option] : [];
+        return sceneAnimationTargets(snapshot.document.entities, snapshot.active_scene_id);
     });
 
-    readonly target = computed(() =>
-        this.options().find(option => option.key === this.targetKey()) ?? this.options()[0] ?? null,
-    );
+    readonly target = computed(() => {
+        const options = this.options();
+        const current = this.scope() === 'scene' ? this.editing.entity()?.key : undefined;
+        return options.find(option => option.key === this.targetKey()) ??
+            options.find(option => option.target.entity_key === current) ?? options[0] ?? null;
+    });
     readonly clips = computed(() => this.context()?.review.metadata.clips ?? []);
     readonly preview = computed(() => {
         const pin = this.pin();
@@ -143,11 +169,8 @@ export class AnimationWorkspaceService {
         effect(() => {
             const origin = this.views.animationOrigin();
             const active = this.views.animationView();
-            if (active) this.scope.set(this.pinnedScope() ?? origin);
-            else untracked(() => {
-                this.pinnedScope.set(null);
-                this.preparedImport.set(null);
-            });
+            if (active) this.scope.set(origin);
+            else untracked(() => this.preparedImport.set(null));
         });
         effect(() => {
             if (!this.views.animationView() || this.library() !== 'authored') this.authoredReveal.set(null);
@@ -185,7 +208,7 @@ export class AnimationWorkspaceService {
     chooseScope(value: string): void {
         if (value !== 'scene' && value !== 'prop') return;
         if (value !== this.scope()) this.preparedImport.set(null);
-        this.pinnedScope.set(value);
+        this.views.setAnimationScope(value);
         this.scope.set(value);
     }
 
@@ -209,7 +232,7 @@ export class AnimationWorkspaceService {
             load: target => this.prepareScopedClip(request, target, propOrigin),
             activate: (prepared, _target, stillCurrent) => {
                 if (!this.views.availableViews().includes('animation-workspace')) return false;
-                this.views.selectView('animation-workspace');
+                this.views.selectView('animation-workspace', prepared.scope);
                 activated = true;
                 this.chooseScope(prepared.scope);
                 this.library.set(prepared.library);
@@ -219,7 +242,7 @@ export class AnimationWorkspaceService {
                     this.retryVersion.update(version => version + 1);
                 } else {
                     this.authoredReveal.set({
-                        document: prepared.document, markerId: prepared.markerId, openTimeline: true, current: stillCurrent,
+                        document: prepared.document, markerId: prepared.markerId, current: stillCurrent,
                     });
                 }
                 return true;
@@ -248,46 +271,73 @@ export class AnimationWorkspaceService {
             const source = bound?.option.settings.source;
             if (!bound || !source || source.asset_id !== asset.id) return null;
             const review = await this.editor.inspectAnimation(asset.id, workspace.workspaceGeneration, workspace.revision);
+            const clipIndex = resolveAnimationClip(source, review.metadata.source, request.clipIndex);
             if (review.workspace_generation !== workspace.nativeGeneration || review.revision !== workspace.revision ||
-                !sameAnimationSource(review.metadata.source, source) ||
-                !review.metadata.clips.some(clip => clip.index === request.clipIndex)) return null;
+                clipIndex === undefined || !review.metadata.clips.some(clip => clip.index === clipIndex)) return null;
             const revision = asset.revision === undefined ? undefined
                 : this.editor.modelAssets()?.find(model => model.asset_id === asset.id)?.revision ?? undefined;
             return {
-                value: {library: 'imported', ...bound, workspace, review, clipIndex: request.clipIndex},
-                asset: {id: source.asset_id, fingerprint: source.expected_sha256, revision},
+                value: {library: 'imported', ...bound, workspace, review, clipIndex},
+                asset: {id: source.asset_id, fingerprint: review.metadata.source.expected_sha256, revision},
             };
         } catch {
             return null;
         }
     }
 
+    /** Open the saved asset itself from its ID, without depending on a selected object. */
+    openAuthoredAsset(assetId: string): Promise<boolean> {
+        return this.openSavedClip(assetId, '', () => true);
+    }
+
     async revealAuthoredClip(assetId: string, markerId: string): Promise<void> {
-        const snapshot = this.editor.snapshot();
-        if (!assetId || snapshot?.mode !== 'edit' || this.editor.playing()) return;
-        const origin = this.views.activeViewKind();
         const prop = this.views.propView() ? this.props.document() : null;
         const subject = this.clipRevealSubject(prop);
+        await this.openSavedClip(assetId, markerId,
+            () => (!prop || this.props.document() === prop) && this.clipRevealSubject(prop) === subject);
+    }
+
+    private async openSavedClip(assetId: string, markerId: string, matchesSubject: () => boolean): Promise<boolean> {
+        const snapshot = this.editor.snapshot();
+        const origin = this.views.activeViewKind();
         const generation = this.editor.workspaceGeneration();
         const nativeGeneration = this.viewport?.state()?.workspace_generation;
-        if (nativeGeneration == null) return;
-        const sameSubject = () => {
+        if (!assetId || snapshot?.mode !== 'edit' || snapshot.transaction !== null ||
+            !this.nativeAvailable || nativeGeneration == null || this.authoredOpening()) return false;
+
+        const sameWorkspace = () => {
             const live = this.editor.snapshot();
-            return !this.destroyed && live?.mode === 'edit' && !this.editor.playing() &&
+            return !this.destroyed && live?.mode === 'edit' && live.transaction === null && !this.editor.playing() &&
                 live.active_scene_id === snapshot.active_scene_id && this.editor.workspaceGeneration() === generation &&
-                this.viewport?.state()?.workspace_generation === nativeGeneration &&
-                (!prop || this.props.document() === prop) && this.clipRevealSubject(prop) === subject;
+                this.viewport?.state()?.workspace_generation === nativeGeneration && matchesSubject();
         };
-        if (!await this.reviewNavigation() || !sameSubject() || this.views.activeViewKind() !== origin) return;
-        const revision = this.editor.snapshot()!.revision;
-        const current = () => sameSubject() && this.editor.snapshot()?.revision === revision;
+        const sameOrigin = () => sameWorkspace() && this.views.activeViewKind() === origin;
+        this.savedClipOpening.set(true);
+        this.savedClipError.set(null);
+        let opened = false;
         try {
-            const document = await this.loadAuthoredClip(assetId, markerId, {workspaceGeneration: generation, nativeGeneration, revision});
-            if (!document || !current() || this.views.activeViewKind() !== origin) return;
-            this.authoredReveal.set({document, markerId, openTimeline: !!markerId, current});
-            this.openAuthored();
-        } catch {
-            // The originating field already reports unavailable clip assets.
+            const load = async () => {
+                if (!sameOrigin()) return;
+                const revision = this.editor.snapshot()!.revision;
+                const current = () => sameWorkspace() && this.editor.snapshot()?.revision === revision;
+                const document = await this.loadAuthoredClip(assetId, markerId,
+                    {workspaceGeneration: generation, nativeGeneration, revision});
+                if (!current() || this.views.activeViewKind() !== origin) return;
+                if (!document) throw new Error('The saved clip or bookmark is unavailable.');
+                if (!this.views.availableViews().includes('animation-workspace')) return;
+                this.openAuthored();
+                this.authoredReveal.set({document, markerId, current});
+                opened = true;
+            };
+            if (origin !== 'animation-workspace' && this.drafts) {
+                await this.drafts.run(this.drafts.capture(), load);
+            } else if (await this.reviewNavigation()) await load();
+            return opened;
+        } catch (error) {
+            if (sameOrigin()) this.savedClipError.set(error instanceof Error ? error.message : String(error));
+            return false;
+        } finally {
+            this.savedClipOpening.set(false);
         }
     }
 
@@ -316,15 +366,16 @@ export class AnimationWorkspaceService {
         return object ? `object:${object.key}` : placement ? `placement:${placement.id}` : null;
     }
 
-    registerTimelineReview(review: () => Promise<boolean>): () => void {
-        this.reviewTimeline = review;
-        return () => {
-            if (this.reviewTimeline === review) this.reviewTimeline = null;
-        };
+    registerDraftReview(review: () => Promise<boolean>): () => void {
+        this.draftReviewers.add(review);
+        return () => this.draftReviewers.delete(review);
     }
 
-    reviewNavigation(): Promise<boolean> {
-        return this.reviewTimeline?.() ?? Promise.resolve(true);
+    async reviewNavigation(): Promise<boolean> {
+        for (const reviewer of [...this.draftReviewers]) {
+            if (!await reviewer()) return false;
+        }
+        return true;
     }
 
     async selectLibrary(library: 'imported' | 'authored'): Promise<void> {
@@ -396,15 +447,22 @@ export class AnimationWorkspaceService {
             const expected = owner.option.settings.source;
             const review = await this.editor.inspectAnimation(expected.asset_id, owner.generation, owner.revision);
             if (!this.current(owner)) return;
-            if (!sameAnimationSource(review.metadata.source, expected)) {
+            if (!canResolveAnimationSource(expected, review.metadata.source)) {
                 throw new Error('The imported animation source changed. Review it in the Animation component.');
             }
             const context = {owner, review};
             this.context.set(context);
+            if (!review.metadata.clips.length) {
+                this.status.set(null);
+                return;
+            }
             const playback = owner.option.settings.playback;
             const configured = playback.kind === 'single_clip' ? playback.clip_index : playback.idle;
-            const clip = review.metadata.clips.find(item => item.index === configured) ?? review.metadata.clips[0];
-            this.openClip(context, clip.index);
+            const index = resolveAnimationClip(expected, review.metadata.source, configured);
+            if (index === undefined || !review.metadata.clips.some(clip => clip.index === index)) {
+                throw new Error('The imported animation source changed. Review it in the Animation component.');
+            }
+            this.openClip(context, index);
         } catch (error) {
             if (this.current(owner)) {
                 this.failure.set(String(error));
@@ -509,9 +567,4 @@ export class AnimationWorkspaceService {
     private closeToken(token: string): void {
         void this.editor.closeAnimationPreview(token).catch(() => undefined);
     }
-}
-
-function sameAnimationSource(first: AnimationSource, second: AnimationSource): boolean {
-    return first.asset_id === second.asset_id && first.expected_sha256 === second.expected_sha256 &&
-        first.scene_index === second.scene_index && first.mesh_node === second.mesh_node && first.skin_index === second.skin_index;
 }

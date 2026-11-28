@@ -1,8 +1,9 @@
 import {computed, DestroyRef, inject, Injectable, signal} from '@angular/core';
 import type {EditorSnapshot, SceneId} from '../../../../core/editor/editor.models';
-import {EditorService} from '../../../../core/editor/editor.service';
+import {EditorService, type WorkspaceAssetScope} from '../../../../core/editor/editor.service';
 import {SceneEditingService} from '../scene-editing.service';
 import {type WorkspaceDraftTarget, WorkspaceDraftReview} from '../workspace-draft-review';
+import {WorkspaceNavigation} from '../workspace-navigation';
 
 interface SceneDestination {
     readonly sceneId: SceneId;
@@ -20,12 +21,15 @@ interface CompletedSwitch extends SceneDestination {
 }
 
 type SceneChoice = 'save' | 'keep' | 'cancel';
+type SceneTarget = { readonly sceneId: SceneId } | { readonly createPath: string };
+type SceneNavigation = 'opened' | 'registered' | 'stayed';
 
 /** One scene-opening flow for the toolbar, asset browser, and viewport drops. */
 @Injectable()
 export class SceneSwitchService {
     private readonly editor = inject(EditorService);
     private readonly drafts = inject(WorkspaceDraftReview);
+    private readonly history = inject(WorkspaceNavigation, {optional: true});
     private readonly editing = inject(SceneEditingService, {optional: true});
     private readonly pendingState = signal(false);
     readonly pending = this.pendingState.asReadonly();
@@ -54,65 +58,109 @@ export class SceneSwitchService {
         });
     }
 
-    async request(sceneId: SceneId): Promise<boolean> {
-        const snapshot = this.editor.snapshot();
-        if (this.destroyed || !this.canSwitch() || !snapshot || snapshot.active_scene_id === sceneId) return false;
+    async request(sceneId: SceneId, recordNavigation = true): Promise<boolean> {
+        if (this.editor.snapshot()?.active_scene_id === sceneId) return false;
+        return await this.navigate({sceneId}, recordNavigation) === 'opened';
+    }
+
+    createAndOpen(createPath: string): Promise<SceneNavigation> {
+        return this.navigate({createPath});
+    }
+
+    private async navigate(target: SceneTarget, recordNavigation = true): Promise<SceneNavigation> {
+        if (this.destroyed || !this.canSwitch()) return 'stayed';
         const scope = this.drafts.capture();
-        const fromId = snapshot.active_scene_id;
         this.pendingState.set(true);
         this.clearFeedback();
-
+        let registeredPath: string | null = null;
         let switched = false;
-        const open = async () => {
-            const previous = this.currentFor(scope);
-            const from = previous.scenes.find(scene => scene.id === fromId);
-            const to = previous.scenes.find(scene => scene.id === sceneId);
-            if (!from || !to) throw new Error('The scene is no longer registered. Choose a scene again.');
+        const report = (message: string) => {
+            if (this.destroyed || this.editor.workspaceGeneration() !== scope.generation) return;
+            this.errorState.set(registeredPath
+                ? `${message} Created ${registeredPath}. Open it from Assets → Scenes and use Save All to save the project.`
+                : message);
+        };
 
+        const current = () => this.currentFor(scope);
+        const readCreateScope = async (revision: number, original?: WorkspaceAssetScope) => {
+            const native = await this.editor.authoringScope(scope.generation);
+            if (native.workspaceGeneration !== scope.generation ||
+                (original && native.nativeGeneration !== original.nativeGeneration)) {
+                throw new Error('The native project changed. Choose Create Scene again.');
+            }
+            if (native.revision !== revision || current().revision !== revision) {
+                throw new Error('The project changed while preparing the new scene. Choose Create Scene again.');
+            }
+            return native;
+        };
+
+        const open = async () => {
+            const previous = current();
+            const from = previous.scenes.find(scene => scene.id === scope.sceneId);
+            const existing = 'sceneId' in target ? previous.scenes.find(scene => scene.id === target.sceneId) : null;
+            const path = 'createPath' in target ? target.createPath : existing?.asset_path;
+            if (!from || !path) throw new Error('The scene is no longer registered. Choose a scene again.');
+
+            let createScope = 'createPath' in target ? await readCreateScope(previous.revision) : null;
             let kept = false;
             if (from.dirty) {
-                const decision = await this.confirm(from.asset_path, to.asset_path);
+                const decision = await this.confirm(from.asset_path, path);
                 if (decision === 'cancel') return;
-                if (this.currentFor(scope).revision !== previous.revision) {
+                if (current().revision !== previous.revision) {
                     throw new Error('The scene changed while the confirmation was open. Try again.');
                 }
+                if (createScope) createScope = await readCreateScope(previous.revision, createScope);
                 if (decision === 'save') {
                     await this.editor.save(scope.generation, previous.revision);
-                    this.currentFor(scope);
+                    if (createScope) createScope = await readCreateScope(current().revision, createScope);
                 } else kept = true;
             }
 
-            const destination = {sceneId, path: to.asset_path};
-            const refreshed = this.currentFor(scope);
+            let sceneId: SceneId;
+            if ('createPath' in target) {
+                if (!createScope) throw new Error('The editor could not identify the current project.');
+                const saved = await this.editor.createScene(path, createScope);
+                const created = saved.scenes.find(scene => scene.asset_path === path);
+                if (!created) throw new Error('The new scene was not registered. Check Assets before trying again.');
+                registeredPath = path;
+                sceneId = created.id;
+                await readCreateScope(saved.revision, createScope);
+            } else sceneId = target.sceneId;
+
+            const destination = {sceneId, path};
+            // Background change receipts can enqueue reads here. The editor queue
+            // orders the switch behind them and validates this generation and revision.
+            const ready = current();
             this.loadingState.set(destination);
-            const opened = await this.editor.switchScene(sceneId, scope.generation, refreshed.revision);
+            const opened = await this.editor.switchScene(sceneId, scope.generation, ready.revision);
             if (this.destroyed || this.editor.workspaceGeneration() !== scope.generation) return;
+            if (opened.active_scene_id !== sceneId) throw new Error('The requested scene could not be opened.');
             this.completedState.set({
                 ...destination,
                 sceneRevision: opened.scene_revision,
-                generation: scope.generation
+                generation: scope.generation,
             });
             this.messageState.set(kept
-                ? `Opened ${destination.path}. Edits to ${from.asset_path} are kept in this session.`
-                : `Opened ${destination.path}.`);
+                ? `Opened ${path}. Edits to ${from.asset_path} are kept in this session.`
+                : `Opened ${path}.`);
+            if (recordNavigation) this.history?.record({kind: 'scene', id: from.id}, {kind: 'scene', id: sceneId});
             switched = true;
         };
 
         try {
             await this.drafts.run(scope, async () => {
-                if (!this.editing) {
-                    await open();
-                } else if (!await this.editing.withCommittedEdit(open)) {
-                    this.errorState.set(this.editing.error() ?? 'Finish the current edit and try again.');
+                if (!this.editing) await open();
+                else if (!await this.editing.withCommittedEdit(open)) {
+                    report(this.editing.error() ?? 'Finish the current edit and try again.');
                 }
             });
         } catch (error) {
-            this.errorState.set(error instanceof Error ? error.message : String(error));
+            report(error instanceof Error ? error.message : String(error));
         } finally {
             this.loadingState.set(null);
             this.pendingState.set(false);
         }
-        return switched;
+        return switched ? 'opened' : registeredPath ? 'registered' : 'stayed';
     }
 
     choose(choice: SceneChoice): void {
@@ -138,7 +186,7 @@ export class SceneSwitchService {
     private currentFor(scope: WorkspaceDraftTarget): EditorSnapshot {
         const snapshot = this.editor.snapshot();
         if (this.destroyed || !this.drafts.current(scope) || snapshot?.mode !== 'edit' ||
-            snapshot.transaction !== null || this.editor.busy()) {
+            snapshot.transaction !== null) {
             throw new Error('The editor state changed. Try opening the scene again.');
         }
         return snapshot;

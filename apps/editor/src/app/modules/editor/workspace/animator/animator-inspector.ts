@@ -1,6 +1,9 @@
 import {Component, computed, DestroyRef, effect, ElementRef, inject, input, linkedSignal, signal, untracked, viewChild} from '@angular/core';
+import {canResolveAnimationSource, type AnimationReview} from '../../../../core/editor/animation.models';
 import {
     animatorChannelKey, type AnimatorActorValidation, type AnimatorBinding, type AnimatorDocument, type AnimatorParameterSource,
+    type AnimatorSettings,
+    type FootIkSettings,
 } from '../../../../core/editor/animator.models';
 import type {EditorCommand, SceneEntity} from '../../../../core/editor/editor.models';
 import type {WorkspaceAssetScope} from '../../../../core/editor/editor.service';
@@ -14,6 +17,12 @@ import type {InspectorSubject} from '../inspector-panel/inspector-subject';
 interface ReviewedAnimator {
     readonly document: AnimatorDocument;
     readonly actor: ActorGraph | null;
+    readonly ankleJoints: readonly AnkleJoint[];
+}
+
+interface AnkleJoint {
+    readonly id: string;
+    readonly name: string;
 }
 
 @Component({
@@ -36,6 +45,24 @@ export class AnimatorInspector {
     protected readonly rootMotionNode = linkedSignal(() => {
         const settings = this.actor().animator?.settings;
         return settings?.asset_id === this.selected() ? settings.root_motion_source_node?.toString() ?? '' : '';
+    });
+    protected readonly footIkDraft = linkedSignal(() => {
+        const settings = this.actor().animator?.settings;
+        const foot = settings?.asset_id === this.selected() ? settings.foot_ik : undefined;
+        return {
+            joint: foot?.foot_joint ?? '', reach: (foot?.reach_mm ?? 250).toString(),
+            offset: (foot?.sole_offset_mm ?? 100).toString()
+        };
+    });
+    protected readonly ankleJoints = computed(() => this.reviewed()?.ankleJoints ?? []);
+    protected readonly footIkIssue = computed(() => {
+        const draft = this.footIkDraft();
+        if (!draft.joint || this.plan().binding?.kind !== 'imported') return null;
+        if (!this.ankleJoints().some(joint => joint.id === draft.joint)) return 'Choose an available foot joint.';
+        if (!validMm(draft.reach, 1) || !validMm(draft.offset, 0)) {
+            return 'Enter a whole number from 1 to 1000 for reach and 0 to 1000 for the sole offset.';
+        }
+        return null;
     });
     protected readonly rootMotionIssue = computed(() => {
         const value = this.rootMotionNode();
@@ -188,16 +215,25 @@ export class AnimatorInspector {
         });
     }
 
+    protected updateFootIk(field: 'joint' | 'reach' | 'offset', value: string): void {
+        this.footIkDraft.update(draft => ({...draft, [field]: value}));
+    }
+
     protected async assign(): Promise<void> {
         const document = this.reviewed()?.document;
         const binding = this.plan().binding;
         const prior = this.actor().animator;
         const key = this.actor().key;
-        if (!this.available() || !document || !binding || this.legacyActive() || this.rootMotionIssue()) return;
+        if (!this.available() || !document || !binding || this.legacyActive() || this.rootMotionIssue() || this.footIkIssue()) return;
         const rootNode = this.rootMotionNode();
-        const settings = binding.kind === 'imported' && rootNode
-            ? {asset_id: document.asset.id, binding, root_motion_source_node: Number(rootNode)}
-            : {asset_id: document.asset.id, binding};
+        const foot = this.footIkDraft();
+        const footIk: FootIkSettings | undefined = binding.kind === 'imported' && foot.joint
+            ? {foot_joint: foot.joint, reach_mm: Number(foot.reach), sole_offset_mm: Number(foot.offset)} : undefined;
+        const settings: AnimatorSettings = {
+            asset_id: document.asset.id, binding,
+            ...(binding.kind === 'imported' && rootNode ? {root_motion_source_node: Number(rootNode)} : {}),
+            ...(footIk ? {foot_ik: footIk} : {}),
+        };
         const component = {
             id: prior?.id ?? crypto.randomUUID(), schema_version: 1, enabled: true,
             data: {kind: 'animator', settings},
@@ -235,19 +271,27 @@ export class AnimatorInspector {
     private async adopt(document: AnimatorDocument, scope: WorkspaceAssetScope, current: () => boolean): Promise<void> {
         const scene = this.editor.snapshot()?.active_scene_id;
         if (!scene) return;
-        this.reviewed.set({document, actor: null});
+        this.reviewed.set({document, actor: null, ankleJoints: []});
         const actor = await reviewActorGraph(document.graph, scene, async id => {
             if (!current()) throw new Error('The Animator review expired.');
             return this.editor.openAuthoredClip(id, scope.workspaceGeneration);
         });
         if (actor.kind === 'imported' && !this.actor().asset_id) await this.editor.assets();
+        let ankleJoints: readonly AnkleJoint[] = [];
+        if (current() && actor.kind === 'imported' && actor.source.character) {
+            const rig = await this.editor.inspectAnimation(actor.source.asset_id, scope.workspaceGeneration, scope.revision);
+            if (rig.workspace_generation !== scope.nativeGeneration || !canResolveAnimationSource(actor.source, rig.metadata.source)) {
+                throw new Error('The imported Character changed during Animator review.');
+            }
+            ankleJoints = availableAnkles(rig, new Set(Object.values(actor.source.character.joints)));
+        }
         if (!current()) return;
         this.library.accept(document.asset, scope);
         const attachment = this.actor().animator;
         const bound = attachment?.settings.asset_id === document.asset.id ? attachment.settings.binding : null;
         this.choices.set(new Map(bound?.kind === 'visual'
             ? (bound.targets ?? []).map(item => [animatorChannelKey(item.channel), item.entity_key]) : []));
-        this.reviewed.set({document, actor});
+        this.reviewed.set({document, actor, ankleJoints});
     }
 
     private async mutate(command: EditorCommand, validate: boolean): Promise<void> {
@@ -292,4 +336,19 @@ export class AnimatorInspector {
             if (current()) this.pending.set(false);
         }
     }
+}
+
+function availableAnkles(rig: AnimationReview, pinned: ReadonlySet<string>): AnkleJoint[] {
+    const joints = rig.metadata.joint_metadata ?? [];
+    const parents = new Map(joints.map(joint => [joint.source_node, joint]));
+    return joints.flatMap(joint => {
+        const knee = parents.get(joint.parent_source_node ?? -1);
+        const hip = parents.get(knee?.parent_source_node ?? -1);
+        return joint.stable_id && pinned.has(joint.stable_id) && knee && hip
+            ? [{id: joint.stable_id, name: joint.name}] : [];
+    });
+}
+
+function validMm(value: string, minimum: number): boolean {
+    return /^\d{1,4}$/.test(value) && Number(value) >= minimum && Number(value) <= 1000;
 }

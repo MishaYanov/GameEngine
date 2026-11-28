@@ -15,6 +15,7 @@ export type ContextMenuSource = readonly ContextMenuItem[] | (() => readonly Con
 export class EditorContextMenuTrigger {
     readonly editorContextMenu = input.required<ContextMenuSource>();
     readonly editorContextMenuLabel = input('Actions');
+    readonly editorContextMenuWhen = input<(event: Event) => boolean>();
     private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     private readonly menu = inject(ContextMenuService);
 
@@ -35,15 +36,17 @@ export class EditorContextMenuTrigger {
     }
 
     private open(event: Event, pointer: { x: number; y: number } | null): void {
+        if (this.editorContextMenuWhen()?.(event) === false) return;
         const source = this.editorContextMenu();
         const items = typeof source === 'function' ? source() : source;
         const document = this.element.ownerDocument;
         const activeId = this.element.getAttribute('aria-activedescendant');
-        const anchor = activeId ? document.getElementById(activeId) ?? this.element : this.element;
+        const focused = document.activeElement instanceof HTMLElement ? document.activeElement : this.element;
+        const focusedChild = this.element.contains(focused) ? focused : this.element;
+        const anchor = activeId ? document.getElementById(activeId) ?? this.element : focusedChild;
         const rect = anchor.getBoundingClientRect();
         const returnFocus = this.element.closest<HTMLElement>('[role="tree"]') ??
-            (this.element.tabIndex >= 0 ? this.element :
-                document.activeElement instanceof HTMLElement ? document.activeElement : this.element);
+            (this.element.tabIndex >= 0 ? this.element : focused);
         if (this.menu.open({
             items, label: this.editorContextMenuLabel(),
             x: pointer?.x ?? rect.left, y: pointer?.y ?? rect.bottom,

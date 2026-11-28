@@ -21,6 +21,7 @@ mod render;
 mod synchronization;
 
 pub use limits::MAX_SCENE_RENDER_OBJECTS;
+pub use render::RenderVisibility;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EntityId(u64);

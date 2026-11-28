@@ -7,4 +7,6 @@ rust-version = "1.89"
 [dependencies]
 cinder-oath-gameplay = { path = "../cinder-oath-gameplay" }
 engine-core = { path = "../engine-core" }
+bridge = { path = "../bridge" }
+engine-script-runtime = { path = "../script-runtime" }
 serde_json = "1"

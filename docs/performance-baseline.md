@@ -94,6 +94,38 @@ The generated fixture must exist before this command. `ENGINE_PERF_SCENE`,
 `ENGINE_PERF_ASSETS` and `ENGINE_PERF_OUTPUT` optionally select the scene, assets
 and output report. The default report is `target/performance/native.json`.
 
+## Scene switch and streaming measurements
+
+Measure both directions of a repeated full-scene switch in the same installed Release Player. Keep the fixture,
+driver, window configuration, and build fixed. Run an installed fixture containing at least two full scenes with
+`game.exe --smoke-test --smoke-scene-cycles 60`. The Player warms up with one switch per direction, then records
+30 measured switches per direction. Set `ENGINE_LOG_DIR` to an evidence folder before launching.
+
+Summarize the run with `scripts/measure_scene_switch.py`. Pass the session JSONL with `--log`, the same fixture
+fingerprint with `--fixture-sha256`, and a `--profile` JSON file containing `os`, `cpu`, `gpu`, `driver`, `build`,
+`width`, and `height`. Select the report file with `--output`. The report pairs timing and resource data by
+request, drops the warmup pair, and breaks out first presentation, source-frame gaps, and overlapping and settled
+memory by direction. Preserve each raw run for comparison.
+
+On Windows with an RTX 4070, matched hidden Release captures found the following.
+
+| Fixture                                                         | Observed change                                                                                                                                                                                                            |
+|-----------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Cinder Oath introduction to arena, 90 switches per arm          | CPU preparation p95 moved from 4.326 ms to 2.841 ms with prefetch. First destination presentation p95 moved from 37.577 ms to 37.021 ms.                                                                                   |
+| Disjoint Robot assets, three pairs of 30 switches per direction | Recent CPU source retention reduced repeat imports but kept about 104.4 MiB more in the source cache after return. First destination presentation showed no consistent improvement. Ordinary pruning is still the default. |
+
+The [hidden Vulkan region test](testing.md#scene-routes-timelines-and-streamed-regions) measures a different workload.
+The 49-region grid was visited twice and peaked at eight resident regions. In a diagnostic run, one unload took
+248.829 ms. Waiting for each checkpoint draw outside the update timer reduced the longest measured update to
+2.203 ms and recorded a checkpoint wait of 251.516 ms. A region unload now waits for the draw when its model
+would otherwise lose its final scene owner. With the normal test settings restored, the latest run measured
+0.514 ms at the 95th percentile and 2.687 ms at the maximum across 1,930 updates. It tracked 30,388 logical GPU
+asset bytes. Hidden-window checkpoint draws still took up to 250.708 ms, so use these numbers for CPU-side
+update pacing in this fixture.
+Separately, the CPU coordinate probe passed its camera-projection and collision tolerances at sampled locations
+through 100,000 world units. Larger locations in that probe are reported for comparison. Use a visible Release run
+with representative content to evaluate end-to-end frame pacing and precision for a particular game.
+
 ## Interpreting regressions
 
 Compare like-for-like release builds, fixture version, window extent, device and

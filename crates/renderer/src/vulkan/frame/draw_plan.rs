@@ -2,6 +2,7 @@ use ash::vk::Handle;
 
 use crate::vulkan::{RenderObject, instancing::InstanceData};
 
+#[derive(Clone, Copy)]
 pub(super) struct DrawBatch {
 	pub(super) object: usize,
 	pub(super) first_instance: u32,
@@ -56,14 +57,17 @@ pub(super) fn build(
 }
 
 fn batchable(object: &RenderObject<'_>) -> bool {
-	object.skin_palette().is_none()
+	object.uses_full_mesh()
+		&& object.skin_palette().is_none()
 		&& object.transform().flags[0] == 0
 		&& object.transform().base_color_factor[3] >= 1.0
 		&& object.material().base_color_factor()[3] >= 1.0
 }
 
-fn batch_key(object: &RenderObject<'_>) -> [u64; 8] {
+fn batch_key(object: &RenderObject<'_>) -> [u64; 15] {
 	let color = object.material().base_color_factor();
+	let surface = object.material().surface();
+	let normal_map = object.material().normal_map();
 	[
 		object.mesh().vertex_buffer().raw().as_raw(),
 		object.mesh().index_buffer().raw().as_raw(),
@@ -73,5 +77,16 @@ fn batch_key(object: &RenderObject<'_>) -> [u64; 8] {
 		color[1].to_bits() as u64,
 		color[2].to_bits() as u64,
 		color[3].to_bits() as u64,
+		surface
+			.alpha_cutoff
+			.map_or(u64::MAX, |cutoff| u64::from(cutoff.to_bits())),
+		surface.emissive_factor[0].to_bits() as u64,
+		surface.emissive_factor[1].to_bits() as u64,
+		surface.emissive_factor[2].to_bits() as u64,
+		u64::from(object.visible())
+			| u64::from(object.shadow_caster()) << 1
+			| u64::from(object.reflected()) << 2,
+		normal_map.map_or(0, |(set, _)| set.as_raw()),
+		normal_map.map_or(0, |(_, scale)| u64::from(scale.to_bits())),
 	]
 }

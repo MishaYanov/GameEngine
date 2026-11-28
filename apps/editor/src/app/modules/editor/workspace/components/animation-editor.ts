@@ -12,11 +12,15 @@ import {
 import { EditorService } from '../../../../core/editor/editor.service';
 import type { ModelAsset } from '../../../../core/editor/editor.models';
 import {
+    resolveAnimationClip,
+    sameAnimationRevision,
 	validAnimationSettings,
 	type AnimationSettings,
 	type AnimationReview,
 	type AnimationPreview,
 } from '../../../../core/editor/animation.models';
+
+type ClipSlot = 'clip_index' | 'idle' | 'walk' | 'air';
 
 @Component({
 	selector: 'editor-animation-editor',
@@ -39,6 +43,14 @@ export class AnimationEditor {
 	protected readonly previewClip = signal(0);
 	protected readonly locomotionSlots = ['idle', 'walk', 'air'] as const;
 	protected readonly time = signal('0');
+    protected readonly reassignment = signal<Partial<Record<ClipSlot, number>> | null>(null);
+    protected readonly reassignmentSlots = computed<readonly ClipSlot[]>(() =>
+        this.value()?.playback.kind === 'locomotion3' ? this.locomotionSlots : ['clip_index'],
+    );
+    protected readonly canReassign = computed(() => {
+        const draft = this.reassignment();
+        return draft !== null && this.reassignmentSlots().every(slot => draft[slot] !== undefined);
+    });
 	protected readonly assets = computed(() =>
 		this.models().filter((model) => model.kind !== 'prefab' && model.asset_id),
 	);
@@ -49,7 +61,7 @@ export class AnimationEditor {
 		return (
 			!!current &&
 			!!review &&
-			JSON.stringify(current.source) === JSON.stringify(review.metadata.source)
+            sameAnimationRevision(current.source, review.metadata.source)
 		);
 	});
 	private request = 0;
@@ -67,6 +79,7 @@ export class AnimationEditor {
 			this.context();
 			this.request++;
 			this.review.set(null);
+            this.reassignment.set(null);
 			this.error.set(null);
 			untracked(() => void this.close());
 		});
@@ -83,6 +96,7 @@ export class AnimationEditor {
 	protected chooseAsset(asset: string): void {
 		this.asset.set(asset);
 		this.review.set(null);
+        this.reassignment.set(null);
 		this.request++;
 		void this.close();
 	}
@@ -95,6 +109,7 @@ export class AnimationEditor {
 			generation = this.editor.workspaceGeneration();
 		this.pending.set(true);
 		this.error.set(null);
+        this.reassignment.set(null);
 		try {
 			const review = await this.editor.inspectAnimation(asset, generation, snapshot.revision);
 			if (this.destroyed || request !== this.request || context !== this.context()) return;
@@ -102,22 +117,11 @@ export class AnimationEditor {
 				throw new Error('Animation review returned a different asset.');
 			this.review.set(review);
 			const previous = this.value();
-			const preserve =
-				previous &&
-				previous.source.asset_id === asset &&
-				(previous.playback.kind === 'single_clip'
-					? previous.playback.clip_index < review.metadata.clips.length
-					: [previous.playback.idle, previous.playback.walk, previous.playback.air].every(
-							(index) => index < review.metadata.clips.length,
-						));
-			this.changed.emit({
-				source: review.metadata.source,
-				playback: preserve
-					? previous.playback
-					: { kind: 'single_clip', clip_index: 0, looping: true },
-				speed_numerator: previous?.speed_numerator ?? 1,
-				speed_denominator: previous?.speed_denominator ?? 1,
-			});
+            if (previous?.source.asset_id === asset) {
+                const playback = this.resolvePlayback(previous, review);
+                if (playback) this.adopt(review, playback);
+                else this.reassignment.set({});
+            } else this.adopt(review, {kind: 'single_clip', clip_index: 0, looping: true});
 		} catch (error) {
 			if (!this.destroyed && request === this.request)
 				this.error.set(error instanceof Error ? error.message : String(error));
@@ -125,6 +129,47 @@ export class AnimationEditor {
 			this.pending.set(false);
 		}
 	}
+
+    protected assignClip(slot: ClipSlot, value: string): void {
+        const draft = this.reassignment();
+        if (draft === null) return;
+        const index = value === '' ? undefined : this.clips().find(clip => clip.index === Number(value))?.index;
+        this.reassignment.set({...draft, [slot]: index});
+    }
+
+    protected acceptReassignment(): void {
+        const draft = this.reassignment(), review = this.review(), current = this.value();
+        if (!draft || !review || !current || !this.canReassign()) return;
+        this.adopt(review, current.playback.kind === 'single_clip'
+            ? {...current.playback, clip_index: draft.clip_index!}
+            : {kind: 'locomotion3', idle: draft.idle!, walk: draft.walk!, air: draft.air!});
+    }
+
+    private adopt(review: AnimationReview, playback: AnimationSettings['playback']): void {
+        const previous = this.value();
+        this.reassignment.set(null);
+        this.changed.emit({
+            source: review.metadata.source,
+            playback,
+            speed_numerator: previous?.speed_numerator ?? 1,
+            speed_denominator: previous?.speed_denominator ?? 1,
+        });
+    }
+
+    private resolvePlayback(previous: AnimationSettings, review: AnimationReview): AnimationSettings['playback'] | undefined {
+        const resolve = (index: number) => {
+            const result = resolveAnimationClip(previous.source, review.metadata.source, index);
+            return review.metadata.clips.find(clip => clip.index === result)?.index;
+        };
+        const playback = previous.playback;
+        if (playback.kind === 'single_clip') {
+            const clip_index = resolve(playback.clip_index);
+            return clip_index === undefined ? undefined : {...playback, clip_index};
+        }
+        const idle = resolve(playback.idle), walk = resolve(playback.walk), air = resolve(playback.air);
+        return idle === undefined || walk === undefined || air === undefined
+            ? undefined : {kind: 'locomotion3', idle, walk, air};
+    }
 	protected playback(kind: string): void {
 		const current = this.value();
 		if (!current) return;

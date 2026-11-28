@@ -1,0 +1,46 @@
+@if (directions().length) {
+    <section class="overview" aria-label="Scene connection graph">
+        <div class="overview-controls">
+            <label>Filter by scene
+                <select #scene [value]="effectiveFilter()" (change)="filter.set(scene.value)">
+                    <option value="">All connected scenes</option>
+                    @for (id of connectedScenes(); track id) {
+                        <option [value]="id">{{ name(id) }}</option>
+                    }
+                </select>
+            </label>
+            <label>Route in graph
+                <select #connection [value]="activeRoute()"
+                        (change)="connection.value !== '' && routeSelected.emit(+connection.value)">
+                    <option value="">Select a route</option>
+                    @for (entry of visibleRoutes(); track entry.index) {
+                        <option [value]="entry.index">
+                            {{ entry.route.id || 'New route' }} · {{ name(entry.route.from) }}
+                            → {{ name(entry.route.to) }}
+                        </option>
+                    }
+                </select>
+            </label>
+        </div>
+        @let graph = diagram();
+        @if (graph.nodes.length) {
+            <div class="graph-scroll">
+                <div class="graph" [style.width.px]="graph.width" [style.height.px]="graph.height">
+                    @for (line of graph.lines; track line.index) {
+                        <span class="edge" aria-hidden="true" [class.selected]="line.index === selected()"
+                              [style.left.px]="line.x" [style.top.px]="line.y" [style.width.px]="line.length"
+                              [style.rotate.deg]="line.rotation"></span>
+                    }
+                    @for (node of graph.nodes; track node.id) {
+                        <button type="button" class="node" [style.left.px]="node.x" [style.top.px]="node.y"
+                                [title]="name(node.id)" [attr.aria-pressed]="effectiveFilter() === node.id"
+                                (click)="filter.set(effectiveFilter() === node.id ? '' : node.id)">{{ name(node.id) }}
+                        </button>
+                    }
+                </div>
+            </div>
+        } @else {
+            <p role="status">No routes match the selected scene.</p>
+        }
+    </section>
+}

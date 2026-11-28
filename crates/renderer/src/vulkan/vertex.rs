@@ -8,6 +8,9 @@ pub struct Vertex {
 	pub position: [f32; 3],
 	pub uv: [f32; 2],
 	pub normal: [f32; 3],
+	/// Tangent XYZ and handedness W. Zero W means the basis is unavailable.
+	pub tangent: [f32; 4],
+	pub normal_uv: [f32; 2],
 }
 
 impl Vertex {
@@ -16,11 +19,19 @@ impl Vertex {
 			position,
 			uv,
 			normal: [0.0; 3],
+			tangent: [0.0; 4],
+			normal_uv: [0.0; 2],
 		}
 	}
 
 	pub const fn with_normal(mut self, normal: [f32; 3]) -> Self {
 		self.normal = normal;
+		self
+	}
+
+	pub const fn with_normal_map(mut self, tangent: [f32; 4], normal_uv: [f32; 2]) -> Self {
+		self.tangent = tangent;
+		self.normal_uv = normal_uv;
 		self
 	}
 
@@ -34,7 +45,7 @@ impl Vertex {
 		}
 	}
 
-	pub fn attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
+	pub fn attribute_descriptions() -> [vk::VertexInputAttributeDescription; 5] {
 		[
 			vk::VertexInputAttributeDescription {
 				location: 2,
@@ -57,6 +68,18 @@ impl Vertex {
 				format: vk::Format::R32G32_SFLOAT,
 
 				offset: offset_of!(Vertex, uv) as u32,
+			},
+			vk::VertexInputAttributeDescription {
+				location: 8,
+				binding: 0,
+				format: vk::Format::R32G32B32A32_SFLOAT,
+				offset: offset_of!(Vertex, tangent) as u32,
+			},
+			vk::VertexInputAttributeDescription {
+				location: 9,
+				binding: 0,
+				format: vk::Format::R32G32_SFLOAT,
+				offset: offset_of!(Vertex, normal_uv) as u32,
 			},
 		]
 	}

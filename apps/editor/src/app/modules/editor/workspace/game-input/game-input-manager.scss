@@ -73,7 +73,7 @@ input, select {
 }
 
 .action-row {
-  grid-template-columns: 1fr minmax(5rem, 0.6fr) 1fr auto;
+  grid-template-columns: 1fr minmax(5rem, 0.6fr) minmax(6.5rem, 0.8fr) 1fr auto;
   align-items: end;
   margin-bottom: var(--space-2);
 }

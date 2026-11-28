@@ -1,0 +1,74 @@
+{
+  "schema_version": 3,
+  "name": "The Hollow Maze",
+  "gameplay_module": "knight_maze",
+  "fixed_hz": 60,
+  "max_catchup_steps": 8,
+  "behaviors": [
+    {
+      "scene_id": "maze",
+      "behavior": {
+        "kind": "controlled_move",
+        "entity": "knight",
+        "speed": 2.4,
+        "space": "world"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "id": "maze",
+      "asset_path": "scenes/maze.json"
+    }
+  ],
+  "startup_scene_id": "maze",
+  "input_profile": {
+    "schema_version": 1,
+    "movement": {
+      "negative_x": "a",
+      "positive_x": "d",
+      "negative_y": "s",
+      "positive_y": "w"
+    },
+    "actions": [
+      {
+        "id": "step",
+        "key": "e"
+      },
+      {
+        "id": "jump",
+        "key": "space"
+      },
+      {
+        "id": "wait",
+        "key": "q"
+      }
+    ],
+    "mouse_actions": [
+      {
+        "id": "step",
+        "button": "left"
+      },
+      {
+        "id": "jump",
+        "button": "right"
+      }
+    ]
+  },
+  "gameplay_settings": {
+    "schema_version": 1,
+    "scene": "maze",
+    "rows": [
+      "###########",
+      "#PH.....#E#",
+      "#.###.#.#.#",
+      "#..1#...#H#",
+      "##..###...#",
+      "#...#2..#.#",
+      "#.#...#.#.#",
+      "#3..H.M...#",
+      "###########"
+    ],
+    "tile_size": 2.4
+  }
+}

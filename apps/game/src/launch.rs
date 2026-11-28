@@ -95,6 +95,7 @@ pub struct LaunchOptions {
 	pub smoke_scene_cycles: u32,
 	pub scene_prefetch: bool,
 	pub smoke_prefetch_probe: bool,
+	pub smoke_retain_recent_source: bool,
 }
 
 impl LaunchOptions {
@@ -122,6 +123,7 @@ impl LaunchOptions {
 				smoke_scene_cycles: 0,
 				scene_prefetch: false,
 				smoke_prefetch_probe: false,
+				smoke_retain_recent_source: false,
 			});
 		}
 		let mut explicit = None;
@@ -132,6 +134,7 @@ impl LaunchOptions {
 		let mut smoke_scene_cycles = None;
 		let mut scene_prefetch = false;
 		let mut smoke_prefetch_probe = false;
+		let mut smoke_retain_recent_source = false;
 
 		while let Some(argument) = args.next() {
 			match argument.as_ref() {
@@ -159,6 +162,12 @@ impl LaunchOptions {
 				"--smoke-prefetch-probe" if !smoke_prefetch_probe => smoke_prefetch_probe = true,
 				"--smoke-prefetch-probe" => {
 					return Err("Specify --smoke-prefetch-probe only once".into());
+				}
+				"--smoke-retain-recent-source" if !smoke_retain_recent_source => {
+					smoke_retain_recent_source = true
+				}
+				"--smoke-retain-recent-source" => {
+					return Err("Specify --smoke-retain-recent-source only once".into());
 				}
 				"--scene-prefetch" if !scene_prefetch => scene_prefetch = true,
 				"--scene-prefetch" => return Err("Specify --scene-prefetch only once".into()),
@@ -195,7 +204,7 @@ impl LaunchOptions {
 					return Err(format!(
 						"Unknown game argument {argument:?}; supported arguments are \
                      --development, --player, --input-profile <path>, --transfer-directory <path>, \
-                     --record-playtrace <path>, --smoke-test, --smoke-scene-cycles <count>, --scene-prefetch, --smoke-prefetch-probe, \
+                     --record-playtrace <path>, --smoke-test, --smoke-scene-cycles <count>, --scene-prefetch, --smoke-prefetch-probe, --smoke-retain-recent-source, \
                      or a standalone --export-input-preset, --preview-input-preset, or --apply-input-preset command"
 					));
 				}
@@ -222,6 +231,11 @@ impl LaunchOptions {
 		{
 			return Err("--smoke-prefetch-probe requires an installed Player and at least two smoke scene cycles".into());
 		}
+		if smoke_retain_recent_source
+			&& (!installed_project || smoke_scene_cycles.is_none_or(|count| count < 2))
+		{
+			return Err("--smoke-retain-recent-source requires an installed Player and at least two smoke scene cycles".into());
+		}
 		if scene_prefetch && (mode != LaunchMode::Player || !installed_project) {
 			return Err("--scene-prefetch requires an installed Player".into());
 		}
@@ -240,6 +254,7 @@ impl LaunchOptions {
 			smoke_scene_cycles: smoke_scene_cycles.unwrap_or(0),
 			scene_prefetch,
 			smoke_prefetch_probe,
+			smoke_retain_recent_source,
 		})
 	}
 }

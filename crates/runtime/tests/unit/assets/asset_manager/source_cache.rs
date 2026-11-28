@@ -299,3 +299,100 @@ fn preparing_additional_mesh_images_updates_cached_bytes_without_duplicate_entri
 	assert_eq!(assets.source_cache.resource_bytes, 0);
 	assert!(assets.source_cache.resource_order.is_empty());
 }
+
+#[test]
+fn scene_switch_experiment_drops_idle_source_before_admission_and_checks_fingerprint() {
+	use std::io::Write as _;
+
+	let fixture = Fixture::new();
+	let robot = fixture.root.join("mapped.glb");
+	// A controlled embedded map keeps this source inside the idle-cache size
+	// window regardless of future updates to the bundled character textures.
+	let mut png = std::io::Cursor::new(Vec::new());
+	image::RgbaImage::from_pixel(1536, 1536, image::Rgba([204, 128, 230, 255]))
+		.write_to(&mut png, image::ImageFormat::Png)
+		.unwrap();
+	let mut bin = Vec::new();
+	for value in [
+		0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 1.,
+	] {
+		bin.extend_from_slice(&value.to_le_bytes());
+	}
+	let png = png.into_inner();
+	bin.extend_from_slice(&png);
+	let json = serde_json::json!({
+		"asset":{"version":"2.0"},
+		"buffers":[{"byteLength":bin.len()}],
+		"bufferViews":[
+			{"buffer":0,"byteOffset":0,"byteLength":36},
+			{"buffer":0,"byteOffset":36,"byteLength":24},
+			{"buffer":0,"byteOffset":60,"byteLength":png.len()}
+		],
+		"accessors":[
+			{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+			{"bufferView":1,"componentType":5126,"count":3,"type":"VEC2"}
+		],
+		"images":[{"bufferView":2,"mimeType":"image/png"}],
+		"textures":[{"source":0}],
+		"materials":[{"normalTexture":{"index":0}}],
+		"meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1},"material":0}]}]
+	})
+		.to_string()
+		.into_bytes();
+	let glb = gltf::binary::Glb {
+		header: gltf::binary::Header {
+			magic: *b"glTF",
+			version: 2,
+			length: 0,
+		},
+		json: json.into(),
+		bin: Some(bin.into()),
+	};
+	std::fs::write(&robot, glb.to_vec().unwrap()).unwrap();
+	let mut assets = AssetManager::new(&fixture.root).unwrap();
+	let active = fixture.root.join("active.gltf");
+	assets
+		.source_cache
+		.prepare_resources(&assets.root, &robot, 0)
+		.unwrap();
+
+	assert!(assets.source_cache.retained_bytes() >= 1536 * 1536 * 4);
+
+	// Ordinary pruning remains the default, independent of asset size.
+	assets.prune_unused();
+	assert_eq!(assets.source_cache.retained_bytes(), 0);
+	assets
+		.source_cache
+		.prepare_resources(&assets.root, &robot, 0)
+		.unwrap();
+	assets.prune_after_scene_switch_benchmark();
+	assert!(assets.source_cache.resource_cache.contains_key(&robot));
+	assert_eq!(assets.gpu_logical_bytes(), 0);
+
+	assets
+		.source_cache
+		.prepare_resources(&assets.root, &active, 0)
+		.unwrap();
+	assert!(!assets.source_cache.resource_cache.contains_key(&robot));
+	assert!(assets.source_cache.resource_cache.contains_key(&active));
+
+	assets
+		.source_cache
+		.prepare_resources(&assets.root, &robot, 0)
+		.unwrap();
+	assets.prune_after_scene_switch_benchmark();
+	let mut changed = std::fs::OpenOptions::new()
+		.write(true)
+		.open(&robot)
+		.unwrap();
+	changed.write_all(b"G").unwrap();
+	drop(changed);
+	assert!(
+		assets
+			.source_cache
+			.prepare_resources(&assets.root, &robot, 0)
+			.is_err(),
+		"same-size source changes must invalidate the optional retained snapshot"
+	);
+	assert!(!assets.source_cache.resource_cache.contains_key(&robot));
+}

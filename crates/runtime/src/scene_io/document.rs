@@ -11,11 +11,56 @@ use crate::scene_data::{MAX_SCENE_BYTES, ParsedScene, SceneData, parse_json};
 pub fn load_data(path: &Path) -> Result<ParsedScene, String> {
 	let file = File::open(path)
 		.map_err(|error| format!("Failed to read scene '{}': {error}", path.display()))?;
+	load_opened_data(path, file)
+}
+
+/// Load a project scene through the verified file handle and report its canonical path.
+pub fn load_confined_data(root: &Path, relative: &Path) -> Result<(PathBuf, ParsedScene), String> {
+	let root = root.canonicalize().map_err(|error| error.to_string())?;
+	load_confined_data_from_canonical_root(&root, relative)
+}
+
+/// Load against a previously captured canonical root without resolving it again.
+pub fn load_confined_data_from_canonical_root(
+	root: &Path,
+	relative: &Path,
+) -> Result<(PathBuf, ParsedScene), String> {
+	let (path, source) = read_confined_scene_source(root, relative)?;
+	let parsed = parse_source(&path, &source)?;
+	Ok((path, parsed))
+}
+
+/// Read bounded UTF-8 for callers that also need the original bytes, such as checkpoint hashing.
+/// The caller supplies its captured canonical asset root.
+pub fn read_confined_scene_source(
+	root: &Path,
+	relative: &Path,
+) -> Result<(PathBuf, String), String> {
+	let (path, file) = super::paths::open_confined_scene(root, relative)?;
+	let source = read_opened_source(&path, file)?;
+	Ok((path, source))
+}
+
+pub(crate) fn load_opened_data(path: &Path, file: File) -> Result<ParsedScene, String> {
+	parse_source(path, &read_opened_source(path, file)?)
+}
+
+fn read_opened_source(path: &Path, file: File) -> Result<String, String> {
 	let mut source = String::new();
 	file.take(MAX_SCENE_BYTES as u64 + 1)
 		.read_to_string(&mut source)
 		.map_err(|error| format!("Failed to read scene '{}': {error}", path.display()))?;
-	parse_json(&source)
+	if source.len() > MAX_SCENE_BYTES {
+		return Err(format!(
+			"Scene '{}' exceeds {MAX_SCENE_BYTES} bytes",
+			path.display()
+		));
+	}
+	Ok(source)
+}
+
+fn parse_source(path: &Path, source: &str) -> Result<ParsedScene, String> {
+	parse_json(source)
 		.map_err(|error| format!("Failed to load scene '{}': {error}", path.display()))
 }
 

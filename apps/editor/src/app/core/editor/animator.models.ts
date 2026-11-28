@@ -1,6 +1,6 @@
 import {validGameActionId} from '../game-input/game-input.models';
 import {validInputActionsId} from '../game-input/input-actions.models';
-import {type AnimationSource, validAnimationSettings} from './animation.models';
+import {sameAnimationRevision, type AnimationSource, validAnimationSettings} from './animation.models';
 import type {VisualClipTarget} from './authored-clip.models';
 import type {EntityKey} from './editor.models';
 
@@ -54,6 +54,13 @@ export interface AnimatorSettings {
     readonly asset_id: string;
     readonly binding: AnimatorBinding;
     readonly root_motion_source_node?: number;
+    readonly foot_ik?: FootIkSettings;
+}
+
+export interface FootIkSettings {
+    readonly foot_joint: string;
+    readonly reach_mm: number;
+    readonly sole_offset_mm: number;
 }
 export interface AnimatorAttachment {
     readonly id: string;
@@ -95,10 +102,12 @@ export function validAnimatorSettings(value: unknown): value is AnimatorSettings
     if (!record(value) || !validInputActionsId(value['asset_id']) || !record(value['binding'])) return false;
     const binding = value['binding'];
     const rootNode = value['root_motion_source_node'];
+    const foot = value['foot_ik'];
     if (binding['kind'] === 'imported') {
-        return validSource(binding['source']) && (rootNode === undefined || integer(rootNode, 0, 0xffffffff));
+        return validSource(binding['source']) && (rootNode === undefined || integer(rootNode, 0, 0xffffffff)) &&
+            (foot === undefined || validFootIk(foot, binding['source']));
     }
-    if (binding['kind'] !== 'visual' || rootNode !== undefined) return false;
+    if (binding['kind'] !== 'visual' || rootNode !== undefined || foot !== undefined) return false;
     const targets = binding['targets'];
     if (targets === undefined) return true;
     if (!Array.isArray(targets) || targets.length > 128) return false;
@@ -112,6 +121,12 @@ export function validAnimatorSettings(value: unknown): value is AnimatorSettings
     return true;
 }
 
+function validFootIk(value: unknown, source: AnimationSource): boolean {
+    return record(value) && only(value, ['foot_joint', 'reach_mm', 'sole_offset_mm']) &&
+        Object.values(source.character?.joints ?? {}).some(id => id === value['foot_joint']) &&
+        integer(value['reach_mm'], 1, 1000) && integer(value['sole_offset_mm'], 0, 1000);
+}
+
 export function animatorChannelKey(channel: VisualClipTarget): string {
     if (channel.kind === 'scene') return JSON.stringify([channel.kind, channel.entity_key]);
     const address = channel.address;
@@ -120,8 +135,7 @@ export function animatorChannelKey(channel: VisualClipTarget): string {
 }
 
 export function sameAnimatorSource(a: AnimationSource, b: AnimationSource): boolean {
-    return a.asset_id === b.asset_id && a.expected_sha256 === b.expected_sha256 && a.scene_index === b.scene_index &&
-        a.mesh_node === b.mesh_node && a.skin_index === b.skin_index;
+    return sameAnimationRevision(a, b) && JSON.stringify(a.character) === JSON.stringify(b.character);
 }
 
 export function readAnimatorGraph(value: unknown): AnimatorGraph {
@@ -281,7 +295,7 @@ function visualChannel(value: unknown): value is VisualClipTarget {
 
 function validSource(value: unknown): value is AnimationSource {
     if (!record(value) || !validInputActionsId(value['asset_id']) ||
-        !only(value, ['asset_id', 'expected_sha256', 'scene_index', 'mesh_node', 'skin_index'])) return false;
+        !only(value, ['asset_id', 'expected_sha256', 'scene_index', 'mesh_node', 'skin_index', 'character'])) return false;
     return validAnimationSettings({source: value, playback: {kind: 'single_clip', clip_index: 0, looping: false},
         speed_numerator: 1, speed_denominator: 1});
 }

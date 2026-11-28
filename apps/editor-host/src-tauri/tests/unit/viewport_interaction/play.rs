@@ -197,12 +197,12 @@ fn game_camera_capture_requires_focused_orbit_and_expires_across_pause_or_replac
 	);
 	controller.settings.view = ViewportView::Game;
 	assert!(
-		GameCameraCapture::acquire(&controller, &workspace, true, || Err(
+		GameCameraCapture::acquire(&controller, &workspace, true, || Err::<(), _>(
 			"OS refused grab".into()
 		))
 		.is_err()
 	);
-	let capture = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
+	let (capture, ()) = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
 		.unwrap()
 		.unwrap();
 	let intent = CameraIntent {
@@ -221,7 +221,7 @@ fn game_camera_capture_requires_focused_orbit_and_expires_across_pause_or_replac
 	command(&mut workspace, Command::SetPaused { paused: false });
 	assert!(!capture.current(&workspace));
 	assert!(capture.submit(&mut workspace, intent).is_err());
-	let capture = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
+	let (capture, ()) = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
 		.unwrap()
 		.unwrap();
 	let mut replacement = fixture.open();
@@ -251,6 +251,194 @@ fn game_camera_capture_requires_focused_orbit_and_expires_across_pause_or_replac
 		.message
 		.contains("previous workspace"));
 	workspace.execute_receipt(correct).unwrap();
+}
+
+#[test]
+fn cinder_captured_primary_click_swings_and_blur_cancels_the_next_press() {
+	let fixture = Fixture::new(0);
+	let (mut workspace, mut controller, seconds) = cinder_duel(&fixture, None);
+
+	// A raw pointer event has no authority until a current native grab succeeds.
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", [400.0, 300.0], Some("left")),
+	);
+	workspace.backend.tick(seconds).unwrap();
+	assert_eq!(cinder_progress(&workspace).swings(), 0);
+	let (capture, ()) = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
+		.unwrap()
+		.unwrap();
+	capture
+		.set_primary_button(&mut controller, &mut workspace, true)
+		.unwrap();
+	capture
+		.set_primary_button(&mut controller, &mut workspace, false)
+		.unwrap();
+	workspace.backend.tick(seconds).unwrap();
+	assert_eq!(cinder_progress(&workspace).swings(), 1);
+
+	for _ in 0..50 {
+		workspace.backend.tick(seconds).unwrap();
+	}
+	capture
+		.set_primary_button(&mut controller, &mut workspace, true)
+		.unwrap();
+	send(
+		&mut controller,
+		&mut workspace,
+		event("blurred", [0.0; 2], None),
+	);
+	capture
+		.set_primary_button(&mut controller, &mut workspace, true)
+		.unwrap();
+	workspace.backend.tick(seconds).unwrap();
+	assert_eq!(cinder_progress(&workspace).swings(), 1);
+	assert!(!controller.captured_primary_held);
+}
+
+#[test]
+fn cinder_defeat_releases_a_held_game_capture_and_prevents_recapture() {
+	use gameplay_catalog::cinder_oath::Phase;
+
+	let fixture = Fixture::new(0);
+	let (mut workspace, mut controller, seconds) = cinder_duel(&fixture, None);
+	let (capture, ()) = GameCameraCapture::acquire(&controller, &workspace, true, || Ok(()))
+		.unwrap()
+		.unwrap();
+	capture
+		.set_primary_button(&mut controller, &mut workspace, true)
+		.unwrap();
+
+	for _ in 0..1_200 {
+		workspace.backend.tick(seconds).unwrap();
+		if cinder_progress(&workspace).phase() == Phase::Defeat {
+			break;
+		}
+	}
+	assert_eq!(cinder_progress(&workspace).phase(), Phase::Defeat);
+	assert!(controller.captured_primary_held);
+	assert!(capture.current(&workspace));
+	assert!(!capture.accepts_input(&workspace));
+	assert!(capture
+		.submit(
+			&mut workspace,
+			CameraIntent {
+				yaw_delta: 0.2,
+				..Default::default()
+			}
+		)
+		.is_err());
+
+	capture.release(&mut controller, Some(&mut workspace));
+	assert!(!controller.captured_primary_held);
+	assert!(
+		GameCameraCapture::acquire(&controller, &workspace, true, || -> Result<(), String> {
+			panic!("defeat attempted another native grab")
+		})
+			.unwrap()
+			.is_none()
+	);
+}
+
+#[test]
+fn an_authored_game_mouse_button_routes_both_edges_without_camera_capture() {
+	let fixture = Fixture::new(0);
+	let (mut workspace, mut controller, seconds) =
+		cinder_duel(&fixture, Some(runtime::MouseButton::Right));
+
+	send(
+		&mut controller,
+		&mut workspace,
+		ViewportInputDto {
+			position: None,
+			..event("pointer_down", [0.0; 2], Some("right"))
+		},
+	);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", [400.0, 300.0], Some("left")),
+	);
+	workspace.backend.tick(seconds).unwrap();
+	assert_eq!(cinder_progress(&workspace).swings(), 0);
+
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", [400.0, 300.0], Some("right")),
+	);
+	assert!(controller.keys.contains("MouseRight"));
+	send(
+		&mut controller,
+		&mut workspace,
+		ViewportInputDto {
+			position: None,
+			..event("pointer_up", [0.0; 2], Some("right"))
+		},
+	);
+	assert!(!controller.keys.contains("MouseRight"));
+	workspace.backend.tick(seconds).unwrap();
+	assert_eq!(cinder_progress(&workspace).swings(), 1);
+
+	for _ in 0..50 {
+		workspace.backend.tick(seconds).unwrap();
+	}
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", [400.0, 300.0], Some("right")),
+	);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("blurred", [0.0; 2], None),
+	);
+	assert!(controller.keys.is_empty());
+	workspace.backend.tick(seconds).unwrap();
+	assert_eq!(cinder_progress(&workspace).swings(), 1);
+}
+
+fn cinder_duel(
+	fixture: &Fixture,
+	mouse_button: Option<runtime::MouseButton>,
+) -> (EditorWorkspace, ViewportInteraction, f64) {
+	use gameplay_catalog::cinder_oath::Phase;
+
+	let project =
+		compiler::create_authoring_project("cinder-pointer", fixture.directory.to_str().unwrap())
+			.unwrap();
+	let location =
+		crate::project_location::ProjectLocation::from_manifest(&project.join("project.json"))
+			.unwrap();
+	let mut workspace = EditorWorkspace::open_project_with_notifier(location, || {}).unwrap();
+	if let Some(button) = mouse_button {
+		let mut project = workspace.backend.session().project().clone();
+		project.input_profile.as_mut().unwrap().mouse_actions.push(
+			runtime::input::MouseActionBinding {
+				id: "attack".into(),
+				button,
+			},
+		);
+		command(&mut workspace, Command::SetProject { project });
+	}
+	let mut controller = controller(&mut workspace);
+	controller.settings.view = ViewportView::Game;
+	command(&mut workspace, Command::StartPlay);
+	focus_keyboard(&mut controller, &mut workspace);
+	send(&mut controller, &mut workspace, key("Enter"));
+
+	let seconds = 1.0 / f64::from(workspace.backend.session().project().fixed_hz);
+	workspace.backend.tick(seconds).unwrap();
+	let (arena, _) = workspace.backend.prepare_pending_play_scene().unwrap();
+	workspace.backend.commit_play_scene(arena).unwrap();
+	controller.clear_play_input(&mut workspace);
+	assert_eq!(cinder_progress(&workspace).phase(), Phase::Duel);
+	(workspace, controller, seconds)
+}
+
+fn cinder_progress(workspace: &EditorWorkspace) -> gameplay_catalog::cinder_oath::CinderProgress {
+	*workspace.backend.session().play_progress().unwrap()
 }
 
 #[test]

@@ -1,6 +1,10 @@
 //! Authored document loading and checked per-file publication.
 use super::*;
-use runtime::{project::MAX_PROJECT_BYTES, scene_data::MAX_SCENE_BYTES};
+use runtime::{
+	project::MAX_PROJECT_BYTES,
+	scene_catalog::SceneDescriptor,
+	scene_data::{CURRENT_SCHEMA_VERSION, MAX_SCENE_BYTES},
+};
 use sha2::{Digest, Sha256};
 
 pub(super) type Fingerprint = [u8; 32];
@@ -186,7 +190,7 @@ impl EditorWorkspace {
 		let saved_files = SavedFiles::new(manifest_fingerprint, documents.fingerprints);
 		let mut candidate = runtime::EngineBuilder::new(data, project)
 			.with_scenes(documents.scenes)
-			.module_resolver(Arc::new(gameplay_catalog::resolve))
+			.module_resolver(gameplay_catalog::project_resolver(&self.asset_root, gameplay_catalog::project_scripts::ScriptSource::Rust))
 			.animation_resolver(animation_resolver(&self.asset_root))
 			.input_actions_resolver(input_actions_resolver(&self.asset_root))
 			.animator_resolver(animator_resolver(&self.asset_root))
@@ -234,6 +238,72 @@ impl EditorWorkspace {
 		Ok(())
 	}
 
+	/// Create and register a saved blank document without changing the active scene.
+	pub fn create_scene(
+		&mut self,
+		path: &str,
+		revision: u64,
+		expected_generation: u64,
+	) -> Result<EditorSnapshotDto, String> {
+		if expected_generation != self.generation {
+			return Err("The project changed before creating the Scene".into());
+		}
+		self.check_revision(revision)?;
+		if path.eq_ignore_ascii_case(runtime::asset_catalog::CATALOG_FILE) {
+			return Err("The asset catalog path is reserved".into());
+		}
+		let session = self.backend.session();
+		if session.is_playing() || session.has_transaction() {
+			return Err("Stop Play and finish grouped edits before creating a scene".into());
+		}
+		self.check_compound_capacity()?;
+		let id = SceneId::generate();
+		SceneDescriptor::new(id.clone(), path)?;
+		let output = self.scene_output(path, None)?;
+		if output.try_exists().map_err(|error| error.to_string())? {
+			return Err("Choose a new scene path, or register the existing scene file".into());
+		}
+
+		let document = SceneData {
+			schema_version: CURRENT_SCHEMA_VERSION,
+			bindings: Default::default(),
+			entities: Vec::new(),
+			camera: Default::default(),
+			default_game_camera: None,
+			lights: Vec::new(),
+			organization: Default::default(),
+			environment: Default::default(),
+		};
+		let source = scene_json(&document)?;
+		let written = fingerprint(source.as_bytes());
+		file_operation(
+			"create_scene",
+			runtime::scene_io::save_new_bytes(&output, source.as_bytes()),
+		)?;
+		if let Err(error) = self.backend.execute(EditorCommandRequest {
+			expected_revision: revision,
+			command: Command::AddScene {
+				id: id.clone(),
+				asset_path: path.into(),
+				document,
+			},
+		}) {
+			// Do not remove a registered document or a file changed on disk
+			// since this operation exclusively published it.
+			if self.backend.session().project().scenes.get(&id).is_ok() {
+				return Err(error.to_string());
+			}
+			let cleanup = verify_saved_parent(&output)
+				.and_then(|()| verify_disk_baseline(&output, Some(written), MAX_SCENE_BYTES))
+				.and_then(|()| fs::remove_file(&output).map_err(|failure| failure.to_string()));
+			file_operation("remove_unregistered_scene", cleanup).map_err(|failure| {
+				format!("{error}. Could not remove the new file at '{path}': {failure}")
+			})?;
+			return Err(error.to_string());
+		}
+		self.finish_scene_registration(&id, path, written)
+	}
+
 	pub fn register_scene(
 		&mut self,
 		path: &str,
@@ -262,8 +332,17 @@ impl EditorWorkspace {
 				},
 			})
 			.map_err(|e| e.to_string())?;
+		self.finish_scene_registration(&id, path, fingerprint)
+	}
+
+	fn finish_scene_registration(
+		&mut self,
+		id: &SceneId,
+		path: &str,
+		fingerprint: Fingerprint,
+	) -> Result<EditorSnapshotDto, String> {
 		self.backend
-			.mark_scene_saved_by_id(&id)
+			.mark_scene_saved_by_id(id)
 			.map_err(|e| e.to_string())?;
 		self.saved_files.record_scene(path, fingerprint);
 		self.backend.snapshot().map_err(|e| e.to_string())

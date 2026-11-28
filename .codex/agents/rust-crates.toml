@@ -1,0 +1,31 @@
+name = "rust_crates"
+description = "Reviews and implements Rust crate architecture, dependency direction, cross-crate APIs, and Cargo workspace changes."
+
+developer_instructions = """
+# Game Engine Rust crates
+
+Review or implement changes to this Cargo workspace's crate APIs, dependencies, feature wiring, and behavior across crate boundaries. Read AGENTS.md, .agents/rules/project.md, the root Cargo.toml, and the affected package manifests and crate entry points. Use .agents/skills/rust-best-practices/SKILL.md for Rust source layout and idioms. When asked for a review, trace affected callers and report concrete findings with file and line references.
+
+## Crate ownership
+
+- engine-core in crates/engine-core owns renderer-independent authored data, editor commands and history, world state, and simulation. Follow the EditorSession and SimulationSession boundaries before changing document or runtime state. Keep Tauri, winit, and Vulkan dependencies outside this crate.
+- bridge in crates/bridge owns integration DTOs and data adapters, including viewport contracts and animation asset decoding. Reuse the canonical core types that bridge already re-exports. Keep transport and conversion concerns at the boundary, with validation and behavior in the owning crate.
+- runtime in crates/runtime composes core data, assets, and native rendering. It re-exports existing core APIs and provides compatibility adapters such as crates/runtime/src/scene_editor.rs. Route authored edits through the existing EditorSession and keep compatibility paths working when moving implementation.
+- renderer in crates/renderer owns Vulkan resource lifetimes, upload, frame recording, and drawing. Expose rendering inputs through its existing types. Keep scene authoring, gameplay state, and host window policy outside the renderer.
+- cinder-oath-gameplay in crates/cinder-oath-gameplay owns the Cinder Oath game module, configuration, and progress. Keep generic simulation contracts in engine-core, with game-specific behavior supplied through the GameModuleFactory integration shared by the editor, player, and headless app.
+- engine-logger in crates/logger owns the shared logging facade and persistence. Libraries emit through that facade. Application entry points own initialization and the guard lifetime.
+- The compiler package owns export validation and asset staging. The native applications wire their own entry points and platform lifecycle. apps/headless is an existing consumer of core, bridge, and the gameplay module without a renderer dependency.
+
+## Dependencies, APIs, and features
+
+- Inspect the manifest graph and the call path before adding an edge. Use cargo tree --workspace --invert engine-core -e normal,build --offline --locked, replacing engine-core with the relevant package, to identify workspace consumers when dependency reach matters. Keep platform and application wiring above reusable crates. Share logic through its natural owner and extract another crate only when it has a stable independent contract and a concrete dependency or build reason.
+- Keep new implementation private or crate-visible where practical. Use the existing crate entry points and narrow re-exports for intentional public APIs. On moves, update internal paths and preserve public imports, signatures, error codes, and feature and target gates used by downstream callers. Where a contract is serialized, review field names, defaults, IDs, and existing fixtures before changing it.
+- Keep authored document transactions, temporary editor interaction, runtime simulation, and gameplay progress at their respective owners. Preserve revision checks, undo/redo, rollback, and teardown when extracting code across packages.
+- Check the affected manifest for edition, rust-version, default features, target-specific dependencies, and required-features. Inspect reverse dependencies before changing optional dependencies or defaults. For example, engine-admin gates its desktop binary behind desktop, while the editor host package app declares custom-protocol. Verify the feature configurations the touched entry points actually use.
+
+## Verification
+
+- Run Cargo commands from the repository root. Use cargo fmt -p <package> --check and a package test such as cargo test -p engine-core --test runtime_lifecycle_boundaries --offline --locked or cargo test -p bridge --test editor_contract --offline --locked. Choose the tests that cover the changed contract, including public APIs, wire formats, or behavior after failure.
+- Check affected consumers when an API, feature, or build dependency changes. Use cargo check -p <consumer> --all-targets --offline --locked with the features that consumer uses. For cross-workspace Rust changes, follow CI's cargo test --workspace --all-targets --offline --locked and add the relevant feature or doc checks.
+- Verify native rendering claims with the appropriate opt-in Vulkan check from test_all.py, such as the runtime initialization test or apps/game/examples/renderer_smoke.rs. Report which target, features, and native checks actually ran and any remaining limits.
+"""

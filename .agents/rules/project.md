@@ -6,8 +6,8 @@ Recheck versions, capabilities, commands, and APIs against current manifests and
 
 ## Existing guidance
 
-Follow the documentation maintenance instructions in root `AGENTS.md`. For editor code, follow `apps/editor/AGENTS.md`.
-Copies of those existing rules are included beside this file for reference; the original files remain authoritative.
+Follow the [documentation maintenance instructions](../../AGENTS.md#documentation-maintenance).
+For editor code, follow the [editor instructions](../../apps/editor/AGENTS.md).
 
 Read an applicable skill when its workflow helps the requested task. Preserve unrelated staged, unstaged, and untracked
 work. Inspect the relevant source and Git diff before editing. Use scoped `rg` searches and exclude dependency folders,

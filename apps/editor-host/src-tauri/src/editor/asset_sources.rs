@@ -9,6 +9,7 @@ pub(crate) enum AssetSourceKind {
 	Glb,
 	Wav,
 	SkyPng,
+	ParticlePng,
 }
 
 #[derive(Default)]

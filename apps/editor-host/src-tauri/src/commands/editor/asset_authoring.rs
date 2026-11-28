@@ -81,6 +81,15 @@ pub async fn editor_choose_external_sky_png(
 	choose_external_file(window, state, expected_generation, AssetSourceKind::SkyPng).await
 }
 
+#[tauri::command]
+pub async fn editor_choose_particle_png(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	expected_generation: u64,
+) -> Result<Option<String>, String> {
+	choose_external_file(window, state, expected_generation, AssetSourceKind::ParticlePng).await
+}
+
 async fn choose_external_file(
 	window: WebviewWindow,
 	state: State<'_, EditorState>,
@@ -104,6 +113,7 @@ async fn choose_external_file(
 			AssetSourceKind::Glb => ("Import binary glTF model", "Binary glTF", "glb"),
 			AssetSourceKind::Wav => ("Import Audio Clip", "PCM WAV", "wav"),
 			AssetSourceKind::SkyPng => ("Import Sky Panorama", "PNG image", "png"),
+			AssetSourceKind::ParticlePng => ("Import Particle Sprite", "PNG image", "png"),
 		};
 		let Some(file) = window
 			.dialog()
@@ -162,6 +172,15 @@ enum Change {
 	ImportSkyPanorama {
 		source: PathBuf,
 		destination: String,
+	},
+	ImportParticleSprite {
+		source: PathBuf,
+		destination: String,
+	},
+	SaveRustScript {
+		destination: String,
+		text: String,
+		replacement: Option<(AssetId, String)>,
 	},
 	Reimport {
 		id: AssetId,
@@ -234,7 +253,10 @@ async fn operate(
 					Change::ImportSkyPanorama { source, .. } => {
 						Some((AssetSourceKind::SkyPng, source))
 					}
-					Change::EnsurePrimitive(_) | Change::Move { .. } => None,
+					Change::ImportParticleSprite { source, .. } => {
+						Some((AssetSourceKind::ParticlePng, source))
+					}
+					Change::EnsurePrimitive(_) | Change::SaveRustScript { .. } | Change::Move { .. } => None,
 				};
 				if let Some((kind, source)) = selected {
 					w.asset_sources.require(kind, source)?;
@@ -245,6 +267,8 @@ async fn operate(
 				if let Change::Import { destination, .. }
 				| Change::ImportAudioClip { destination, .. }
 				| Change::ImportSkyPanorama { destination, .. }
+				| Change::ImportParticleSprite { destination, .. }
+				| Change::SaveRustScript { destination, .. }
 				| Change::Move { destination, .. } = &change
 				{
 					w.validate_asset_destination(destination)?;
@@ -292,6 +316,13 @@ async fn operate(
 					source,
 					destination,
 				} => project_assets::prepare_sky_panorama_import(&root, &source, &destination)?,
+				Change::ImportParticleSprite {
+					source,
+					destination,
+				} => project_assets::prepare_particle_sprite_import(&root, &source, &destination)?,
+				Change::SaveRustScript { destination, text, replacement } => project_assets::prepare_rust_script(
+					&root, &destination, &text, replacement.as_ref().map(|(id, digest)| (id, digest.as_str())),
+				)?,
 				Change::Reimport {
 					id,
 					source,
@@ -421,6 +452,93 @@ pub async fn editor_import_sky_panorama(
 		},
 	)
 	.await
+}
+
+#[tauri::command]
+pub async fn editor_import_particle_sprite(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	source_path: String,
+	destination_path: String,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<AssetOperationDto, String> {
+	operate(window, state, expected_revision, expected_generation, Change::ImportParticleSprite {
+		source: PathBuf::from(source_path),
+		destination: destination_path,
+	}).await
+}
+
+#[tauri::command]
+pub async fn editor_particle_sprite(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	asset_id: String,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<tauri::ipc::Response, String> {
+	trusted_window(&window)?;
+	let id = AssetId::new(asset_id)?;
+	let scope = move |workspace: &mut EditorWorkspace| {
+		workspace.check_revision(expected_revision)?;
+		check_asset_generation(workspace, expected_generation)?;
+		Ok(workspace.asset_root.clone())
+	};
+	let root = workspace(state.clone(), false, None, scope).await?;
+	let (bytes, _) = tauri::async_runtime::spawn_blocking(move || bridge::particle_sprite::read_project(&root, &id))
+		.await.map_err(|error| error.to_string())??;
+	workspace(state, false, None, scope).await?;
+	Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[derive(Serialize)]
+pub struct RustScriptDocumentDto {
+	path: String,
+	source: String,
+	fingerprint: String,
+}
+
+#[tauri::command]
+pub async fn editor_open_rust_script(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	asset_id: String,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<RustScriptDocumentDto, String> {
+	trusted_window(&window)?;
+	let id = AssetId::new(asset_id)?;
+	workspace(state, false, None, move |workspace| {
+		workspace.check_revision(expected_revision)?;
+		check_asset_generation(workspace, expected_generation)?;
+		let catalog = project_assets::load_catalog(&workspace.asset_root)?;
+		let asset = catalog.by_id(&id).ok_or("Rust script is unavailable")?;
+		let source = bridge::script_assets::read_source(&workspace.asset_root, asset)?;
+		Ok(RustScriptDocumentDto { path: asset.path.clone(), fingerprint: project_assets::fingerprint(source.as_bytes()), source })
+	}).await
+}
+
+#[tauri::command]
+pub async fn editor_save_rust_script(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	destination_path: String,
+	source: String,
+	replacement_id: Option<String>,
+	expected_fingerprint: Option<String>,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<AssetOperationDto, String> {
+	let replacement = match (replacement_id, expected_fingerprint) {
+		(Some(id), Some(fingerprint)) => Some((AssetId::new(id)?, fingerprint)),
+		(None, None) => None,
+		_ => return Err("Reopen the script before replacing it".into()),
+	};
+	operate(window, state, expected_revision, expected_generation, Change::SaveRustScript {
+		destination: destination_path,
+		text: source,
+		replacement,
+	}).await
 }
 
 #[derive(Serialize)]

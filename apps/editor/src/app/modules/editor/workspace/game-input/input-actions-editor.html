@@ -1,15 +1,12 @@
 <section aria-label="Input Actions assets" class="fields">
     <div class="asset-controls">
-        <label>Input Actions asset
-            <select #asset [value]="selectedId()" [disabled]="!available() || dirty()" (change)="selectedId.set(asset.value)">
-                <option value="" [selected]="!selectedId()">Choose an asset</option>
-                @for (item of catalog.assets(); track item.id) {
-                    <option [value]="item.id" [selected]="item.id === selectedId()">{{ item.path }}</option>
-                }
-            </select>
-        </label>
+        <editor-search-picker label="Input Actions asset" placeholder="Find saved Input Actions…"
+                              [options]="assetOptions()" [value]="selectedId() || null" [resultLimit]="80"
+                              [disabled]="!available() || dirty()" (picked)="chooseAsset($event)"/>
         <button type="button" (click)="catalog.refresh()" [disabled]="!available() || catalog.pending()">Refresh Assets</button>
-        <button type="button" (click)="openSelected()" [disabled]="!available() || dirty() || !selectedId()">Open Asset</button>
+        <button type="button" (click)="openSelected()" [disabled]="!available() || dirty() || !hasSelectedAsset()">Open
+            Asset
+        </button>
         <button type="button" (click)="create()" [disabled]="!available() || dirty()">New Asset</button>
     </div>
     @if (catalog.pending()) {
@@ -88,16 +85,10 @@
                     </select>
                 </label>
                 @if (layout.when.kind === 'scene_is') {
-                    <label>Condition scene
-                        <select #scene [value]="layout.when.scene_id" (change)="chooseConditionScene(scene.value)">
-                            @if (!sceneIds().has(layout.when.scene_id)) {
-                                <option value="" selected>Choose an available scene</option>
-                            }
-                            @for (item of scenes(); track item.id) {
-                                <option [value]="item.id" [selected]="item.id === layout.when.scene_id">{{ item.id }}</option>
-                            }
-                        </select>
-                    </label>
+                    <editor-search-picker label="Condition scene" placeholder="Find a project scene…"
+                                          [options]="sceneOptions()" [value]="layout.when.scene_id || null"
+                                          [resultLimit]="80" [disabled]="!available()"
+                                          (picked)="chooseConditionScene($event)"/>
                 }
             }
             @for (action of editingActions(); track $index; let actionIndex = $index) {
@@ -175,14 +166,10 @@
             <fieldset [disabled]="!available()" class="fields">
                 <legend>Test condition</legend>
                 <div class="actions">
-                    <label>Preview scene
-                        <select #previewScene [value]="testScene()" (change)="testScene.set(previewScene.value)">
-                            <option value="" [selected]="!testScene()">Unavailable</option>
-                            @for (item of scenes(); track item.id) {
-                                <option [value]="item.id" [selected]="item.id === testScene()">{{ item.id }}</option>
-                            }
-                        </select>
-                    </label>
+                    <editor-search-picker label="Preview scene" placeholder="Find a project scene…"
+                                          [options]="testSceneOptions()" [value]="testScene()"
+                                          [resultLimit]="80" [disabled]="!available()"
+                                          (picked)="chooseTestScene($event)"/>
                     <label>Preview motion
                         <select #motion [value]="testMotion()" (change)="setTestMotion(motion.value)">
                             <option value="unavailable">Unavailable</option>

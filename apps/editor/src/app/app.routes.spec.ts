@@ -18,11 +18,22 @@ describe('Production routes', () => {
         const harness = await RouterTestingHarness.create(path);
         expect(TestBed.inject(Router).url).toBe('/setup');
         expect(harness.routeNativeElement?.querySelector('h1')?.textContent).toContain(
-            'Create your project',
+            'Open or create a project',
         );
         expect(harness.routeNativeElement?.querySelector('editor')).toBeNull();
         expect(harness.routeNativeElement?.querySelector('editor-design-workbench')).toBeNull();
     });
+    it('shows Open Existing Project at desktop startup', async () => {
+        vi.mocked(isTauri).mockReturnValue(true);
+        TestBed.configureTestingModule({providers: [provideRouter(routes)]});
+        const harness = await RouterTestingHarness.create('/');
+        expect(TestBed.inject(Router).url).toBe('/setup');
+        const open = harness.routeNativeElement?.querySelector<HTMLButtonElement>('button.open-existing');
+        expect(open?.textContent).toContain('Open Existing Project');
+        expect(open?.disabled).toBe(false);
+        expect(harness.routeNativeElement?.querySelector('form')).toBeTruthy();
+    });
+
     it('opens the editor directly in production', async () => {
         TestBed.configureTestingModule({providers: [provideRouter(routes)]});
         const harness = await RouterTestingHarness.create();
@@ -58,7 +69,7 @@ describe('Production routes', () => {
         await harness.navigateByUrl(toSetup);
         expect(router.url).toBe(toSetup);
         expect(review).toHaveBeenCalledTimes(2);
-        expect(harness.routeNativeElement?.querySelector('h1')?.textContent).toContain('Create your project');
+        expect(harness.routeNativeElement?.querySelector('h1')?.textContent).toContain('Open or create a project');
         expect(invoke).not.toHaveBeenCalledWith('editor_exit', expect.anything());
     });
 });

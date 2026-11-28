@@ -10,7 +10,8 @@ import {
     input,
     output,
     signal,
-    untracked
+    untracked,
+    viewChild,
 } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import type {
@@ -34,13 +35,16 @@ import { CONTROLLER_FIELDS } from '../../../../core/editor/character-controller.
 import type { MachineDefinition } from '../../../../core/editor/state-machine.models';
 import type { AnimationSettings } from '../../../../core/editor/animation.models';
 import { AnimationEditor } from './animation-editor';
-import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {EditorSearchPicker, type SearchPickerOption} from '../../../../shared/components/search-picker/search-picker';
 import {sceneReferenceOptions} from '../scene-reference-options';
 import {CameraRigFields} from '../game-settings/camera-rig-fields';
 import {skyColorChannels} from './sky-component-draft';
 import {SkyPanoramaPicker} from './sky-panorama-picker';
 import {particlePresetLabel} from '../particle-designer/particle-designer.models';
 import {PARTICLE_NUMBER_FIELDS} from '../../../../core/editor/particle-emitter.models';
+import {EditorParticleSpritePicker} from '../particle-designer/particle-sprite-picker';
+import {EditorService} from '../../../../core/editor/editor.service';
+import {PHYSICS_LAYER_COUNT} from '../../../../core/editor/physics-layers.models';
 import {validateCameraLens} from './camera-component-draft';
 import type {InputActionsAsset} from '../../../../core/game-input/input-actions.models';
 import type {InputActionsRef} from '../../../../core/editor/player-controller.models';
@@ -61,7 +65,7 @@ export type ComponentEditIntent =
 
 @Component({
 	selector: 'editor-component-editor',
-    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector, AudioMarkerFields, SkyPanoramaPicker],
+    imports: [FormField, ColliderInspector, MachineEditor, AnimationEditor, EditorSearchPicker, CameraRigFields, AudioSourceInspector, AudioMarkerFields, SkyPanoramaPicker, EditorParticleSpritePicker],
 	templateUrl: './component-editor.html',
 	styleUrl: './component-editor.scss',
 })
@@ -106,8 +110,13 @@ export class ComponentEditor {
     readonly assetGeneration = input<number | null>(null);
 	readonly actionRequested = output<ComponentEditIntent>();
 	readonly draftOpenChanged = output<boolean>();
+    private readonly editor = inject(EditorService, {optional: true});
     private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
     private readonly injector = inject(Injector);
+    private readonly heading = viewChild<ElementRef<HTMLElement>>('componentHeading');
+    private readonly draftForm = viewChild<ElementRef<HTMLElement>>('draftForm');
+    private draftTrigger: { readonly button: HTMLButtonElement | null; readonly context: string } | null = null;
+    private draftScope: { readonly context: string; readonly acknowledged: number } | null = null;
 	protected readonly open = signal(false);
 	protected readonly selectedKind = signal<AddComponentChoice['id']>('native_behavior');
 	protected readonly draft = signal(componentDraft('native_behavior', '', ''));
@@ -117,6 +126,10 @@ export class ComponentEditor {
 	protected readonly colliderInvalid = signal(false);
 	protected readonly animationPending = signal(false);
 	protected readonly original = signal<ComponentRecord | undefined>(undefined);
+    protected readonly draftTitle = computed(() => {
+        const original = this.original();
+        return original ? 'Edit ' + this.label(original) : 'Add ' + this.typeLabel(this.draft().kind);
+    });
 	protected readonly axes = ['x', 'y', 'z'] as const;
 	protected readonly colors = ['r', 'g', 'b', 'a'] as const;
 	protected readonly draftUsesMaterialGraph = computed(() => {
@@ -156,8 +169,14 @@ export class ComponentEditor {
     })));
     protected readonly modelMeshOptions = computed(() =>
         selectedModelAsset(this.meshModels(), this.draft().model_path, this.original())?.meshes ?? []);
-    protected readonly meshSelectionUnavailable = computed(() =>
-        !!this.draft().mesh_id && !this.modelMeshOptions().some(mesh => mesh.id === this.draft().mesh_id));
+    protected readonly meshIdentityOptions = computed(() => [
+        {id: '', label: 'Use mesh index'},
+        ...this.modelMeshOptions().map(mesh => ({id: mesh.id, label: (mesh.name || 'Mesh') + ' (' + mesh.index + ')'})),
+    ]);
+    protected readonly inputSourceOptions = computed(() => [
+        {id: '', label: 'Project Input'},
+        ...this.inputActionAssets().map(asset => ({id: asset.id, label: asset.path})),
+    ]);
 	protected readonly available = computed(() => this.editable() && !this.pending());
     protected readonly choices = computed(() => addComponentCatalog(
         this.types(), this.components(), kind => this.pinned(kind), this.specialistAttachments(),
@@ -211,7 +230,20 @@ export class ComponentEditor {
 			return { value: null, error: error instanceof Error ? error.message : String(error) };
 		}
 	});
+    protected readonly scriptOptions = computed(() => this.scriptTypes().map(type => ({
+        id: type.id, label: type.label, description: type.id,
+    })));
     protected readonly scriptType = computed(() => this.scriptTypes().find(type => type.id === this.draft().script.id));
+    private readonly scriptObjectOptions = computed(() => {
+        const sensors = new Set(this.entities().filter(entity => servesScriptReference(entity, 'trigger_collider'))
+            .map(entity => 'entity:' + entity.key));
+        const objects = this.entityOptions().map(option => ({...option, id: 'entity:' + option.id}));
+        const slots = this.scriptSlots().map(slot => ({id: 'slot:' + slot, label: slot, description: 'Prop slot'}));
+        return {
+            entity: [...objects, ...slots],
+            trigger_collider: [...objects.filter(option => sensors.has(option.id)), ...slots],
+        };
+    });
     protected readonly scriptCanReset = computed(() => {
         const original = this.original()?.data;
         const script = this.scriptType();
@@ -219,7 +251,8 @@ export class ComponentEditor {
             script.config_version !== original.settings.config_version && !this.draft().script.resetConfig;
     });
     protected chooseScript(id: string): void {
-        if (!this.scriptTypes().some(type => type.id === id)) return;
+        if (!this.available() || !this.open() || this.draft().kind !== 'script' ||
+            !this.scriptTypes().some(type => type.id === id)) return;
         this.draft.update(value => value.script.id === id ? value : {...value, script: {...scriptDraft(), id}});
     }
     protected resetScriptConfig(): void {
@@ -238,17 +271,23 @@ export class ComponentEditor {
     protected setScriptValue(key: string, next: string | boolean): void {
         this.draft.update(value => ({...value, script: {...value.script, properties: {...value.script.properties, [key]: next}}}));
     }
-    protected scriptTargets(field: ScriptReferenceField): readonly ComponentTarget[] {
-        return this.entities().filter(target => servesScriptReference(target, field.requires));
+
+    protected scriptTargetOptions(field: ScriptReferenceField): readonly SearchPickerOption[] {
+        return this.scriptObjectOptions()[field.requires];
     }
     protected scriptTarget(key: string): string {
         const reference = this.draft().script.references[key];
         if (!reference) return '';
         return 'entity' in reference ? 'entity:' + reference.entity : 'slot:' + reference.slot;
     }
-    protected setScriptTarget(key: string, option: string): void {
+
+    protected setScriptTarget(field: ScriptReferenceField, option: string): void {
+        if (!this.available() || !this.open() || !this.scriptType()?.references.includes(field) ||
+            !this.scriptTargetOptions(field).some(candidate => candidate.id === option)) return;
         const reference = option.startsWith('slot:') ? {slot: option.slice(5)} : {entity: option.slice(7)};
-        this.draft.update(value => ({...value, script: {...value.script, references: {...value.script.references, [key]: reference}}}));
+        this.draft.update(value => ({
+            ...value, script: {...value.script, references: {...value.script.references, [field.key]: reference}},
+        }));
     }
 	protected readonly references = computed<
 		readonly {
@@ -273,13 +312,35 @@ export class ComponentEditor {
 	});
     protected readonly actionListId = 'component-actions-' + crypto.randomUUID();
 	protected readonly prefabListId = `component-prefabs-${crypto.randomUUID()}`;
+    protected readonly projectileActionListId = `projectile-actions-${crypto.randomUUID()}`;
+    protected readonly projectileLayers = computed(() => {
+        const layers = this.editor?.snapshot?.()?.project.physics_layers?.layers ?? [];
+        return Array.from({length: PHYSICS_LAYER_COUNT}, (_, bit) => ({
+            bit, label: layers.find(layer => layer.bit === bit)?.label ?? `Layer ${bit + 1}`,
+        }));
+    });
+
+    protected projectileLayerSelected(bit: number): boolean {
+        return Boolean(Number(this.draft().projectile.collisionMask) & (1 << bit));
+    }
+
+    protected toggleProjectileLayer(bit: number, selected: boolean): void {
+        const value = Number(this.draft().projectile.collisionMask);
+        const layer = 1 << bit;
+        const next = selected ? value | layer : value & ~layer;
+        this.fields.projectile.collisionMask().value.set(String(next >>> 0));
+    }
 
 	constructor() {
-		effect(() => {
-			this.contextKey();
-			this.acknowledged();
-			untracked(() => this.discardDraft());
-		});
+        effect(() => {
+            const context = this.contextKey();
+            const acknowledged = this.acknowledged();
+            const waitingForEditor = this.draftTrigger !== null && !this.available();
+            if (this.draftScope?.context === context &&
+                (waitingForEditor || this.draftScope.acknowledged === acknowledged)) return;
+            this.draftScope = {context, acknowledged};
+            untracked(() => this.discardDraft());
+        });
 		effect(() => {
 			this.draftOpenChanged.emit(this.open());
 		});
@@ -313,13 +374,17 @@ export class ComponentEditor {
 				key_door: 'Key and Door',
 				collectible: 'Collectible',
 				timed_spawner: 'Timed Spawner',
+                projectile: 'Projectile',
+                projectile_launcher: 'Projectile Launcher',
 				state_machine: 'State Machine',
 			}[component.data.behavior.kind];
-		return (
-			this.types().find((type) => type.kind === component.data.kind)?.label ??
-			(component.data.kind === 'collider' ? 'Collider' : 'Mesh Renderer')
-		);
-	}
+        return this.typeLabel(component.data.kind);
+    }
+
+    private typeLabel(kind: ComponentData['kind']): string {
+        return this.types().find(type => type.kind === kind)?.label ??
+            kind.split('_').map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
+    }
 
     protected inputAssetId(ref: InputActionsRef): string { return ref.kind === 'asset' ? ref.asset_id : ''; }
 
@@ -368,6 +433,10 @@ export class ComponentEditor {
             case 'key_door': return 'Key and Door';
             case 'collectible': return 'Collectible';
             case 'timed_spawner': return 'Timed Spawner';
+            case 'projectile':
+                return 'Projectile';
+            case 'projectile_launcher':
+                return 'Projectile Launcher';
             case 'state_machine': return 'State Machine';
             default: return kind;
         }
@@ -403,7 +472,7 @@ export class ComponentEditor {
         this.chooseAudioClip(id);
     }
 
-	protected start(component?: ComponentRecord): void {
+    protected start(component?: ComponentRecord, button?: HTMLButtonElement): void {
 		if (!this.available() || this.open()) return;
         const choice = this.selectedChoice();
         if (!component && (!choice || choice.unavailableReason)) return;
@@ -415,7 +484,18 @@ export class ComponentEditor {
             return;
         }
         if (this.pinned(kind)) return;
+        const context = this.contextKey();
+        this.draftTrigger = {button: button ?? null, context};
         this.initializeDraft(kind, component);
+        if (button) {
+            afterNextRender(() => {
+                if (!this.open() || this.contextKey() !== context) return;
+                const form = this.draftForm()?.nativeElement;
+                if (form?.closest('[hidden]')) return;
+                form?.scrollIntoView?.({block: 'start'});
+                form?.focus({preventScroll: true});
+            }, {injector: this.injector});
+        }
     }
 
     private initializeDraft(kind: ComponentData['kind'], component?: ComponentRecord): void {
@@ -446,7 +526,9 @@ export class ComponentEditor {
             const control = reference?.matches(selector) ? reference : reference?.querySelector<HTMLElement>(selector);
             const article = [...host.querySelectorAll<HTMLElement>('[data-reference-component]')]
                 .find(element => element.dataset['referenceComponent'] === id);
-            const destination = control ?? article;
+            const matchingDraft = this.open() && this.original()?.id === id ? this.draftForm()?.nativeElement : null;
+            const destination = control ?? matchingDraft ?? article;
+            if (destination?.closest('[hidden]')) return;
             destination?.scrollIntoView?.({block: 'nearest'});
             destination?.focus({preventScroll: true});
         }, {injector: this.injector});
@@ -463,7 +545,23 @@ export class ComponentEditor {
         } else {
             this.open.set(false);
             this.colliderInvalid.set(false);
+            this.restoreDraftFocus();
         }
+    }
+
+    private restoreDraftFocus(): void {
+        const trigger = this.draftTrigger;
+        this.draftTrigger = null;
+        if (!trigger || trigger.context !== this.contextKey()) return;
+        afterNextRender(() => {
+            if (trigger.context !== this.contextKey() || this.open()) return;
+            const button = trigger.button;
+            const control = button?.isConnected && !button.disabled && !button.closest('[hidden]')
+                ? button : this.heading()?.nativeElement;
+            if (control?.closest('[hidden]')) return;
+            control?.scrollIntoView?.({block: 'nearest'});
+            control?.focus({preventScroll: true});
+        }, {injector: this.injector});
     }
 
     prepareEdit(): ComponentEditIntent | null {

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "3f5f21bc-420e-55cf-bd67-69a4b9c67346",
+      "path": "actors/knight.glb",
+      "kind": "model",
+      "revision": 1,
+      "bytes": 323784,
+      "fingerprint": "47d080bb44cbe1ca7f561bce99f4a600fe167f05705274716220e2bfae5b52a6",
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Knight of the Oath",
+          "primitives": 10
+        }
+      ]
+    },
+    {
+      "id": "faf2cd04-14e1-52c5-8c1e-c8e316d319e7",
+      "path": "actors/warden.glb",
+      "kind": "model",
+      "revision": 1,
+      "bytes": 330068,
+      "fingerprint": "06567535b2054507ccf9013c60887820c74fa77396975f62397f0fe8641554a8",
+      "meshes": [
+        {
+          "index": 0,
+          "name": "The Cinder Warden",
+          "primitives": 10
+        }
+      ]
+    },
+    {
+      "id": "c3c84670-98fc-562b-9f62-45feaa6c31cf",
+      "path": "architecture/masonry.glb",
+      "kind": "model",
+      "revision": 1,
+      "bytes": 1504,
+      "fingerprint": "b4359162073c6647a02dd76944c88fd75e2a4432912c14e2af40d50300462a83",
+      "meshes": [
+        {
+          "index": 0,
+          "name": "Vault masonry",
+          "primitives": 1
+        }
+      ]
+    },
+    {
+      "id": "9de43a41-a4f6-5e6a-a1ee-3714bb26f327",
+      "path": "audio/beneath-the-stones.wav",
+      "kind": "audio_clip",
+      "revision": 1,
+      "bytes": 512044,
+      "fingerprint": "6a3f3eaee9c31537d29a2f985f4d6f42d02398578482955806a7e102b28ee047"
+    },
+    {
+      "id": "5a2becea-16ef-5176-89ad-f2154ccf4e07",
+      "path": "environment/ember-sky.png",
+      "kind": "sky_panorama",
+      "revision": 1,
+      "bytes": 195124,
+      "fingerprint": "2bc0d50a5595dd8379b6d352c4e2265e90292ccb8e2a19059bf9e318bfaf9ade"
+    }
+  ]
+}

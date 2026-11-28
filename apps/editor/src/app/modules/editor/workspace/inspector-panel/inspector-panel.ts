@@ -86,11 +86,15 @@ export class InspectorPanel {
         command.name === 'set_project') === true);
     protected readonly activationAvailable = computed(() => this.editor?.capabilities()?.commands?.some(command =>
         command.name === 'set_object_active') === true);
-    protected readonly activationEditable = computed(() => {
-        const selected = this.entity();
+    protected readonly activationEditable = computed(() =>
+        this.editable() && this.entity() !== null && this.snapshot() !== null && !this.linkedMemberRoot(),
+    );
+    protected readonly readOnlyReason = computed(() => {
+        if (this.editable()) return null;
         const snapshot = this.snapshot();
-        return this.editable() && !!selected && !!snapshot &&
-            !linkedInspectorRoot(selected, snapshot.document.entities);
+        if (snapshot?.mode === 'play') return 'Stop Play to edit this object.';
+        if (snapshot?.transaction) return 'Finish the current edit to change this object.';
+        return 'This object is read-only.';
     });
     protected readonly inactiveAncestor = computed(() => {
         const entities = this.snapshot()?.document.entities;
@@ -117,7 +121,9 @@ export class InspectorPanel {
     protected readonly drawerConfig = AUTHORING_DRAWER_CONFIG;
 
     focus(): void {
-        this.element.querySelector<HTMLElement>('[data-reference-entity], .placeholder, [aria-label="Selected objects"]')?.focus({preventScroll: true});
+        const target = this.element.querySelector<HTMLElement>('[data-reference-entity], .placeholder, [aria-label="Selected objects"]');
+        target?.scrollIntoView?.({block: 'nearest'});
+        target?.focus({preventScroll: true});
     }
 
     private readonly snapshot = computed(() => this.editor?.snapshot() ?? null);
@@ -129,10 +135,15 @@ export class InspectorPanel {
             ? {workspaceGeneration: this.editor.workspaceGeneration(), nativeGeneration, revision: snapshot.revision}
             : null;
     });
+    protected readonly linkedMemberRoot = computed(() => {
+        const snapshot = this.snapshot();
+        const object = this.entity();
+        return snapshot && object ? linkedInspectorRoot(object, snapshot.document.entities) : null;
+    });
     private readonly linkedTarget = computed<LinkedInspectorTarget | null>(() => {
         const snapshot = this.snapshot(), object = this.entity(), scope = this.scope();
         if (!snapshot || !object || !scope || snapshot.transaction !== null || snapshot.selection[0] !== object.key) return null;
-        const root = linkedInspectorRoot(object, snapshot.document.entities);
+        const root = this.linkedMemberRoot();
         return root ? {scene: snapshot.active_scene_id, object: object.key, root, scope} : null;
     }, {equal: sameLinkedInspectorTarget});
     private readonly linkedAddress = watchLinkedInspectorAddress(this.editor, this.linkedTarget);
@@ -141,7 +152,7 @@ export class InspectorPanel {
         if (!snapshot || !object || !scope || snapshot.selection[0] !== object.key) return null;
         const target = this.linkedTarget();
         if (target) return linkedInspectorSubject(snapshot, target, this.linkedAddress(), this.editable());
-        if (snapshot.transaction !== null && linkedInspectorRoot(object, snapshot.document.entities)) return null;
+        if (snapshot.transaction !== null && this.linkedMemberRoot()) return null;
         return sceneInspectorSubject(snapshot, object.key, scope, this.editable());
     });
 
@@ -193,7 +204,7 @@ export class InspectorPanel {
                 components.revealReference(componentId, field)) return;
             const matching = componentId === undefined ? null :
                 [...this.element.querySelectorAll<HTMLElement>('[data-reference-component]')]
-                    .find(component => component.dataset['referenceComponent'] === componentId);
+                    .find(component => component.dataset['referenceComponent'] === componentId && !component.closest('[hidden]'));
             const prefab = section === 'prefab' ? this.element.querySelector<HTMLElement>('[data-reference-prefab]') : null;
             const binding = slot === undefined ? null : [...(prefab?.querySelectorAll<HTMLElement>('[data-prefab-slot]') ?? [])]
                 .find(element => element.dataset['prefabSlot'] === slot);

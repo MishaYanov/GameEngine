@@ -1,60 +1,54 @@
 <div aria-label="Workspace actions" class="workspace-actions" role="group">
     @if (sceneActionsVisible()) {
-    <div aria-label="Scene edits" class="action-group" role="group">
-        <button (click)="dispatch('save')" [disabled]="!canPerform('save')" type="button">
-            Save Scene
-        </button>
-        <button (click)="dispatch('saveAll')" [disabled]="!canPerform('saveAll')" type="button">
-            Save All
-        </button>
-        <button (click)="dispatch('undo')" [disabled]="!canPerform('undo')"
-                type="button">
-            Undo
-        </button>
-        <button (click)="dispatch('redo')" [disabled]="!canPerform('redo')"
-                type="button">
-            Redo
-        </button>
-    </div>
-    <div aria-label="Selected entities" class="action-group" role="group">
-        <button (click)="dispatch('duplicate')" [disabled]="!canPerform('duplicate')" type="button">Duplicate</button>
-        <button (click)="dispatch('deleteSelection')" [disabled]="!canPerform('deleteSelection')" type="button">Delete
-        </button>
-        <button (click)="dispatch('frameSelection')" [disabled]="!canPerform('frameSelection')" type="button">Frame
-            Selection
-        </button>
-    </div>
+        @for (group of editGroups; track group.label) {
+            <div [attr.aria-label]="group.label" class="action-group" role="group">
+                @for (item of group.actions; track item.action) {
+                    <button (click)="dispatch(item.action)" [disabled]="!canPerform(item.action)"
+                            [attr.aria-label]="item.label" [attr.aria-keyshortcuts]="item.keys"
+                            [title]="editTitle(item)" class="icon-action" type="button">
+                        <editor-icon [name]="item.icon"/>
+                    </button>
+                }
+            </div>
+        }
     }
     <div aria-label="Game preview controls" class="action-group" role="group">
-        <button (click)="dispatch('play')" [disabled]="!canPerform('play')" class="play-action" type="button">
-            <editor-icon name="play"/>
-            Play
-        </button>
-        <button (click)="dispatch('stop')" [disabled]="!canPerform('stop')" type="button">
-            Stop
+        <button #playControl (click)="dispatch(playAction())" [disabled]="!canPerform(playAction())"
+                [class.stop-action]="playAction() === 'stop'" class="play-action" type="button">
+            <editor-icon [name]="playAction()"/>
+            {{ playAction() === 'stop' ? 'Stop' : 'Play' }}
         </button>
     </div>
-    <div aria-label="Command palette" class="action-group" role="group">
-        <button (click)="paletteRequested.emit()" [disabled]="!paletteAvailable()"
-                [title]="paletteShortcut" aria-haspopup="dialog"
-                aria-keyshortcuts="Control+Shift+P Meta+Shift+P" type="button">Commands
+    <div class="action-group">
+        <button (click)="paletteRequested.emit()" [disabled]="!paletteAvailable()" [title]="paletteTitle"
+                aria-label="Commands" aria-haspopup="dialog" aria-keyshortcuts="Control+Shift+P Meta+Shift+P"
+                class="icon-action" type="button">
+            <editor-icon name="search"/>
         </button>
     </div>
-</div>
-@if (editorService.savedFiles(); as files) {
-    @if (files.length) {
-        <section aria-label="Save All results" class="save-report" role="status" tabindex="0">
+    @if (sceneActionsVisible() && unsaved() && !saveIssue()) {
+        <span class="save-state" role="status">Unsaved changes</span>
+    }
+    @if (editorService.savedFiles().length) {
+        <button class="save-summary" type="button" popovertarget="workspace-save-results"
+                [attr.aria-label]="saveSummary() + ', view Save All results'" [class.save-issue]="saveIssue()">
+            <span role="status">{{ saveSummary() }}</span>
+            <editor-icon name="expand"/>
+        </button>
+        <section id="workspace-save-results" aria-label="Save All results" class="save-report" popover="auto">
             <ul>
-                @for (file of files; track $index) {
-                    <li>{{ file.path }} — {{ saveOutcomes[file.outcome] }}
-                        @if (file.message) { <span>{{ file.message }}</span> }
+                @for (file of editorService.savedFiles(); track $index) {
+                    <li>{{ file.path }} · {{ saveOutcomes[file.outcome] }}
+                        @if (file.message) {
+                            <p>{{ file.message }}</p>
+                        }
                     </li>
                 }
             </ul>
-            <button type="button" (click)="editorService.clearSaveReport()">Dismiss save results</button>
+            <button type="button" (click)="dismissSaveReport(playControl)">Dismiss save results</button>
         </section>
     }
-}
+</div>
 @if (actionError(); as message) {
     <div class="action-error" role="alert">{{ message }}</div>
 }

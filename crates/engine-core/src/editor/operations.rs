@@ -108,6 +108,7 @@ pub(super) fn apply(
 			data.environment.ambient_linear = ambient_linear;
 			data.environment.sky_exposure_ev = sky_exposure_ev;
 		}
+		EditorCommandDto::SetSceneFog { fog } => data.environment.fog = fog,
 		EditorCommandDto::SetLocalPlayer { key } => player::set_local_player(data, key.as_ref())?,
 		EditorCommandDto::AlignCameraToSceneView {
 			key,

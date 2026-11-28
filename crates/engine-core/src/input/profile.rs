@@ -1,4 +1,4 @@
-use super::{GamepadSample, InputState, Key};
+use super::{GamepadSample, InputState, Key, MouseButton};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -13,6 +13,8 @@ pub struct InputProfile {
 	pub movement: MovementBindings,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub actions: Vec<GameInputBinding>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub mouse_actions: Vec<MouseActionBinding>,
 }
 
 impl Default for InputProfile {
@@ -21,6 +23,7 @@ impl Default for InputProfile {
 			schema_version: INPUT_PROFILE_SCHEMA_VERSION,
 			movement: MovementBindings::default(),
 			actions: Vec::new(),
+			mouse_actions: Vec::new(),
 		}
 	}
 }
@@ -32,6 +35,14 @@ pub struct GameInputBinding {
 	pub key: Key,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub animation_parameter: Option<String>,
+}
+
+/// An alternate physical binding for a named gameplay action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MouseActionBinding {
+	pub id: String,
+	pub button: MouseButton,
 }
 
 /// A resolved gameplay sample shared by the editor and Player.
@@ -132,17 +143,27 @@ impl InputProfile {
 		self.movement.contains_key(key) || self.actions.iter().any(|binding| binding.key == key)
 	}
 
+	pub fn contains_mouse_button(&self, button: MouseButton) -> bool {
+		self.mouse_actions
+			.iter()
+			.any(|binding| binding.button == button)
+	}
+
 	pub fn resolve_keyboard(&self, input: &InputState) -> GameKeyboardInput {
 		self.resolve_controls(input, GamepadSample::default())
 	}
 
-	/// Resolves movement and logical actions from a single keyboard and controller owner.
+	/// Resolves movement and logical actions from the active keyboard, mouse, and controller input.
 	pub fn resolve_controls(
 		&self,
 		input: &InputState,
 		gamepad: GamepadSample,
 	) -> GameKeyboardInput {
-		self.resolve(|key| input.is_held(key), gamepad)
+		self.resolve(
+			|key| input.is_held(key),
+			|button| input.is_held(button),
+			gamepad,
+		)
 	}
 
 	pub(crate) fn resolve_keyboard_codes(&self, held_codes: &HashSet<String>) -> GameKeyboardInput {
@@ -154,12 +175,21 @@ impl InputProfile {
 		held_codes: &HashSet<String>,
 		gamepad: GamepadSample,
 	) -> GameKeyboardInput {
-		self.resolve(|key| held_codes.contains(&key.physical_code()), gamepad)
+		self.resolve(
+			|key| held_codes.contains(&key.physical_code()),
+			|button| {
+				button
+					.input_code()
+					.is_some_and(|code| held_codes.contains(code))
+			},
+			gamepad,
+		)
 	}
 
 	fn resolve(
 		&self,
 		mut is_held: impl FnMut(Key) -> bool,
+		mouse_held: impl Fn(MouseButton) -> bool,
 		gamepad: GamepadSample,
 	) -> GameKeyboardInput {
 		let keyboard = self.movement.direction_from_held(&mut is_held);
@@ -175,7 +205,13 @@ impl InputProfile {
 				"interact" => gamepad.interact,
 				_ => false,
 			};
-			if is_held(binding.key) || controller_held {
+			if is_held(binding.key)
+				|| controller_held
+				|| self
+				.mouse_actions
+				.iter()
+				.any(|alias| alias.id == binding.id && mouse_held(alias.button))
+			{
 				actions.ids.insert(binding.id.clone());
 				if let Some(parameter) = &binding.animation_parameter {
 					actions.animation_parameters.insert(parameter.clone());
@@ -221,6 +257,32 @@ impl InputProfile {
 			}
 		}
 
+		let mut mouse_ids = HashSet::new();
+		let mut mouse_buttons = HashSet::new();
+		for binding in &self.mouse_actions {
+			if !ids.contains(&binding.id) {
+				return Err(format!(
+					"Mouse binding refers to unknown game action {:?}",
+					binding.id
+				));
+			}
+			if binding.button.input_code().is_none() {
+				return Err("Mouse actions require Left, Right, Middle, Back or Forward".into());
+			}
+			if !mouse_ids.insert(&binding.id) {
+				return Err(format!(
+					"Duplicate mouse binding for game action {:?}",
+					binding.id
+				));
+			}
+			if !mouse_buttons.insert(binding.button) {
+				return Err(format!(
+					"Mouse button {:?} is already bound",
+					binding.button
+				));
+			}
+		}
+
 		Ok(())
 	}
 
@@ -260,4 +322,132 @@ pub fn valid_game_action_id(value: &str) -> bool {
 	value.len() <= 32
 		&& bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
 		&& bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn mouse_profile() -> InputProfile {
+		InputProfile {
+			actions: vec![
+				GameInputBinding {
+					id: "jump".into(),
+					key: Key::Space,
+					animation_parameter: Some("Jumping".into()),
+				},
+				GameInputBinding {
+					id: "wait".into(),
+					key: Key::Q,
+					animation_parameter: None,
+				},
+			],
+			mouse_actions: vec![MouseActionBinding {
+				id: "jump".into(),
+				button: MouseButton::Left,
+			}],
+			..InputProfile::default()
+		}
+	}
+
+	#[test]
+	fn native_mouse_and_named_codes_resolve_the_same_action_and_parameter() {
+		let profile = mouse_profile();
+		let mut input = InputState::default();
+		input.press(Key::W);
+		input.press(MouseButton::Left);
+		input.press(MouseButton::Right);
+		let codes = HashSet::from(["KeyW".into(), "MouseLeft".into(), "MouseRight".into()]);
+		let actual = profile.resolve_controls(&input, GamepadSample::default());
+		let named = profile.resolve_controls_from_codes(&codes, GamepadSample::default());
+
+		assert_eq!(actual.movement, [0.0, 1.0]);
+		assert_eq!(actual.movement, named.movement);
+		assert_eq!(actual.actions.ids, HashSet::from(["jump".into()]));
+		assert_eq!(actual.actions.ids, named.actions.ids);
+		assert_eq!(
+			actual.actions.animation_parameters,
+			HashSet::from(["Jumping".into()])
+		);
+		assert_eq!(
+			actual.actions.animation_parameters,
+			named.actions.animation_parameters
+		);
+
+		input.press(Key::Space);
+		input.release(MouseButton::Left);
+		assert!(
+			profile
+				.resolve_keyboard(&input)
+				.actions
+				.ids
+				.contains("jump")
+		);
+		input.release(Key::Space);
+		assert!(profile.resolve_keyboard(&input).actions.ids.is_empty());
+	}
+
+	#[test]
+	fn mouse_aliases_round_trip_and_reject_invalid_targets_or_collisions() {
+		let profile = mouse_profile();
+		assert!(profile.contains_mouse_button(MouseButton::Left));
+		assert!(!profile.contains_mouse_button(MouseButton::Right));
+		assert_eq!(
+			InputProfile::from_json(&profile.to_json().unwrap()).unwrap(),
+			profile
+		);
+		assert!(
+			!InputProfile::default()
+				.to_json()
+				.unwrap()
+				.contains("mouse_actions")
+		);
+
+		let mut invalid = profile.clone();
+		invalid.mouse_actions[0].id = "missing".into();
+		assert!(
+			invalid
+				.validate()
+				.unwrap_err()
+				.contains("unknown game action")
+		);
+
+		let mut invalid = profile.clone();
+		invalid.mouse_actions[0].button = MouseButton::Other(7);
+		assert!(invalid.validate().unwrap_err().contains("Left, Right"));
+
+		let mut invalid = profile.clone();
+		invalid.mouse_actions.push(MouseActionBinding {
+			id: "jump".into(),
+			button: MouseButton::Right,
+		});
+		assert!(
+			invalid
+				.validate()
+				.unwrap_err()
+				.contains("Duplicate mouse binding")
+		);
+
+		let mut invalid = profile;
+		invalid.mouse_actions.push(MouseActionBinding {
+			id: "wait".into(),
+			button: MouseButton::Left,
+		});
+		assert!(invalid.validate().unwrap_err().contains("already bound"));
+	}
+
+	#[test]
+	fn standard_mouse_codes_are_distinct_from_physical_keyboard_codes() {
+		let keys: HashSet<_> = Key::ALL.iter().copied().map(Key::physical_code).collect();
+		for button in [
+			MouseButton::Left,
+			MouseButton::Right,
+			MouseButton::Middle,
+			MouseButton::Back,
+			MouseButton::Forward,
+		] {
+			assert!(!keys.contains(button.input_code().unwrap()));
+		}
+		assert_eq!(MouseButton::Other(7).input_code(), None);
+	}
 }

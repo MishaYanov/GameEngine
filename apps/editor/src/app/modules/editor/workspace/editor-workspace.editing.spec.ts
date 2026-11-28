@@ -17,7 +17,8 @@ import type {
     ProjectData,
     SceneDocument,
     ViewportSceneLoad,
-    ViewportStatus
+    ViewportStatus,
+    Vec3,
 } from '../../../core/editor/editor.models';
 import type {ComponentRecord} from '../../../core/editor/editor-components';
 import type {SceneIssue} from '../../../core/editor/scene-verification.models';
@@ -49,7 +50,7 @@ vi.mock('@tauri-apps/api/event', () => ({listen: vi.fn()}));
 
 // Exercise the real UI, draft controller, revision queue and command bridge.
 // GPU attachment is outside this DOM test.
-@Component({selector: 'scene-viewport', template: ''})
+@Component({selector: 'scene-viewport', template: '<div class="surface"></div>'})
 class ViewportStub {
     readonly enabled = input(false);
     readonly label = input('');
@@ -196,6 +197,7 @@ describe('Workspace live editing flow', () => {
     let viewportStatus: ViewportStatus;
     let viewportEditorState: ViewportEditorState;
     let viewportStateListener: ((event: TauriEvent<ViewportEditorState>) => void) | undefined;
+    let viewportMenuListener: ((event: TauriEvent<unknown>) => void) | undefined;
     let restartReply: (() => Promise<ViewportEditorState>) | undefined;
     let assets: readonly ModelAsset[];
     let linkedStatus: LinkedPrefabStatus | null;
@@ -214,6 +216,8 @@ describe('Workspace live editing flow', () => {
     let animators: Map<string, AnimatorDocument>;
     let verificationIssues: readonly SceneIssue[] | null;
     let incrementalSelection: boolean;
+    let authoringGeneration: number;
+    let replaceProjectAfterPrimitive: boolean;
 
     beforeEach(async () => {
         localStorage.clear();
@@ -236,6 +240,7 @@ describe('Workspace live editing flow', () => {
         };
         restartReply = undefined;
         viewportStateListener = undefined;
+        viewportMenuListener = undefined;
         assets = [];
         linkedStatus = null;
         openPropSource = async revision => propSource(revision);
@@ -253,7 +258,10 @@ describe('Workspace live editing flow', () => {
         animators = new Map();
         verificationIssues = null;
         incrementalSelection = false;
+        authoringGeneration = 17;
+        replaceProjectAfterPrimitive = false;
         vi.mocked(listen).mockReset().mockImplementation(async (name, handler) => {
+            if (name === 'editor://viewport-context-menu') viewportMenuListener = handler;
             if (name === 'editor://viewport-editor-state') {
                 viewportStateListener = handler as (event: TauriEvent<ViewportEditorState>) => void;
             }
@@ -265,7 +273,10 @@ describe('Workspace live editing flow', () => {
         vi.mocked(isTauri).mockReturnValue(true);
         vi.mocked(invoke).mockReset().mockImplementation(async (operation, args) => {
             if (operation === 'editor_capabilities') return {
-                protocol_version: 2, scene_schema_version: 3, incremental_commands: true,
+                protocol_version: 2,
+                scene_schema_version: 3,
+                incremental_commands: true,
+                primitive_assets: true,
                 commands: [...folderCapabilities, ...cameraCapabilities, ...playerCapabilities], embedded_viewport_supported: true,
                 component_types: [
                     {type_id: 'engine.camera', kind: 'camera', label: 'Camera', description: 'Authored camera', max_per_object: 1},
@@ -285,6 +296,7 @@ describe('Workspace live editing flow', () => {
                     project: structuredClone(savedProject), document: structuredClone(savedDocument)};
                 return structuredClone(nativeState);
             }
+            if (operation === 'choose_project_destination') return null;
             if (operation === 'editor_save') {
                 expect(nativeState.transaction).toBeNull();
                 savedDocument = structuredClone(nativeState.document);
@@ -300,6 +312,49 @@ describe('Workspace live editing flow', () => {
             }
             if (operation === 'editor_snapshot') return structuredClone(nativeState);
             if (operation === 'editor_layout_preferences_project_scope') return 'a'.repeat(64);
+            if (operation === 'editor_authoring_scope') {
+                return {workspace_generation: authoringGeneration, revision: nativeState.revision};
+            }
+            if (operation === 'editor_ensure_primitive') {
+                const request = args as { kind: string; expectedGeneration: number; expectedRevision: number };
+                expect(request.expectedGeneration).toBe(authoringGeneration);
+                expect(request.expectedRevision).toBe(nativeState.revision);
+                expect(nativeState.transaction).toBeNull();
+                const asset: ModelAsset = {
+                    name: 'Cube', path: 'models/primitives/v1/cube.glb', kind: 'model', asset_id: 'cube-id',
+                };
+                expect(request.kind).toBe('cube');
+                assets = [asset];
+                nativeState = {...nativeState, revision: nativeState.revision + 1};
+                if (replaceProjectAfterPrimitive) authoringGeneration += 1;
+                return {operation_id: 'ensure-cube', asset, snapshot: structuredClone(nativeState)};
+            }
+            if (operation === 'editor_import_model') {
+                const request = args as {
+                    path: string;
+                    position: Vec3;
+                    expectedGeneration: number;
+                    expectedRevision: number;
+                    expectedScene: string
+                };
+                expect(request.expectedGeneration).toBe(authoringGeneration);
+                expect(request.expectedRevision).toBe(nativeState.revision);
+                expect(request.expectedScene).toBe(nativeState.active_scene_id);
+                const asset = assets.find(entry => entry.path === request.path)!;
+                if (!nativeState.transaction) undo.push(nativeState.document);
+                nativeState = {
+                    ...nativeState, dirty: true, can_undo: true, revision: nativeState.revision + 1,
+                    scene_revision: nativeState.scene_revision + 1, selection: ['cube-object'],
+                    document: {
+                        ...nativeState.document, entities: [...nativeState.document.entities, {
+                            ...nativeState.document.entities[0], key: 'cube-object', name: asset.name,
+                            model_path: asset.path, asset_id: asset.asset_id,
+                            transform: {...nativeState.document.entities[0].transform, position: request.position},
+                        }]
+                    },
+                };
+                return structuredClone(nativeState);
+            }
             if (operation === 'editor_check_scenes') return {
                 generation: viewportEditorState.workspace_generation,
                 revision: nativeState.revision,
@@ -619,14 +674,13 @@ describe('Workspace live editing flow', () => {
                         entities: nativeState.document.entities.map(entity => entity.key === command.key ? {...entity, parent: command.parent} : entity)}};
                     break;
                 case 'move_roots_to_folder': {
-                    expect(nativeState.transaction).toBeNull();
                     const organization = nativeState.document.organization!;
                     const membership = {...organization.root_membership};
                     for (const key of command.roots) {
                         if (command.folder === null) delete membership[key];
                         else membership[key] = command.folder;
                     }
-                    undo.push(nativeState.document);
+                    if (!nativeState.transaction) undo.push(nativeState.document);
                     redo = [];
                     nativeState = {...nativeState, dirty: true, can_undo: true, can_redo: false,
                         document: {...nativeState.document, organization: {...organization, root_membership: membership}}};
@@ -694,7 +748,7 @@ describe('Workspace live editing flow', () => {
 
     function action(label: string): HTMLButtonElement {
         const button = Array.from(fixture.nativeElement.querySelectorAll('.workspace-actions button') as NodeListOf<HTMLButtonElement>)
-            .find(button => button.textContent?.trim() === label);
+            .find(button => (button.getAttribute('aria-label') ?? button.textContent?.trim()) === label);
         expect(button, `Missing ${label} button`).toBeTruthy();
         return button!;
     }
@@ -748,7 +802,7 @@ describe('Workspace live editing flow', () => {
             .find(item => item.textContent?.trim() === label)!;
         const menu = TestBed.inject(ContextMenuService);
         const create = async (key: string) => {
-            button('Create').click();
+            root.querySelector<HTMLButtonElement>('[aria-label="Create Object"]')!.click();
             const camera = menu.request()?.items.find(item => item.kind === 'action' && item.label === 'Camera');
             expect(camera).toBeDefined();
             menu.execute(camera!);
@@ -830,6 +884,142 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(editor.document()?.default_game_camera).toBeNull());
     });
 
+    it('opens project actions by right-click and keyboard, and honors build and Play guards', async () => {
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        const root: HTMLElement = fixture.nativeElement;
+        const chrome = root.querySelector<HTMLElement>('.workspace-controls')!;
+        const panel = root.querySelector<HTMLElement>('.workspace-panel')!;
+        const menu = TestBed.inject(ContextMenuService);
+        const find = (id: string) => {
+            const item = menu.request()?.items.find(option => option.id === id);
+            if (item?.kind !== 'action') throw new Error('Missing workspace action ' + id);
+            return item;
+        };
+        const pointer = new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, button: 2, clientX: 18, clientY: 24,
+        });
+        chrome.dispatchEvent(pointer);
+        expect(pointer.defaultPrevented).toBe(true);
+        expect(menu.request()).toMatchObject({label: 'Workspace actions', x: 18, y: 24});
+        const creation = menu.request()?.items.find(item => item.id === 'workspace.create-object');
+        expect(creation).toMatchObject({kind: 'submenu', label: 'Create Object'});
+        if (creation?.kind !== 'submenu') throw new Error('Create Object has no submenu');
+        expect(creation.children).toEqual(expect.arrayContaining([
+            expect.objectContaining({id: 'workspace.create_camera', label: 'Camera', disabled: false}),
+            expect.objectContaining({id: 'workspace.create_cube', label: 'Cube', disabled: false}),
+        ]));
+        expect(find('document.save-all').disabled).toBe(true);
+        expect(find('project.build').disabled).toBe(false);
+        menu.execute(find('project.build'));
+        await fixture.whenStable();
+        expect(invoke).toHaveBeenCalledWith('choose_project_destination', {initialDirectory: null});
+
+        const openWithKeyboard = () => {
+            panel.focus();
+            const event = new KeyboardEvent('keydown', {bubbles: true, cancelable: true, key: 'F10', shiftKey: true});
+            panel.dispatchEvent(event);
+            expect(event.defaultPrevented).toBe(true);
+        };
+        await selectRobot();
+        const position = input('Position X');
+        await change(position, '2.5');
+        position.blur();
+        await vi.waitFor(() => expect(editor.dirty()).toBe(true));
+        await fixture.whenStable();
+        openWithKeyboard();
+        expect(menu.request()?.returnFocus).toBe(panel);
+        expect(find('project.build')).toMatchObject({disabled: true, label: 'Build Game… (save changes first)'});
+        expect(find('document.save-all').disabled).toBe(false);
+        menu.execute(find('document.save-all'));
+        await vi.waitFor(() => expect(editor.dirty()).toBe(false));
+        await fixture.whenStable();
+
+        openWithKeyboard();
+        menu.execute(find('game.play'));
+        await vi.waitFor(() => expect(editor.playing()).toBe(true));
+        await fixture.whenStable();
+
+        openWithKeyboard();
+        expect(find('project.build')).toMatchObject({disabled: true, label: 'Build Game… (stop Play first)'});
+        expect(menu.request()?.items.some(item => item.id === 'workspace.create-object')).toBe(false);
+        menu.execute(find('game.stop'));
+        await vi.waitFor(() => expect(editor.playing()).toBe(false));
+    });
+
+    it('preserves field, viewport and hierarchy right-click behavior', async () => {
+        await selectRobot();
+        const root: HTMLElement = fixture.nativeElement;
+        const menu = TestBed.inject(ContextMenuService);
+        const rightClick = (target: Element) => {
+            const event = new MouseEvent('contextmenu', {bubbles: true, cancelable: true, button: 2});
+            target.dispatchEvent(event);
+            return event;
+        };
+        expect(rightClick(input('Position X')).defaultPrevented).toBe(false);
+        expect(menu.request()).toBeNull();
+        const viewport = root.querySelector('scene-viewport')!;
+        expect(rightClick(viewport).defaultPrevented).toBe(false);
+        expect(menu.request()).toBeNull();
+
+        const entity = root.querySelector('.entity-list [data-key="robot"]')!;
+        expect(rightClick(entity).defaultPrevented).toBe(true);
+        expect(menu.request()?.label).toBe('robot actions');
+        expect(menu.request()?.items.some(item => item.id === 'project.build')).toBe(false);
+        menu.close(false);
+    });
+
+    it('places a primitive on the native Scene work plane from its context menu', async () => {
+        const root: HTMLElement = fixture.nativeElement;
+        const viewport = fixture.debugElement.injector.get(ViewportEditorService);
+        await viewport.start();
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        authoringGeneration = viewport.state()?.workspace_generation ?? -1;
+        expect(authoringGeneration).toBeGreaterThan(0);
+        expect(viewportMenuListener).toBeDefined();
+        const surface = root.querySelector<HTMLElement>('scene-viewport .surface')!;
+        vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 50, 700, 400));
+        const menu = TestBed.inject(ContextMenuService);
+        const nativeClick = {
+            workspace_generation: authoringGeneration,
+            revision: editor.snapshot()!.revision,
+            scene_id: 'main',
+            client_x: 151, client_y: 115,
+            position: [6.25, 0, -3],
+        };
+        const sendMenu = (payload: typeof nativeClick) =>
+            viewportMenuListener?.({event: 'editor://viewport-context-menu', id: 1, payload});
+        sendMenu({...nativeClick, revision: nativeClick.revision + 1});
+        expect(menu.request()).toBeNull();
+        sendMenu({...nativeClick, workspace_generation: nativeClick.workspace_generation + 1});
+        expect(menu.request()).toBeNull();
+        sendMenu({...nativeClick, client_x: 999});
+        expect(menu.request()).toBeNull();
+
+        sendMenu(nativeClick);
+        expect(menu.request()).toMatchObject({
+            label: 'Workspace actions', x: 151, y: 115,
+            returnFocus: root.querySelector('.workspace-panel')
+        });
+        const create = menu.request()?.items.find(item => item.id === 'workspace.create-object');
+        if (create?.kind !== 'submenu') throw new Error('Create Object has no submenu');
+        const cube = create.children.find(item => item.id === 'workspace.create_cube')!;
+        menu.execute(cube);
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['cube-object']));
+        expect(editor.document()?.entities.find(entity => entity.key === 'cube-object')?.transform.position)
+            .toEqual(nativeClick.position);
+
+        sendMenu({...nativeClick, revision: editor.snapshot()!.revision});
+        const stale = menu.request()?.items.find(item => item.id === 'workspace.create-object');
+        if (stale?.kind !== 'submenu') throw new Error('Create Object has no submenu');
+        const staleCube = stale.children.find(item => item.id === 'workspace.create_cube')!;
+        await editor.execute({type: 'select', keys: ['robot']});
+        menu.execute(staleCube);
+        await fixture.whenStable();
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === 'editor_import_model')).toHaveLength(1);
+    });
+
     it('creates a complete Player, routes local input explicitly, and restores prior ownership through Undo', async () => {
         await editor.loadCapabilities();
         await fixture.whenStable();
@@ -838,7 +1028,7 @@ describe('Workspace live editing flow', () => {
             .find(item => item.textContent?.trim() === label)!;
         const menu = TestBed.inject(ContextMenuService);
         const create = async (key: string) => {
-            button('Create').click();
+            root.querySelector<HTMLButtonElement>('[aria-label="Create Object"]')!.click();
             const player = menu.request()?.items.find(item => item.kind === 'action' && item.label === 'Player Controller');
             expect(player).toBeDefined();
             menu.execute(player!);
@@ -962,10 +1152,19 @@ describe('Workspace live editing flow', () => {
         await fixture.whenStable();
         button('Move or Rename Asset…', panel).click();
         await fixture.whenStable();
-        await change(field('New asset path', panel).querySelector('input')!, 'keyboard.input-actions.json');
+        const movedPath = 'campaign/western-observatory/accessibility/keyboard-and-controller.input-actions.json';
+        await change(field('New asset path', panel).querySelector('input')!, movedPath);
         button('Move Asset', panel).click();
-        await vi.waitFor(() => expect(inputActions.get(controlsAssetId)?.asset.path).toBe('keyboard.input-actions.json'));
+        await vi.waitFor(() => expect(inputActions.get(controlsAssetId)?.asset.path).toBe(movedPath));
         await fixture.whenStable();
+        const savedPicker = panel.querySelector<HTMLInputElement>('input[placeholder="Find saved Input Actions…"]')!;
+        expect(savedPicker.value).toBe(movedPath);
+        await change(savedPicker, 'keyboard-and-controller');
+        const resultLabel = panel.querySelector('[aria-label="Input Actions asset results"] [role="option"]');
+        expect(resultLabel?.textContent.trim()).toBe(movedPath);
+        savedPicker.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
+        expect(savedPicker.value).toBe(movedPath);
         button('Open Asset', panel).click();
         await vi.waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('editor_open_input_actions',
             expect.objectContaining({assetId: controlsAssetId, expectedGeneration: 1})));
@@ -977,9 +1176,12 @@ describe('Workspace live editing flow', () => {
         edit.click();
         await fixture.whenStable();
         const inspector = root.querySelector('editor-component-editor')!;
-        const inputSource = field('Input source', inspector).querySelector('select')!;
-        inputSource.value = controlsAssetId;
-        inputSource.dispatchEvent(new Event('change', {bubbles: true}));
+        const inputSource = inspector.querySelector<HTMLInputElement>('input[placeholder="Find an Input Actions asset…"]')!;
+        inputSource.click();
+        await fixture.whenStable();
+        const choice = [...inspector.querySelectorAll<HTMLElement>('[aria-label="Input source results"] [role="option"]')]
+            .find(option => option.textContent.trim() !== 'Project Input')!;
+        choice.click();
         await fixture.whenStable();
         button('Apply Component', inspector).click();
         await vi.waitFor(() => expect(editor.document()?.entities.find(entity => entity.key === 'player-1')
@@ -1161,7 +1363,7 @@ describe('Workspace live editing flow', () => {
         const views = fixture.debugElement.injector.get(WorkspaceViewService);
         views.selectView('animation-workspace');
         const review = vi.fn(async () => false);
-        const release = fixture.debugElement.injector.get(AnimationWorkspaceService).registerTimelineReview(review);
+        const release = fixture.debugElement.injector.get(AnimationWorkspaceService).registerDraftReview(review);
         const button = root.querySelector<HTMLButtonElement>('.problems-button')!;
         button.click();
         await fixture.whenStable();
@@ -1203,7 +1405,7 @@ describe('Workspace live editing flow', () => {
         };
         const sceneDialog = () => root.querySelector<HTMLDialogElement>('editor-scene-actions dialog[open]');
         const focusedRole = () => expect(document.activeElement)
-            .toBe(sceneDialog()?.querySelector('[data-scene-binding="player"]'));
+            .toBe(sceneDialog()?.querySelector('[data-scene-binding="player"] [role="combobox"]'));
 
         await setPlayer('robot');
         const hierarchy = fixture.debugElement.query(By.directive(SceneEntitiesPanel)).injector.get(SceneEntitiesPanel);
@@ -1858,7 +2060,7 @@ describe('Workspace live editing flow', () => {
         tree.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', shiftKey: true, bubbles: true, cancelable: true}));
         await vi.waitFor(() => expect(editor.selection()).toEqual(['robot', 'crate']));
         const move = [...root.querySelectorAll<HTMLButtonElement>('.hierarchy-actions button')]
-            .find(button => button.textContent?.trim() === 'Move to Folder…')!;
+            .find(button => button.getAttribute('aria-label') === 'Move to Folder…')!;
         move.click();
         await fixture.whenStable();
         root.querySelector('hierarchy-folder-editor form')!
@@ -1943,13 +2145,14 @@ describe('Workspace live editing flow', () => {
         const sharedViewport = root.querySelector('scene-viewport')!;
         expect(tools.nextElementSibling).toBe(sharedViewport);
         expect(tools.parentElement?.classList.contains('animation-layout')).toBe(true);
+        expect(root.querySelector('[aria-label="Animation preview"]')?.textContent).toContain('Object Preview');
         expect(root.querySelector('scene-entities-panel')?.hasAttribute('hidden')).toBe(true);
         expect(root.querySelector('editor-assets-panel')?.hasAttribute('hidden')).toBe(true);
         root.querySelector<HTMLButtonElement>('editor-animation-workspace .clip-kind button:nth-child(2)')!.click();
         await fixture.whenStable();
         const animation = fixture.debugElement.injector.get(AnimationWorkspaceService);
         const review = vi.fn(async () => false);
-        const release = animation.registerTimelineReview(review);
+        const release = animation.registerDraftReview(review);
         importedClips.click();
         await fixture.whenStable();
         expect(animation.library()).toBe('authored');
@@ -1996,19 +2199,92 @@ describe('Workspace live editing flow', () => {
         const workspace = fixture.componentInstance;
         const root = fixture.nativeElement as HTMLElement;
         expect(workspace.availableObjectActions()).toEqual(expect.arrayContaining(['browse_props', 'browse_models', 'create_camera']));
-        const filter = root.querySelector<HTMLSelectElement>('.asset-filter select')!;
+        const activeKind = () => root.querySelector<HTMLElement>(
+            'button[data-asset-kind][aria-pressed="true"]')?.dataset['assetKind'];
         await workspace.runObjectAction('browse_props');
         await fixture.whenStable();
-        expect(filter.value).toBe('prefab');
+        expect(activeKind()).toBe('prefab');
         expect(document.activeElement).toBe(root.querySelector('input[aria-label="Search Assets"]'));
         await workspace.runObjectAction('browse_models');
         await fixture.whenStable();
-        expect(filter.value).toBe('model');
+        expect(activeKind()).toBe('model');
 
         await workspace.runObjectAction('create_camera');
         await fixture.whenStable();
         expect(commands).toContainEqual({type: 'create_camera'});
         expect(editor.selection()).toEqual(['camera-1']);
+    });
+
+    it('offers primitive menu rows and places a Cube while the viewport has no workspace token', async () => {
+        viewportEditorState = {...viewportEditorState, workspace_generation: null};
+        const viewport = fixture.debugElement.injector.get(ViewportEditorService);
+        await viewport.start();
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        expect(viewport.state()?.workspace_generation ?? null).toBeNull();
+        const revision = editor.snapshot()!.revision;
+        const root = fixture.nativeElement as HTMLElement;
+        root.querySelector<HTMLButtonElement>('[aria-label="Create Object"]')!.click();
+        const menu = TestBed.inject(ContextMenuService);
+        const options = menu.request()?.items;
+        expect(options?.map(item => 'label' in item ? item.label : null))
+            .toEqual(expect.arrayContaining(['Plane', 'Cube', 'Sphere', 'Capsule']));
+        const cube = options?.find(item => 'label' in item && item.label === 'Cube');
+        expect(cube).toBeDefined();
+        menu.execute(cube!);
+        await vi.waitFor(() => expect(editor.selection()).toEqual(['cube-object']));
+        expect(editor.document()?.entities.find(entity => entity.key === 'cube-object')?.name).toBe('Cube');
+        expect(invoke).toHaveBeenCalledWith('editor_ensure_primitive', {
+            kind: 'cube',
+            expectedGeneration: 17,
+            expectedRevision: revision
+        });
+        expect(invoke).toHaveBeenCalledWith('editor_import_model', {
+            path: 'models/primitives/v1/cube.glb',
+            position: [0, 0, 0],
+            expectedGeneration: 17,
+            expectedScene: 'main',
+            expectedRevision: revision + 1,
+        });
+        expect(viewport.state()?.workspace_generation ?? null).toBeNull();
+    });
+
+    it('guards primitive placement after an intervening native workspace replacement', async () => {
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        replaceProjectAfterPrimitive = true;
+        await fixture.componentInstance.runObjectAction('create_cube');
+        await fixture.whenStable();
+        expect(invoke).toHaveBeenCalledWith('editor_ensure_primitive', expect.anything());
+        expect(invoke).not.toHaveBeenCalledWith('editor_import_model', expect.anything());
+        expect(editor.document()?.entities.some(entity => entity.key === 'cube-object')).toBe(false);
+        expect(fixture.nativeElement.textContent).toContain('The project changed while preparing the object.');
+    });
+
+    it('places a primitive in its elected folder with one Undo step', async () => {
+        nativeState = {
+            ...nativeState, document: {
+                ...nativeState.document, schema_version: 6,
+                organization: {folders: [{id: 'floor', name: 'Floor', parent: null}], root_membership: {}},
+            }
+        };
+        await editor.refresh();
+        await editor.loadCapabilities();
+        await fixture.whenStable();
+        await fixture.componentInstance.runObjectAction('create_cube', 'floor');
+        await fixture.whenStable();
+
+        expect(editor.selection()).toEqual(['cube-object']);
+        expect(editor.document()?.organization?.root_membership).toEqual({'cube-object': 'floor'});
+        expect(commands.slice(-3)).toEqual([
+            {type: 'begin_transaction', label: 'Create object in folder'},
+            {type: 'move_roots_to_folder', roots: ['cube-object'], folder: 'floor'},
+            {type: 'commit_transaction'},
+        ]);
+        await editor.execute({type: 'undo'});
+        expect(editor.document()?.entities.some(entity => entity.key === 'cube-object')).toBe(false);
+        expect(editor.document()?.organization?.root_membership).toEqual({});
+        expect(editor.snapshot()?.can_undo).toBe(false);
     });
 
     it('opens a pinned instance with unavailable source and restores its read-only tab after Play', async () => {
@@ -2023,7 +2299,8 @@ describe('Workspace live editing flow', () => {
         await vi.waitFor(() => expect(fixture.nativeElement.textContent).toContain('Source file missing'));
         const root: HTMLElement = fixture.nativeElement;
         const open = [...root.querySelectorAll<HTMLButtonElement>('editor-linked-prefab-inspector button')]
-            .find(button => button.textContent?.trim() === 'Open Prop Workspace')!;
+            .find(button => button.getAttribute('aria-label') === 'Open Prop Workspace' ||
+                button.textContent?.trim() === 'Open Prop Workspace')!;
         open.click();
         await vi.waitFor(() => expect(root.querySelector('editor-prop-workspace')?.textContent).toContain('Pinned Prop instance'));
         const propText = () => root.querySelector('editor-prop-workspace')?.textContent;
@@ -2144,9 +2421,11 @@ describe('Workspace live editing flow', () => {
         const button = (label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')]
             .find(item => item.textContent?.trim() === label)!;
         const form = () => root.querySelector<HTMLFormElement>('editor-nested-prop-editor form')!;
-        const changeSelect = (select: HTMLSelectElement, value: string) => {
-            select.value = value;
-            select.dispatchEvent(new Event('change', {bubbles: true}));
+        const pickers = () => form().querySelectorAll<HTMLInputElement>('editor-search-picker input[role="combobox"]');
+        const pick = async (index: number, value: string) => {
+            const picker = pickers()[index];
+            await change(picker, value);
+            picker.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
         };
         const placements = () => propDraft?.prefab.composition?.placements ?? [];
         const add = async (x: string) => {
@@ -2154,12 +2433,12 @@ describe('Workspace live editing flow', () => {
             await fixture.whenStable();
             button('Add Nested Prop…').click();
             await fixture.whenStable();
-            changeSelect(form().querySelector('select')!, nestedAsset.asset_id);
-            await vi.waitFor(() => expect(form().querySelectorAll('select').length).toBe(2));
+            await pick(0, nestedAsset.asset_id);
+            await vi.waitFor(() => expect(pickers()).toHaveLength(2));
             const apply = form().querySelector<HTMLButtonElement>('button[type="submit"]')!;
             expect(apply.disabled).toBe(true);
-            changeSelect(form().querySelectorAll('select')[1], 'object:arch');
-            const coordinate = form().querySelectorAll<HTMLInputElement>('input')[1];
+            await pick(1, 'object:arch');
+            const coordinate = form().querySelector<HTMLInputElement>('input[inputmode="decimal"]')!;
             coordinate.value = x;
             coordinate.dispatchEvent(new Event('input', {bubbles: true}));
             await fixture.whenStable();

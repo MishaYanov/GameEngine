@@ -37,7 +37,8 @@ describe('EditorHeader', () => {
     it('places Game beside File and enables scene information after a project opens', async () => {
         const menuTriggers = [...root.querySelectorAll('button[popovertarget]')]
             .map(button => button.textContent.trim());
-        const sceneInformation = root.querySelector<HTMLButtonElement>('#editor-game-menu button')!;
+        const sceneInformation = [...root.querySelectorAll<HTMLButtonElement>('#editor-game-menu button')]
+            .find(button => button.textContent.trim() === 'Scene Information…')!;
         expect(menuTriggers).toEqual(['File', 'Game', 'Project']);
         expect(sceneInformation.textContent.trim()).toBe('Scene Information…');
         expect(sceneInformation.disabled).toBe(true);
@@ -67,7 +68,8 @@ describe('EditorHeader', () => {
         });
         component.sceneInformationRequested.subscribe(openSceneInformation);
 
-        gameMenu.querySelector<HTMLButtonElement>('button')!.click();
+        [...gameMenu.querySelectorAll<HTMLButtonElement>('button')]
+            .find(button => button.textContent.trim() === 'Scene Information…')!.click();
 
         expect(openSceneInformation).toHaveBeenCalledOnce();
     });

@@ -14,6 +14,8 @@ describe('Project setup', () => {
     type SessionState = Pick<EditorSnapshot, 'revision' | 'mode' | 'transaction' | 'dirty' | 'project_dirty' | 'scenes'>;
     const current = signal<SessionState | null>(null);
     const editorBusy = signal(false);
+    const workspaceGeneration = signal(7);
+    const chooseManifest = vi.fn<() => Promise<string | null>>();
     const confirmDiscard = vi.fn<() => Promise<boolean>>();
     const openProject = vi.fn();
     const created = {path: 'D:\\Projects\\Demo', manifestPath: 'D:\\Projects\\Demo\\project.json'};
@@ -21,6 +23,8 @@ describe('Project setup', () => {
     beforeEach(async () => {
         current.set(null);
         editorBusy.set(false);
+        workspaceGeneration.set(7);
+        chooseManifest.mockReset().mockResolvedValue(null);
         confirmDiscard.mockReset().mockResolvedValue(true);
         openProject.mockReset().mockResolvedValue(null);
         vi.mocked(isTauri).mockReturnValue(true);
@@ -30,7 +34,10 @@ describe('Project setup', () => {
             imports: [ProjectSetup],
             providers: [provideRouter([]), {
                 provide: EditorService,
-                useValue: {snapshot: current, busy: editorBusy, confirmProjectDiscard: confirmDiscard, openProject},
+                useValue: {
+                    snapshot: current, busy: editorBusy, workspaceGeneration,
+                    chooseProjectManifest: chooseManifest, confirmProjectDiscard: confirmDiscard, openProject,
+                },
             }]
         }).compileComponents();
         vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
@@ -56,9 +63,90 @@ describe('Project setup', () => {
         const fixture = TestBed.createComponent(ProjectSetup);
         await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
-        expect(root.querySelector('h1')?.textContent).toContain('Create your project');
+        expect(root.querySelector('h1')?.textContent).toContain('Open or create a project');
+        expect(root.querySelector('h2')?.textContent).toContain('Create a project');
+        expect(root.querySelector('.open-existing')?.textContent).toContain('Open Existing Project');
         expect(root.querySelectorAll('input').length).toBe(2);
         expect(root.querySelector<HTMLSelectElement>('#project-template')?.value).toBe('blank');
+    });
+
+    it('opens a selected manifest from startup without creating a project', async () => {
+        chooseManifest.mockResolvedValueOnce(created.manifestPath);
+        let finishOpen!: () => void;
+        openProject.mockImplementationOnce(() => new Promise<void>(resolve => finishOpen = resolve));
+        const fixture = TestBed.createComponent(ProjectSetup);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        root.querySelector<HTMLButtonElement>('.open-existing')!.click();
+        await vi.waitFor(() => expect(openProject).toHaveBeenCalledOnce());
+
+        expect(chooseManifest).toHaveBeenCalledOnce();
+        expect(invoke).not.toHaveBeenCalled();
+        expect(openProject).toHaveBeenCalledWith(created.manifestPath, {
+            expectedGeneration: 7, expectedRevision: null, discardUnsaved: false,
+        });
+        expect(TestBed.inject(Router).navigateByUrl).not.toHaveBeenCalled();
+        finishOpen();
+        await fixture.whenStable();
+        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor', {replaceUrl: true});
+    });
+
+    it('keeps focus and creation fields when the existing project picker is canceled', async () => {
+        let finishPicking!: (manifest: string | null) => void;
+        chooseManifest.mockImplementationOnce(() => new Promise(resolve => finishPicking = resolve));
+        const fixture = TestBed.createComponent(ProjectSetup);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        fill(root);
+        const open = root.querySelector<HTMLButtonElement>('.open-existing')!;
+        open.focus();
+        open.click();
+        fixture.detectChanges();
+        expect(open.getAttribute('aria-disabled')).toBe('true');
+        expect(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+        open.click();
+        submit(root);
+        expect(chooseManifest).toHaveBeenCalledOnce();
+        expect(invoke).not.toHaveBeenCalled();
+
+        finishPicking(null);
+        await fixture.whenStable();
+        expect(open.getAttribute('aria-disabled')).toBe('false');
+        expect(root.ownerDocument.activeElement).toBe(open);
+        expect(root.querySelector<HTMLInputElement>('#project-name')!.value).toBe('Demo');
+        expect(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+        expect(openProject).not.toHaveBeenCalled();
+        expect(TestBed.inject(Router).navigateByUrl).not.toHaveBeenCalled();
+    });
+
+    it('rejects a picker response from a previous workspace', async () => {
+        let finishPicking!: (manifest: string) => void;
+        chooseManifest.mockImplementationOnce(() => new Promise(resolve => finishPicking = resolve));
+        const fixture = TestBed.createComponent(ProjectSetup);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        root.querySelector<HTMLButtonElement>('.open-existing')!.click();
+        workspaceGeneration.set(8);
+        finishPicking(created.manifestPath);
+        await fixture.whenStable();
+
+        expect(root.querySelector('[role="alert"]')?.textContent).toContain('The current workspace changed');
+        expect(openProject).not.toHaveBeenCalled();
+    });
+
+    it('honors the discard decision before loading an existing project', async () => {
+        current.set(session({project_dirty: true}));
+        chooseManifest.mockResolvedValueOnce(created.manifestPath);
+        confirmDiscard.mockResolvedValueOnce(false);
+        const fixture = TestBed.createComponent(ProjectSetup);
+        await fixture.whenStable();
+        const root = fixture.nativeElement as HTMLElement;
+        root.querySelector<HTMLButtonElement>('.open-existing')!.click();
+        await fixture.whenStable();
+
+        expect(confirmDiscard).toHaveBeenCalledOnce();
+        expect(openProject).not.toHaveBeenCalled();
+        expect(root.querySelector('[role="status"]')?.textContent).toContain('Opening canceled');
     });
 
     it('preselects Cinder Oath from Open Sample and asks the host for an editable copy', async () => {
@@ -80,7 +168,7 @@ describe('Project setup', () => {
             name: 'Demo', destination: 'D:\\Projects', template: 'cinder_oath',
         });
         expect(openProject).toHaveBeenCalledWith(created.manifestPath, {
-            expectedRevision: null, discardUnsaved: false,
+            expectedGeneration: 7, expectedRevision: null, discardUnsaved: false,
         });
     });
 
@@ -117,9 +205,9 @@ describe('Project setup', () => {
         await fixture.whenStable();
         expect(invoke).toHaveBeenLastCalledWith('create_project', {name: 'Demo', destination, template: 'blank'});
         expect(openProject).toHaveBeenCalledWith(`${destination}\\Demo\\project.json`, {
-            expectedRevision: null, discardUnsaved: false,
+            expectedGeneration: 7, expectedRevision: null, discardUnsaved: false,
         });
-        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor');
+        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor', {replaceUrl: true});
     });
 
     it('starts browsing from the current destination and preserves it when cancelled', async () => {
@@ -185,13 +273,17 @@ describe('Project setup', () => {
         expect(root.querySelector<HTMLInputElement>('#destination')!.value).toBe('D:\\Projects');
     });
 
-    it('keeps native folder browsing unavailable in browser preview', async () => {
+    it('keeps native folder browsing and project opening unavailable in browser preview', async () => {
         vi.mocked(isTauri).mockReturnValue(false);
         const fixture = TestBed.createComponent(ProjectSetup);
         await fixture.whenStable();
         const browse = fixture.nativeElement.querySelector('.browse') as HTMLButtonElement;
         expect(browse.disabled).toBe(true);
         browse.click();
+        const open = fixture.nativeElement.querySelector('.open-existing') as HTMLButtonElement;
+        expect(open.disabled).toBe(true);
+        open.click();
+        expect(chooseManifest).not.toHaveBeenCalled();
         expect(invoke).not.toHaveBeenCalled();
     });
 
@@ -253,7 +345,7 @@ describe('Project setup', () => {
         root.querySelector<HTMLButtonElement>('.open-created')!.click();
         await fixture.whenStable();
         expect(openProject).toHaveBeenCalledExactlyOnceWith(created.manifestPath, {
-            expectedRevision: 4, discardUnsaved: true,
+            expectedGeneration: 7, expectedRevision: 4, discardUnsaved: true,
         });
         expect(invoke).toHaveBeenCalledExactlyOnceWith('create_project', {
             name: 'Demo',
@@ -276,7 +368,9 @@ describe('Project setup', () => {
         current.set(session({revision: 9, dirty: true}));
         answer(true);
         await fixture.whenStable();
-        expect(openProject).toHaveBeenCalledWith(created.manifestPath, {expectedRevision: 4, discardUnsaved: true});
+        expect(openProject).toHaveBeenCalledWith(created.manifestPath, {
+            expectedGeneration: 7, expectedRevision: 4, discardUnsaved: true,
+        });
     });
 
     it('keeps the created path after open failure and retries opening instead of copying assets again', async () => {
@@ -295,7 +389,7 @@ describe('Project setup', () => {
         await fixture.whenStable();
         expect(openProject).toHaveBeenCalledTimes(2);
         expect(invoke).toHaveBeenCalledOnce();
-        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor');
+        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor', {replaceUrl: true});
         expect(root.querySelector('[role="alert"]')).toBeNull();
     });
 
@@ -353,6 +447,6 @@ describe('Project setup', () => {
         expect(TestBed.inject(Router).navigateByUrl).not.toHaveBeenCalled();
         finishOpen();
         await fixture.whenStable();
-        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor');
+        expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/editor', {replaceUrl: true});
     });
 });

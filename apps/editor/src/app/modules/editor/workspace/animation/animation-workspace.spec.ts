@@ -1,9 +1,15 @@
 import {signal} from '@angular/core';
-import {TestBed} from '@angular/core/testing';
+import {type ComponentFixture, TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import type {AnimationSettings} from '../../../../core/editor/animation.models';
 import type {AnimationWorkspaceTarget, ScopedAnimationPreview} from '../../../../core/editor/animation-workspace.models';
-import type {AuthoredClip, AuthoredClipPreviewRequest, ClipAssetDocument, VisualClipPreview} from '../../../../core/editor/authored-clip.models';
+import type {
+    AuthoredClip,
+    AuthoredClipPreviewRequest,
+    ClipAssetDocument,
+    ClipAssetVersion,
+    VisualClipPreview
+} from '../../../../core/editor/authored-clip.models';
 import type {ComponentRecord} from '../../../../core/editor/editor-components';
 import type {SceneEntity, Transform} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
@@ -80,14 +86,22 @@ function setup(useRealViews = false) {
     const library = new Map<string, ClipAssetDocument>();
     const listAuthoredClips = vi.fn(async () => [...library.values()].map(entry => entry.asset));
     const openAuthoredClip = vi.fn(async (id: string) => library.get(id)!);
-    const saveAuthoredClip = vi.fn(async (path: string, clip: AuthoredClip) => {
+    const saveAuthoredClip = vi.fn(async (path: string, clip: AuthoredClip, replacement?: ClipAssetVersion | null) => {
+        const previous = replacement ? library.get(replacement.asset_id) : undefined;
         const document: ClipAssetDocument = {
-            asset: {asset_id: 'authored-clip-id', path, fingerprint: 'e'.repeat(64), revision: 1},
+            asset: {
+                asset_id: previous?.asset.asset_id ?? 'authored-clip-id', path,
+                fingerprint: (previous ? 'f' : 'e').repeat(64), revision: (previous?.asset.revision ?? 0) + 1
+            },
             clip, workspace_generation: 11,
         };
         library.set(document.asset.asset_id, document);
         return document;
     });
+    const openClipTimelineDraft = vi.fn(async (id: string) => ({
+        ...library.get(id)!, draft_id: 'timeline-draft', draft_revision: 0,
+        dirty: false, can_undo: false, can_redo: false,
+    }));
     let authoredPreview: VisualClipPreview;
     const openAuthoredClipPreview = vi.fn(async (request: AuthoredClipPreviewRequest) => {
         authoredPreview = {
@@ -114,27 +128,46 @@ function setup(useRealViews = false) {
                 inspectAnimation: inspect, openAnimationWorkspacePreview: open, importedAnimationKeys,
                 sampleAnimationWorkspacePreview: sample, closeAnimationPreview: close, frameAnimationWorkspacePreview: frame,
                 listAuthoredClips, openAuthoredClip, saveAuthoredClip, openAuthoredClipPreview, sampleAuthoredClipPreview, closeAuthoredClipPreview,
-                openClipTimelineDraft: async (id: string) => ({
-                    ...library.get(id)!, draft_id: 'timeline-draft', draft_revision: 0,
-                    dirty: false, can_undo: false, can_redo: false,
-                }),
+                    openClipTimelineDraft,
                 openClipTimelinePreview: openAuthoredClipPreview,
                 sampleClipTimelinePreview: sampleAuthoredClipPreview,
                 closeClipTimelineDraft: async () => undefined,
             }},
             {provide: SceneEditingService, useValue: {entity: selected}},
             useRealViews ? WorkspaceViewService
-                : {provide: WorkspaceViewService, useValue: {animationView: active, animationOrigin: origin}},
+                : {
+                    provide: WorkspaceViewService,
+                    useValue: {
+                        animationView: active,
+                        animationOrigin: origin,
+                        setAnimationScope: (value: 'scene' | 'prop') => origin.set(value)
+                    }
+                },
             {provide: ViewportEditorService, useValue: {state: () => ({workspace_generation: 11, settings: {view: playing() ? 'game' : 'scene'}}), gameStatus: signal(null)}},
             {provide: PropWorkspaceService, useValue: {document: propSource, selectedObject: () => null, selectedPlacement: placement}},
         ],
     });
     const fixture = TestBed.createComponent(AnimationWorkspace);
+    const workspace = TestBed.inject(AnimationWorkspaceService);
+    TestBed.inject(WorkspaceDraftReview).setReviewers([() => workspace.reviewNavigation()]);
     return {
         fixture, selected, generation, revision, active, origin, playing, entities, propSource, placement,
         views: TestBed.inject(WorkspaceViewService),
-        open, inspect, sample, close, frame, opened, saveAuthoredClip, openAuthoredClip, sampleAuthoredClipPreview, closeAuthoredClipPreview, workspace: TestBed.inject(AnimationWorkspaceService),
+        open, inspect, sample, close, frame, opened, saveAuthoredClip, openAuthoredClip, openClipTimelineDraft,
+        openAuthoredClipPreview, sampleAuthoredClipPreview, closeAuthoredClipPreview, workspace, library,
     };
+}
+
+async function pickAnimationOption(fixture: ComponentFixture<AnimationWorkspace>, picker: string, label: string): Promise<void> {
+    const root: HTMLElement = fixture.nativeElement;
+    const element = Array.from(root.querySelectorAll('editor-search-picker'))
+        .find(item => item.querySelector('label')?.textContent?.trim() === picker)!;
+    element.querySelector<HTMLInputElement>('[role="combobox"]')!.click();
+    await fixture.whenStable();
+    const option = Array.from(element.querySelectorAll<HTMLElement>('[role="option"]'))
+        .find(item => item.querySelector('span')?.textContent?.trim() === label)!;
+    option.click();
+    await fixture.whenStable();
 }
 
 const importedRequest: AnimationPaneRequest = {
@@ -242,28 +275,41 @@ describe('Animation workspace', () => {
         expect(timeline.querySelector('[aria-label="Timeline bookmarks"] [aria-pressed="true"]')?.textContent)
             .toContain('Turn finish · 376 ms');
     });
-    it('offers a clear empty view and opens the selected imported clip independently', async () => {
-        const {fixture, selected, inspect, open, workspace, frame} = setup();
+    it('discovers animated objects and changes the preview without a Scene selection', async () => {
+        const {fixture, selected, entities, inspect, open, workspace, frame} = setup();
         selected.set(null);
+        entities.set([]);
         await fixture.whenStable();
-        expect(fixture.nativeElement.textContent).toContain('Select a visible object with an Animation component');
+        expect(fixture.nativeElement.textContent).toContain('Add an Animation component to a visible GLB');
         expect(inspect).not.toHaveBeenCalled();
-        selected.set(actor);
+        entities.set([actor, {...actor, key: 'archer', name: 'Archer'}]);
         await fixture.whenStable();
         expect(workspace.ready()).toBe(true);
         expect(inspect).toHaveBeenCalledWith(settings.source.asset_id, 1, 4);
         expect(open).toHaveBeenCalledWith({
             document: {kind: 'scene', scene_id: 'arena'}, entity_key: 'actor', component_id: 'animation-component',
         }, 0, 1, 4, 11, expect.any(Number));
-        const clip = fixture.nativeElement.querySelector('select') as HTMLSelectElement;
-        clip.value = '1';
-        clip.dispatchEvent(new Event('change'));
-        await fixture.whenStable();
+        await pickAnimationOption(fixture, 'Animated object', 'Archer');
+        expect(workspace.preview()?.target.entity_key).toBe('archer');
+        expect(selected()).toBeNull();
+        await pickAnimationOption(fixture, 'Imported GLB clip', 'Walk');
         expect(workspace.preview()?.clip_index).toBe(1);
         expect(settings.playback).toEqual({kind: 'single_clip', clip_index: 0, looping: true});
         const buttons = fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>;
         Array.from(buttons).find(button => button.textContent?.includes('Frame Animated Object'))?.click();
         expect(frame).toHaveBeenCalledWith(workspace.preview()?.token);
+    });
+
+    it('explains when the imported source contains no previewable clips', async () => {
+        const {fixture, inspect, open, workspace} = setup();
+        inspect.mockResolvedValueOnce({
+            workspace_generation: 11, revision: 4,
+            metadata: {source: settings.source, mesh_index: 0, nodes: 2, joints: 2, clips: []},
+        });
+        await fixture.whenStable();
+        expect(fixture.nativeElement.textContent).toContain('This object has no imported GLB clips.');
+        expect(workspace.error()).toBeNull();
+        expect(open).not.toHaveBeenCalled();
     });
 
     it('inspects immutable imported keys and scrubs to a listed time', async () => {
@@ -381,7 +427,7 @@ describe('Animation workspace', () => {
         placement.set(item);
         origin.set('prop');
         await fixture.whenStable();
-        expect(fixture.nativeElement.textContent).toContain('Performer › Knight');
+        expect(fixture.nativeElement.querySelector('input[role="combobox"]')?.value).toBe('Performer › Knight');
         expect(open.mock.calls.at(-1)?.[0]).toEqual({
             document: {kind: 'source', asset_id: source.draft.asset_id, draft_id: 'stage-draft', draft_revision: 3},
             address: {kind: 'object', placement_path: ['performer'], source_entity: 'actor'},
@@ -397,7 +443,9 @@ describe('Animation workspace', () => {
         const {fixture, workspace, views, selected, openAuthoredClip} = setup(true);
         await fixture.whenStable();
         let resolveReview!: (allowed: boolean) => void;
-        workspace.registerTimelineReview(() => new Promise(resolve => { resolveReview = resolve; }));
+        workspace.registerDraftReview(() => new Promise(resolve => {
+            resolveReview = resolve;
+        }));
         const opening = workspace.revealAuthoredClip('audio-event-clip', 'marker');
         selected.set({...actor, key: 'other'});
         resolveReview(true);
@@ -406,17 +454,172 @@ describe('Animation workspace', () => {
         expect(openAuthoredClip).not.toHaveBeenCalled();
     });
 
-    it('creates a visual clip, reopens its authored keys and samples halfway without a Scene edit', async () => {
-        const {fixture, selected, entities, workspace, saveAuthoredClip, openAuthoredClip, sampleAuthoredClipPreview, closeAuthoredClipPreview} = setup();
+    it('opens the saved asset from another pane without an animated object selection', async () => {
+        const {fixture, selected, saveAuthoredClip, workspace, views, openClipTimelineDraft} = setup(true);
+        selected.set(null);
+        const saved = await saveAuthoredClip('clips/turn.clip.json', {
+            schema_version: 1, name: 'Camera Turn', owner: {kind: 'scene', scene_id: 'arena'},
+            duration_ticks: 1000, tracks: [],
+        });
+        expect(await workspace.openAuthoredAsset(saved.asset.asset_id)).toBe(true);
+        await fixture.whenStable();
+        expect(views.activeViewKind()).toBe('animation-workspace');
+        expect(workspace.authoredTimelineOpen()).toBe(true);
+        expect(openClipTimelineDraft).toHaveBeenCalledWith(saved.asset.asset_id, 1, 4);
+        const root: HTMLElement = fixture.nativeElement;
+        expect(root.querySelector('[aria-label="Clip timeline"] h3')?.textContent).toContain('Camera Turn');
+        expect(saveAuthoredClip).toHaveBeenCalledTimes(1);
+
+        expect(await workspace.openAuthoredAsset(saved.asset.asset_id)).toBe(true);
+        await fixture.whenStable();
+        expect(openClipTimelineDraft).toHaveBeenCalledTimes(2);
+        expect(root.querySelector('[aria-label="Clip timeline"] h3')?.textContent).toContain('Camera Turn');
+    });
+
+    it('keeps the Timeline open when its preview fails and resets the layout when switching libraries', async () => {
+        const {fixture, openAuthoredClipPreview, saveAuthoredClip, workspace} = setup(true);
+        const saved = await saveAuthoredClip('clips/turn.clip.json', {
+            schema_version: 1, name: 'Camera Turn', owner: {kind: 'scene', scene_id: 'arena'},
+            duration_ticks: 1000, tracks: [],
+        });
+        openAuthoredClipPreview.mockRejectedValueOnce(new Error('Object unavailable'));
+        expect(await workspace.openAuthoredAsset(saved.asset.asset_id)).toBe(true);
+        await fixture.whenStable();
+
+        const root: HTMLElement = fixture.nativeElement;
+        expect(workspace.authoredTimelineOpen()).toBe(true);
+        expect(workspace.authoredTimelinePreviewError()).toContain('Object unavailable');
+        expect(root.querySelector('[aria-label="Clip timeline"] h3')?.textContent).toContain('Camera Turn');
+        expect(root.querySelector('[aria-label="Clip timeline"] [role="alert"]')?.textContent).toContain('Object unavailable');
+
+        await workspace.selectLibrary('imported');
+        await fixture.whenStable();
+        expect(workspace.authoredTimelineOpen()).toBe(false);
+        expect(workspace.authoredTimelinePreviewError()).toBeNull();
+        expect(root.querySelector('[aria-label="Clip timeline"]')).toBeNull();
+    });
+
+    it('rejects a saved clip response from a replaced project before opening a Timeline', async () => {
+        const {
+            fixture,
+            workspace,
+            generation,
+            views,
+            openAuthoredClip,
+            openClipTimelineDraft,
+            saveAuthoredClip
+        } = setup(true);
+        const saved = await saveAuthoredClip('clips/turn.clip.json', {
+            schema_version: 1, name: 'Camera Turn', owner: {kind: 'scene', scene_id: 'arena'},
+            duration_ticks: 1000, tracks: [],
+        });
+        let finish!: (document: ClipAssetDocument) => void;
+        openAuthoredClip.mockImplementationOnce(() => new Promise(resolve => {
+            finish = resolve;
+        }));
+        const opening = workspace.openAuthoredAsset(saved.asset.asset_id);
+        await vi.waitFor(() => expect(openAuthoredClip).toHaveBeenCalledWith(saved.asset.asset_id, 1));
+        generation.set(2);
+        finish(saved);
+        expect(await opening).toBe(false);
+        await fixture.whenStable();
+        expect(views.activeViewKind()).toBe('scene-viewport');
+        expect(openClipTimelineDraft).not.toHaveBeenCalled();
+    });
+
+    it('retains or discards a new clip draft before opening a different saved asset', async () => {
+        const prototype = HTMLDialogElement.prototype;
+        const show = Object.getOwnPropertyDescriptor(prototype, 'showModal');
+        const close = Object.getOwnPropertyDescriptor(prototype, 'close');
+        Object.defineProperty(prototype, 'showModal', {
+            configurable: true, value(this: HTMLDialogElement) {
+                this.setAttribute('open', '');
+            }
+        });
+        Object.defineProperty(prototype, 'close', {
+            configurable: true, value(this: HTMLDialogElement) {
+                this.removeAttribute('open');
+                this.dispatchEvent(new Event('close'));
+            }
+        });
+        try {
+            const {
+                fixture,
+                entities,
+                saveAuthoredClip,
+                workspace,
+                views,
+                openAuthoredClip,
+                openClipTimelineDraft,
+                library
+            } =
+                setup(true);
+            const saved = await saveAuthoredClip('clips/turn.clip.json', {
+                schema_version: 1, name: 'Camera Turn', owner: {kind: 'scene', scene_id: 'arena'},
+                duration_ticks: 1000, tracks: [],
+            });
+            entities.set([{...actor, key: 'pivot', renderable: false}, {
+                ...actor, key: 'lever', name: 'Lever', animation: null, parent: 'pivot',
+            }]);
+            views.selectView('animation-workspace');
+            await fixture.whenStable();
+            const root: HTMLElement = fixture.nativeElement;
+            const button = (name: string, target: ParentNode = root) => Array.from(target.querySelectorAll('button'))
+                .find(item => (item.getAttribute('aria-label') ?? item.textContent)?.trim() === name)!;
+            button('Authored Clips').click();
+            await fixture.whenStable();
+            await pickAnimationOption(fixture, 'New clip object', 'Lever');
+            button('New Visual Clip').click();
+            await fixture.whenStable();
+            const name = Array.from(root.querySelectorAll('label'))
+                .find(item => item.textContent?.trim() === 'Clip name')!.querySelector('input')!;
+            name.value = 'In-progress clip';
+            name.dispatchEvent(new Event('input'));
+            await fixture.whenStable();
+
+            const canceled = workspace.openAuthoredAsset(saved.asset.asset_id);
+            await fixture.whenStable();
+            const dialog = root.querySelector<HTMLDialogElement>('dialog[open]')!;
+            expect(dialog.textContent).toContain('Unsaved clip changes');
+            button('Keep Editing', dialog).click();
+            await fixture.whenStable();
+            expect(await canceled).toBe(false);
+            expect(name.value).toBe('In-progress clip');
+            expect(openAuthoredClip).not.toHaveBeenCalled();
+
+            const opened = workspace.openAuthoredAsset(saved.asset.asset_id);
+            await fixture.whenStable();
+            button('Discard Changes', dialog).click();
+            expect(await opened).toBe(true);
+            await fixture.whenStable();
+            expect(root.querySelector('[aria-label="Clip timeline"] h3')?.textContent).toContain('Camera Turn');
+            expect(openClipTimelineDraft).toHaveBeenCalledExactlyOnceWith(saved.asset.asset_id, 1, 4);
+            expect(saveAuthoredClip).toHaveBeenCalledTimes(1);
+            expect([...library.keys()]).toEqual([saved.asset.asset_id]);
+        } finally {
+            if (show) Object.defineProperty(prototype, 'showModal', show);
+            else Reflect.deleteProperty(prototype, 'showModal');
+            if (close) Object.defineProperty(prototype, 'close', close);
+            else Reflect.deleteProperty(prototype, 'close');
+        }
+    });
+
+    it('creates a clip, opens its saved Timeline, and replaces the same asset when editing clip settings', async () => {
+        const {
+            fixture, selected, entities, views, workspace, saveAuthoredClip, openAuthoredClip, openClipTimelineDraft,
+            sampleAuthoredClipPreview, closeAuthoredClipPreview, library
+        } = setup(true);
+        views.selectView('animation-workspace');
         const lever: SceneEntity = {...actor, name: 'Lever', key: 'lever', animation: null, parent: 'pivot'};
-        selected.set(lever);
-        entities.set([{...actor, key: 'pivot', renderable: false}, lever]);
+        selected.set(null);
+        entities.set([{...actor, key: 'pivot', renderable: false}, {...lever, key: 'pulley', name: 'Pulley'}, lever]);
         await fixture.whenStable();
         const root = fixture.nativeElement as HTMLElement;
         const button = (name: string) => Array.from(root.querySelectorAll('button'))
             .find(item => item.textContent?.trim() === name)!;
         button('Authored Clips').click();
         await fixture.whenStable();
+        await pickAnimationOption(fixture, 'New clip object', 'Lever');
         button('New Visual Clip').click();
         await fixture.whenStable();
         const name = Array.from(root.querySelectorAll('label'))
@@ -439,12 +642,40 @@ describe('Animation workspace', () => {
                 {at: 0, value: [0, 0, 0]}, {at: 1000, value: [4, 0, 0]},
             ]},
         });
-        const library = root.querySelector('select')!;
-        library.value = 'authored-clip-id';
-        library.dispatchEvent(new Event('change'));
-        await fixture.whenStable();
+        await pickAnimationOption(fixture, 'Saved visual clips', 'lever-turn.clip.json');
         expect(openAuthoredClip).toHaveBeenCalledWith('authored-clip-id', 1);
-        expect(root.querySelector<HTMLInputElement>('input[aria-label="End position X"]')?.value).toBe('4');
+        expect(openClipTimelineDraft).toHaveBeenCalledExactlyOnceWith('authored-clip-id', 1, 4);
+        expect(root.querySelector('[aria-label="Clip timeline"] h3')?.textContent).toContain('Lever Turn');
+        expect(root.querySelector('.clip-file')?.textContent).toContain('lever-turn.clip.json');
+        const trackInput = root.querySelector<HTMLInputElement>('.track-choice [role="combobox"]')!;
+        expect(trackInput.value).toBe('Position · Lever');
+        await pickAnimationOption(fixture, 'Track', 'Rotation · Lever');
+        expect(trackInput.value).toBe('Rotation · Lever');
+        expect(root.querySelector('input[aria-label="End position X"]')).toBeNull();
+        expect(root.textContent).not.toContain('New clip object');
+        expect(saveAuthoredClip).toHaveBeenCalledTimes(1);
+
+        button('Clip Settings…').click();
+        await fixture.whenStable();
+        const savedEnd = root.querySelector<HTMLInputElement>('input[aria-label="End position X"]')!;
+        expect(savedEnd.value).toBe('4');
+        savedEnd.value = '8';
+        savedEnd.dispatchEvent(new Event('input'));
+        button('Save Clip').click();
+        await fixture.whenStable();
+        expect(saveAuthoredClip).toHaveBeenLastCalledWith('lever-turn.clip.json', expect.objectContaining({
+            name: 'Lever Turn',
+        }), {asset_id: 'authored-clip-id', fingerprint: 'e'.repeat(64)}, {
+            workspaceGeneration: 1, nativeGeneration: 11, revision: 4,
+        });
+        expect([...library.keys()]).toEqual(['authored-clip-id']);
+        expect(library.get('authored-clip-id')?.asset.revision).toBe(2);
+
+        await pickAnimationOption(fixture, 'Saved visual clips', 'lever-turn.clip.json');
+        expect(openClipTimelineDraft).toHaveBeenCalledTimes(2);
+        expect(root.querySelector('[aria-label="Clip timeline"] h3')?.textContent).toContain('Lever Turn');
+        button('Close Timeline').click();
+        await fixture.whenStable();
         button('Preview Saved Clip').click();
         await fixture.whenStable();
         const slider = root.querySelector<HTMLInputElement>('input[type=range]')!;

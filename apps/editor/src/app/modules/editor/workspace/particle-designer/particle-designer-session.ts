@@ -1,4 +1,4 @@
-import {computed, inject, Injectable, signal} from '@angular/core';
+import {computed, effect, inject, Injectable, signal} from '@angular/core';
 import type {EditorSnapshot, ParticleEmitterComponent, SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
@@ -36,6 +36,10 @@ export class ParticleDesignerSession {
     readonly draft = signal<ParticleDraft>(draftFromSettings(DEFAULT_PARTICLE_EMITTER));
     readonly candidate = computed(() => settingsFromDraft(this.draft(), this.exactColor()));
     readonly active = computed(() => this.target() !== null);
+    readonly spritePreview = signal<Blob | null>(null);
+    readonly spriteError = signal<string | null>(null);
+    private readonly spriteId = computed(() => this.draft().sprite_asset_id);
+    private readonly assetRevision = computed(() => this.editor.snapshot()?.revision);
     readonly objectName = computed(() => this.target()?.name ?? '');
     private readonly pendingState = signal(false);
     readonly pending = this.pendingState.asReadonly();
@@ -57,6 +61,26 @@ export class ParticleDesignerSession {
         const candidate = this.candidate();
         return candidate ? particlePresetLabel(candidate) : '';
     });
+
+    constructor() {
+        effect(onCleanup => {
+            const target = this.target();
+            const id = this.spriteId();
+            const revision = this.assetRevision();
+            this.spritePreview.set(null);
+            this.spriteError.set(null);
+            if (!target || !id || revision === undefined || this.targetError()) return;
+            let current = true;
+            onCleanup(() => {
+                current = false;
+            });
+            void this.editor.particleSprite(id, target.generation, revision).then(sprite => {
+                if (current) this.spritePreview.set(sprite);
+            }, (cause: unknown) => {
+                if (current) this.spriteError.set(cause instanceof Error ? cause.message : 'Could not preview the selected sprite.');
+            });
+        });
+    }
 
     /** Opens the exact selected emitter created by the last accepted Scene command. */
     openSelected(key: string): Promise<boolean> {
@@ -146,7 +170,10 @@ export class ParticleDesignerSession {
     pickPreset(label: string): void {
         if (this.pending()) return;
         const preset = PARTICLE_PRESETS.find(item => item.label === label);
-        if (preset) this.setDraft(preset.settings);
+        if (preset) {
+            const {sprite_asset_id, linger_on_despawn} = this.draft();
+            this.setDraft({...preset.settings, ...(sprite_asset_id ? {sprite_asset_id} : {}), linger_on_despawn});
+        }
     }
 
     requestCloseReview(): void {

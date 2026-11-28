@@ -1,7 +1,7 @@
 use super::*;
 use gameplay_catalog::cinder_oath::Phase;
 use renderer::ui::{ScreenOverlay, ScreenOverlayLayout};
-use runtime::particle_draw::ParticleDraw;
+use runtime::{particle_draw::ParticleDraw, scene::RenderVisibility};
 
 impl GameApp {
 	pub(super) fn render(&mut self) -> Result<renderer::DrawStatus, String> {
@@ -17,6 +17,12 @@ impl GameApp {
 			timing.finish(outcome);
 		}
 		if matches!(result, Ok(renderer::DrawStatus::Rendered))
+			&& let Some(transition) = &mut self.scene_transition
+		{
+			transition.waiting_frame_drawn = true;
+		}
+		if matches!(result, Ok(renderer::DrawStatus::Rendered))
+			&& self.scene_transition.is_none()
 			&& let (Some(prefetch), Some(current), Some(project)) = (
 				&mut self.scene_prefetch,
 				self.editor.play_scene_id(),
@@ -77,6 +83,15 @@ impl GameApp {
 					)
 					.unwrap_or_else(|| {
 						let mut rows = gameplay_hud_rows(self.editor.play_status().as_ref());
+						if let Some(transition) = &self.scene_transition {
+							rows.retain(|row| !row.starts_with("Scene ") && row != "Paused");
+							rows.insert(0, format!("Loading {}  /  F7: Cancel", transition.attempt.scene_id().as_str()));
+						} else if self.failed_scene_transition.is_some() {
+							rows.insert(0, "Could not load scene  /  F8: Retry".into());
+						}
+						if let Some(message) = &self.world_streaming_status {
+							rows.insert(0, message.clone());
+						}
 						if cinder_phase.is_some() {
 							rows.retain(|row| !row.starts_with("Score "));
 						}
@@ -138,12 +153,11 @@ impl GameApp {
 			self.camera.far,
 		);
 
-		let frustum = if self.tools.culling {
-			Some(runtime::visibility::Frustum::from_view_projection(
-				glam::Mat4::from_cols_array(&camera_uniform.view_projection),
-			)?)
+		renderer.set_lights(&self.scene.renderer_lights())?;
+		let visibility = if self.tools.culling {
+			RenderVisibility::from_camera(renderer, &camera_uniform, None)?
 		} else {
-			None
+			RenderVisibility::default()
 		};
 		self.particle_samples.clear();
 		self.particle_samples.extend(self.editor.play_particles());
@@ -152,11 +166,15 @@ impl GameApp {
 			renderer,
 			&camera_uniform,
 			&self.particle_samples,
+			self.asset_manager.as_mut(),
 		)?;
-		let (mut objects, mut stats) = self.scene.try_render_visible(frustum.as_ref())?;
-		if let Some(object) = self.particle_draw.as_ref().and_then(ParticleDraw::object) {
+		let world = self.editor.play_scene_id();
+		let lods = self.project.iter().flat_map(|project| &project.world_lods)
+			.filter(|lod| world == Some(&lod.world));
+		let (mut objects, mut stats) = self.scene.try_render_view(&visibility, &[], lods, self.camera.position)?;
+		for object in self.particle_draw.iter().flat_map(ParticleDraw::objects) {
 			stats.draw_calls += 1;
-			stats.triangles += object.mesh().index_count() as usize / 3;
+			stats.triangles += object.index_range().len() / 3;
 			objects.push(object);
 		}
 		if !self.standalone_runtime
@@ -238,7 +256,6 @@ impl GameApp {
 		}
 		self.tools.stats = stats;
 
-		renderer.set_lights(&self.scene.renderer_lights())?;
 		runtime::scene::Scene::configure_sky(
 			renderer,
 			self.asset_manager.as_mut(),
@@ -294,6 +311,12 @@ pub(super) fn gameplay_hud_rows(
 		if gameplay.completed {
 			rows.push("F10 to restart".into());
 		}
+	}
+	if let Some(sequence) = &status.sequence {
+		if let Some(subtitle) = &sequence.subtitle {
+			rows.insert(0, subtitle.clone());
+		}
+		rows.push("Enter: Skip cutscene".into());
 	}
 	if status.paused {
 		rows.push("Paused".into());

@@ -1,23 +1,34 @@
-<section aria-label="Authored Animation Clips" class="animation">
+<section aria-label="Authored Animation Clips" class="animation authored-form">
+    <div class="clip-library-bar">
+        @if (clipOptions().length) {
+            <editor-search-picker label="Saved visual clips" placeholder="Find a saved clip…"
+                                  [value]="selected()?.asset?.asset_id ?? null" [options]="clipOptions()"
+                                  [disabled]="!available() || animation.authoredOpening()" (picked)="open($event)"/>
+        }
+        @if (timelineOpen() && canEditSettings()) {
+            <button type="button" [disabled]="!available() || animation.authoredOpening()"
+                    (click)="editSettings()">Clip Settings…
+            </button>
+        }
+        @if (selected() && !draft()) {
+            <button type="button" [disabled]="!available() || animation.authoredOpening()"
+                    (click)="startNewClip()">New Clip…
+            </button>
+        }
+        @if (selected(); as clip) {
+            <p class="clip-file" [title]="clip.asset.path">{{ clip.asset.path }}</p>
+        }
+    </div>
+    @if (animation.authoredOpening()) {
+        <p role="status">Opening saved clip…</p>
+    }
     @if (timelineOpen() && selected(); as clip) {
         <editor-clip-timeline [asset]="clip" [scope]="previewScope(clip.clip.owner)" [initialMarker]="timelineMarker()"
                               (closed)="closeTimeline()" (saved)="timelineSaved($event)"/>
-    } @else {
-    <div class="time-controls">
-        <label>
-            Clip library
-            <select #saved [value]="selected()?.asset?.asset_id ?? ''"
-                    [disabled]="!available()" (change)="open(saved.value)">
-                <option value="">Choose a saved clip</option>
-                @for (asset of assets(); track asset.asset_id) {
-                    <option [value]="asset.asset_id">{{ asset.path }}</option>
-                }
-            </select>
-        </label>
-        <button type="button" [disabled]="!canCreate()" (click)="begin()">New Visual Clip</button>
-    </div>
-    @if (draft(); as form) {
-        <p>Visual object {{ form.targetName }}</p>
+    } @else if (draft(); as form) {
+        <h3>{{ selected() ? 'Clip Settings' : 'Create Visual Clip' }}</h3>
+        <p class="help">Animating <strong>{{ form.targetName }}</strong>. Set its start and end values, then save the
+            clip.</p>
         <label>
             Clip name
             <input #name [value]="form.name" [disabled]="busy()" (input)="update('name', name.value)" maxlength="128"/>
@@ -46,22 +57,32 @@
                 </div>
             </fieldset>
         }
-        <button type="button" [disabled]="!canSave()" (click)="save()">Save Clip</button>
+        <div class="time-controls">
+            <button type="button" [disabled]="busy()" (click)="closeClipForm()">Cancel</button>
+            <button type="button" [disabled]="!canSave()" (click)="save()">Save Clip</button>
+        </div>
     } @else if (selected(); as clip) {
-        <p>{{ clip.clip.name }} · {{ clip.clip.duration_ticks }} ms</p>
-        <p>{{ clip.clip.tracks.length }} visual tracks</p>
-    } @else {
-        <p>Select a visible child object in Scene or a saved Prop to create a clip.</p>
-    }
-
-    @if (selected()) {
+        <h3>{{ clip.clip.name }}</h3>
+        <p>{{ clip.clip.duration_ticks }} ms · {{ clip.clip.tracks.length }} visual tracks</p>
         <div class="time-controls">
             <button #timelineTrigger type="button" [disabled]="!available()" (click)="openTimeline()">Open Timeline</button>
-            <button type="button" [disabled]="!available()" (click)="openPreview()">Preview Saved Clip</button>
+            @if (canEditSettings()) {
+                <button type="button" [disabled]="!available()" (click)="editSettings()">Clip Settings…</button>
+            }
             @if (preview()) {
                 <button type="button" (click)="closePreview()">Close Clip Preview</button>
+            } @else {
+                <button type="button" [disabled]="!available()" (click)="openPreview()">Preview Saved Clip</button>
             }
         </div>
+    } @else if (target(); as object) {
+        <editor-search-picker label="New clip object" placeholder="Find a visible child object…" [value]="object.key"
+                              [options]="targetOptions()" [disabled]="!available()" (picked)="chooseTarget($event)"/>
+        <button type="button" [disabled]="!canCreate() || animation.authoredOpening()" (click)="begin()">New Visual
+            Clip
+        </button>
+    } @else {
+        <p class="help">Add a visible child mesh in Scene or save an editable Prop with a visible child mesh.</p>
     }
     @if (preview(); as frame) {
         <label class="time">
@@ -74,11 +95,26 @@
             <output>Position {{ pose.position.join(', ') }}</output>
         }
     }
-    @if (error(); as issue) {
+    @if (!reviewingDraft() && error(); as issue) {
+        <p role="alert" class="error">{{ issue }}</p>
+    }
+    @if (animation.authoredOpenError(); as issue) {
         <p role="alert" class="error">{{ issue }}</p>
     }
     @if (message(); as notice) {
         <p role="status">{{ notice }}</p>
     }
-    }
 </section>
+
+<editor-dialog title="Unsaved clip changes" [open]="reviewingDraft()" [renderFields]="false" [closeBlocked]="busy()"
+               closeLabel="Keep Editing" (openChange)="!$event && settleDraftReview('keep')"
+               [config]="{width: '30rem', draggable: false, resizable: false, expandable: false}">
+    <p>Save or discard the clip changes before continuing.</p>
+    @if (error(); as issue) {
+        <p role="alert">{{ issue }}</p>
+    }
+    <ng-container dialog-actions>
+        <button type="button" [disabled]="busy()" (click)="settleDraftReview('discard')">Discard Changes</button>
+        <button type="button" [disabled]="!canSave()" (click)="settleDraftReview('save')">Save and Continue</button>
+    </ng-container>
+</editor-dialog>

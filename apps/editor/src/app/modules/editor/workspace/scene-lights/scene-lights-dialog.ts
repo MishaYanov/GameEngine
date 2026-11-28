@@ -9,6 +9,7 @@ import {
 } from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {EditorSearchPicker, type SearchPickerOption} from '../../../../shared/components/search-picker/search-picker';
 import {SceneEditingService} from '../scene-editing.service';
 
 type VectorField = 'position' | 'direction' | 'color';
@@ -57,7 +58,7 @@ function valid(light: Light): boolean {
 
 @Component({
     selector: 'editor-scene-lights',
-    imports: [EditorDialog],
+    imports: [EditorDialog, EditorSearchPicker],
     templateUrl: './scene-lights-dialog.html',
     styleUrl: './scene-lights-dialog.scss',
 })
@@ -77,6 +78,9 @@ export class SceneLightsDialog {
     protected readonly colorNames = ['Red', 'Green', 'Blue'] as const;
     protected readonly dialogConfig = {width: '32rem'};
     protected readonly lights = computed(() => this.editor.document()?.lights ?? []);
+    protected readonly lightOptions = computed<readonly SearchPickerOption[]>(() => this.lights().map(light => ({
+        id: light.key, label: light.name, description: light.kind === 'point' ? 'Point light' : 'Directional light',
+    })));
     private readonly parsed = computed<Light | null>(() => {
         const draft = this.draft();
         return draft && {
@@ -102,7 +106,7 @@ export class SceneLightsDialog {
         const snapshot = this.editor.snapshot();
         if (this.opening() || snapshot?.mode !== 'edit' || !this.editing.ready()) return false;
         this.context = {generation: this.editor.workspaceGeneration(), scene: snapshot.active_scene_id};
-        this.select(key ?? this.lights().at(0)?.key ?? '');
+        this.load(key ?? this.lights().at(0)?.key ?? '');
         this.open.set(true);
         return true;
     }
@@ -118,12 +122,12 @@ export class SceneLightsDialog {
     }
 
     protected select(key: string): void {
-        if (this.pending()) return;
+        if (this.pending() || this.changed() || !this.current() || !this.lights().some(light => light.key === key)) return;
         this.load(key);
     }
 
     protected revert(): void {
-        this.select(this.draft()?.key ?? '');
+        if (!this.pending() && this.current()) this.load(this.draft()?.key ?? '');
     }
 
     protected updateScalar(field: ScalarField, value: string): void {

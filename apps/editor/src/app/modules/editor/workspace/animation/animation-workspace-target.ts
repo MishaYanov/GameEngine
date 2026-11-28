@@ -17,11 +17,24 @@ export interface AnimationTargetOption {
 export function sceneAnimationTarget(
     entity: SceneEntity | null, entities: readonly SceneEntity[], sceneId: SceneId,
 ): AnimationTargetOption | null {
-    if (!entity?.animation || !entity.renderable) return null;
+    return entity && sceneOption(entity, new Map(entities.map(object => [object.key, object])), sceneId);
+}
+
+export function sceneAnimationTargets(entities: readonly SceneEntity[], sceneId: SceneId): readonly AnimationTargetOption[] {
     const byKey = new Map(entities.map(object => [object.key, object]));
+    return entities.flatMap(entity => {
+        const target = sceneOption(entity, byKey, sceneId);
+        return target ? [target] : [];
+    });
+}
+
+function sceneOption(
+    entity: SceneEntity, byKey: ReadonlyMap<EntityKey, SceneEntity>, sceneId: SceneId,
+): AnimationTargetOption | null {
+    if (!entity.animation || !entity.renderable || entity.model_path === '__no_mesh__') return null;
     let parent = entity.parent;
     let document: AnimationPreviewDocument = {kind: 'scene', scene_id: sceneId};
-    for (let depth = 0; parent && depth < entities.length; depth++) {
+    for (let depth = 0; parent && depth < byKey.size; depth++) {
         const owner = byKey.get(parent);
         if (owner?.linked_prefab) {
             document = {kind: 'instance', scene_id: sceneId, root_key: owner.key};

@@ -15,6 +15,9 @@ impl EntityData {
 		}
 		if let Some(emitter) = &self.particle_emitter {
 			bytes = bytes.saturating_add(emitter.id.as_str().len());
+			if let Some(sprite) = &emitter.settings.sprite_asset_id {
+				bytes = bytes.saturating_add(sprite.as_str().len());
+			}
 		}
 		if let Some(light) = &self.light {
 			bytes = bytes
@@ -106,6 +109,14 @@ impl EntityData {
 					bytes = bytes.saturating_add(name.capacity());
 				}
 			}
+			if let NativeBehaviorSpec::ProjectileLauncher { settings } = &component.behavior {
+				bytes = bytes.saturating_add(settings.prefab_path.capacity()).saturating_add(settings.action.capacity());
+			}
+			if let NativeBehaviorSpec::Projectile { settings } = &component.behavior
+				&& let Some(sprite) = settings.impact.as_ref().and_then(|burst| burst.settings.sprite_asset_id.as_ref())
+			{
+				bytes = bytes.saturating_add(sprite.as_str().len());
+			}
 		}
 		for script in &self.scripts {
 			bytes = bytes
@@ -136,7 +147,7 @@ impl EntityData {
 				schema_version: 1,
 				enabled: emitter.enabled,
 				data: ComponentData::ParticleEmitter {
-					settings: emitter.settings,
+					settings: emitter.settings.clone(),
 				},
 			});
 		}

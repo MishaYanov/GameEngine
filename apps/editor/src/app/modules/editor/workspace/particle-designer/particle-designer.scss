@@ -30,6 +30,10 @@ label :is(input, select) {
   inline-size: 100%;
 }
 
+label.trail-option {
+  grid-template-columns: auto 1fr;
+}
+
 small {
   grid-column: 1 / -1;
 }

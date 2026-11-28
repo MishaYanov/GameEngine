@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "scene_switch_benchmark.rs"]
+mod scene_switch_benchmark;
+use runtime::scene_load_timing::{BenchmarkPhase, SceneLoadResources};
+use scene_switch_benchmark::{SceneSwitchSample, micros};
+
 pub(super) fn is_linked_package_entry(metadata: &std::fs::Metadata) -> bool {
 	#[cfg(windows)]
 	{
@@ -9,10 +14,6 @@ pub(super) fn is_linked_package_entry(metadata: &std::fs::Metadata) -> bool {
 		}
 	}
 	metadata.file_type().is_symlink()
-}
-
-pub(super) fn resolve_scene_path(asset_root: &Path, relative: &str) -> Result<PathBuf, String> {
-	scene_io::resolve_confined_scene_path(asset_root, Path::new(relative))
 }
 
 impl GameApp {
@@ -32,11 +33,17 @@ impl GameApp {
 			self.clock.reset();
 			return;
 		}
-		if completed && !self.cinder_victory_animation_active() {
+		if completed
+			&& !self.cinder_victory_animation_active()
+			&& self.editor.pending_scene_transition().is_none()
+			&& self.failed_scene_transition.is_none()
+		{
 			return;
 		}
 		if self.play_trace.is_none()
 			&& !self.installed_project
+			&& self.failed_scene_transition.is_none()
+			&& self.world_streaming_status.is_none()
 			&& self.player_shortcut_pressed(Key::F8)
 			&& self.editor.pending_play_scene().is_none()
 		{
@@ -71,6 +78,10 @@ impl GameApp {
 	}
 
 	pub(super) fn advance_play(&mut self, delta_seconds: f32) -> Result<(), String> {
+		if self.drive_authored_scene_transition()? {
+			return Ok(());
+		}
+		self.update_world_streaming()?;
 		if self.play_trace.is_none()
 			&& self.input.just_pressed(Key::F8)
 			&& let Some(scene_id) = self.editor.pending_play_scene().cloned()
@@ -81,11 +92,8 @@ impl GameApp {
 			}
 			return result;
 		}
-		if self.editor.has_runtime_instances() {
-			self.renderer
-				.as_ref()
-				.ok_or("Renderer is unavailable")?
-				.wait_idle()?;
+		if self.play_trace.is_none() && self.input.just_pressed(Key::Enter) {
+			self.editor.skip_play_sequence();
 		}
 		let pad = self.logical_gamepad();
 		let physical = self.physical_gamepad();
@@ -93,12 +101,12 @@ impl GameApp {
 		let mut prior_combat = self.combat_sound_facts();
 		let pointer_input = self.pointer_attack_input();
 		let input = pointer_input.as_ref().unwrap_or(&self.input);
-		let mut outcome = self.editor.update_play_with_action_controls(
+		let mut outcome = self.editor.update_play_with_draw(
 			&mut self.scene,
 			input,
-			pad,
-			physical,
+			(pad, physical),
 			delta_seconds,
+			self.renderer.as_ref(),
 		)?;
 		let paused = self.editor.simulation_paused();
 		if paused != was_paused {
@@ -150,6 +158,7 @@ impl GameApp {
 					std::mem::take(&mut outcome.audio_onsets),
 				);
 			}
+			self.scene_audio.settle_sequences(&outcome.sequence_events);
 			if let Some(trace) = self.play_trace.as_mut() {
 				trace.record_steps(outcome.steps);
 			}
@@ -157,6 +166,9 @@ impl GameApp {
 				self.camera = camera;
 			}
 			if let Some(scene_id) = outcome.requested_scene {
+				if self.drive_authored_scene_transition()? {
+					return Ok(());
+				}
 				let result = self.install_play_scene(scene_id, false);
 				if result.is_err() {
 					self.update_selection_title();
@@ -164,8 +176,6 @@ impl GameApp {
 				return result;
 			}
 			self.fulfill_runtime_spawns()?;
-			// synchronize_world can retire runtime models; submitted frames have
-			// completed before each mutating tick above/below.
 			if outcome.changes.topology_changed
 				&& let Some(assets) = &mut self.asset_manager
 			{
@@ -174,14 +184,10 @@ impl GameApp {
 			if outcome.pending_steps == 0 {
 				break;
 			}
-			if self.editor.has_runtime_instances() {
-				self.renderer
-					.as_ref()
-					.ok_or("Renderer is unavailable")?
-					.wait_idle()?;
-			}
 			prior_combat = self.combat_sound_facts();
-			outcome = self.editor.drain_play(&mut self.scene)?;
+			outcome = self
+				.editor
+				.drain_play_with_draw(&mut self.scene, self.renderer.as_ref())?;
 		}
 		Ok(())
 	}
@@ -383,6 +389,16 @@ impl GameApp {
 		new_game: bool,
 		scope: SceneLoadScope,
 	) -> Result<(), String> {
+		self.install_observed_player_scene(scene_id, new_game, scope, None)
+	}
+
+	fn install_observed_player_scene(
+		&mut self,
+		scene_id: SceneId,
+		new_game: bool,
+		scope: SceneLoadScope,
+		sample: Option<&mut SceneSwitchSample<'_>>,
+	) -> Result<(), String> {
 		let current = self
 			.editor
 			.play_scene_id()
@@ -395,7 +411,13 @@ impl GameApp {
 			self.invalidate_scene_prefetch();
 		}
 		let mut timing = SceneLoadTiming::new("player", scope, Instant::now());
+		if sample.is_some() {
+			timing.enable_benchmark();
+		}
 		let result = self.prepare_player_scene(scene_id, new_game, &mut timing);
+		if let Some(sample) = sample {
+			sample.observe_install(&timing);
+		}
 		if result.is_ok() {
 			self.scene_load_timing = Some(timing);
 		} else {
@@ -424,10 +446,17 @@ impl GameApp {
 				project
 					.scenes
 					.iter()
-					.find(|scene| scene.id() != &startup)
+					.filter(|scene| {
+						scene.id() != &startup
+							&& !project
+							.world_regions
+							.iter()
+							.any(|region| &region.scene == scene.id())
+					})
+					.min_by(|left, right| left.id().as_str().cmp(right.id().as_str()))
 					.map(|scene| scene.id().clone())
 			})
-			.ok_or("Scene load smoke requires two authored scenes")?;
+			.ok_or("Scene load smoke requires two authored full scenes")?;
 		for index in 0..samples + 2 {
 			let scene = if index % 2 == 0 { &alternate } else { &startup };
 			let scope = if index < 2 {
@@ -435,47 +464,81 @@ impl GameApp {
 			} else {
 				SceneLoadScope::Play
 			};
-			if self.smoke_prefetch_probe && index >= 2 && index % 2 == 0 {
-				self.measure_active_frames(index)?;
+			let source = self
+				.editor
+				.play_scene_id()
+				.cloned()
+				.ok_or("Scene load smoke has no source scene")?;
+			let before = self.scene_switch_resources()?;
+			let frames = self.measure_active_frames(index)?;
+			let last_source_frame = Instant::now();
+			let mut sample = SceneSwitchSample::new(index, &source, scene, before, frames);
+			let result = self
+				.install_observed_player_scene(scene.clone(), false, scope, Some(&mut sample))
+				.and_then(|()| self.present_scene_switch());
+			if result.is_ok() {
+				sample.observe_present(
+					micros(last_source_frame.elapsed()),
+					self.scene_switch_resources()?,
+				);
 			}
-			self.install_timed_player_scene(scene.clone(), false, scope)?;
-			let mut rendered = false;
-			for _ in 0..8 {
-				if self.render()? == renderer::DrawStatus::Rendered {
-					rendered = true;
-					break;
-				}
-			}
-			if !rendered {
-				if let Some(timing) = self.scene_load_timing.take() {
-					timing.finish(SceneLoadOutcome::Failed);
-				}
-				return Err("Scene load smoke did not render a frame after installation".into());
-			}
+			sample.emit();
+			result?;
 		}
 		self.wait_for_gpu()
 	}
 
+	fn scene_switch_resources(&self) -> Result<SceneLoadResources, String> {
+		let assets = self
+			.asset_manager
+			.as_ref()
+			.ok_or("Assets are not initialized")?;
+		let renderer = self
+			.renderer
+			.as_ref()
+			.ok_or("Renderer is not initialized")?;
+		Ok(SceneLoadResources::capture(assets, renderer))
+	}
+
+	fn present_scene_switch(&mut self) -> Result<(), String> {
+		for _ in 0..8 {
+			if self.render()? == renderer::DrawStatus::Rendered {
+				return Ok(());
+			}
+		}
+		if let Some(timing) = self.scene_load_timing.take() {
+			timing.finish(SceneLoadOutcome::Failed);
+		}
+		Err("Scene load smoke did not render a frame after installation".into())
+	}
+
 	pub(super) fn invalidate_scene_prefetch(&mut self) {
+		self.scene_transition = None;
+		self.failed_scene_transition = None;
 		if let Some(prefetch) = self.scene_prefetch.as_mut() {
 			prefetch.invalidate();
 		}
 	}
 
-	fn measure_active_frames(&mut self, sample: u32) -> Result<(), String> {
-		for frame in 0..3 {
+	fn measure_active_frames(&mut self, sample: u32) -> Result<[u64; 3], String> {
+		let mut frames = [0; 3];
+		for (frame, elapsed_us) in frames.iter_mut().enumerate() {
 			let started = Instant::now();
 			if self.render()? != renderer::DrawStatus::Rendered {
-				return Err("Prefetch probe could not draw an active-scene frame".into());
+				return Err("Scene switch probe could not draw an active-scene frame".into());
 			}
-			scene_prefetch::record_active_frame(
-				sample,
-				frame,
-				self.scene_prefetch.is_some(),
-				started.elapsed(),
-			);
+			let elapsed = started.elapsed();
+			*elapsed_us = micros(elapsed);
+			if self.smoke_prefetch_probe && sample >= 2 && sample % 2 == 0 {
+				scene_prefetch::record_active_frame(
+					sample,
+					frame as u32,
+					self.scene_prefetch.is_some(),
+					elapsed,
+				);
+			}
 		}
-		Ok(())
+		Ok(frames)
 	}
 
 	fn prepare_player_scene(
@@ -493,30 +556,38 @@ impl GameApp {
 			.asset_root
 			.as_ref()
 			.ok_or("Asset root is not initialized")?;
-		let scene_path = resolve_scene_path(asset_root, relative_path)?;
-		let (parsed, outcome, estimated_bytes) = if let Some(prefetch) =
-			self.scene_prefetch.as_mut()
-			&& !new_game
-		{
-			prefetch.load(&scene_id, &scene_path)?
-		} else {
-			(
-				scene_io::load_data(&scene_path)?,
-				runtime::scene_prefetch::PrefetchOutcome::Disabled,
-				0,
-			)
-		};
+		let (scene_path, parsed, outcome, estimated_bytes) =
+			timing.measure(BenchmarkPhase::Read, || {
+				if let Some(prefetch) = self.scene_prefetch.as_ref()
+					&& !new_game
+				{
+					prefetch.load(&scene_id, Path::new(relative_path))
+				} else {
+					let (path, parsed) = scene_io::load_confined_data_from_canonical_root(
+						asset_root,
+						Path::new(relative_path),
+					)?;
+					Ok((
+						path,
+						parsed,
+						runtime::scene_prefetch::PrefetchOutcome::Disabled,
+						0,
+					))
+				}
+			})?;
 		if self.scene_prefetch_enabled || self.smoke_prefetch_probe {
 			scene_prefetch::record_load(timing, &scene_id, outcome, estimated_bytes);
 		}
 		let document = Arc::new(parsed.data);
-		let prepared = if new_game {
-			self.editor
-				.prepare_new_game(scene_id, Arc::clone(&document))?
-		} else {
-			self.editor
-				.prepare_play_scene(scene_id, Arc::clone(&document))?
-		};
+		let prepared = timing.measure(BenchmarkPhase::Simulation, || {
+			if new_game {
+				self.editor
+					.prepare_new_game(scene_id, Arc::clone(&document))
+			} else {
+				self.editor
+					.prepare_play_scene(scene_id, Arc::clone(&document))
+			}
+		})?;
 		self.adopt_prepared_scene(&document, prepared, scene_path, timing)
 	}
 
@@ -541,20 +612,33 @@ impl GameApp {
 			.ok_or("Assets are not initialized")?;
 		timing.cpu_ready();
 		timing.gpu_started();
-		let candidate = scene_io::instantiate(document, assets, renderer);
+		let candidate = timing.measure_native_assembly(assets, renderer, |assets| {
+			scene_io::instantiate(document, assets, renderer)
+		});
 
 		// Both scenes share one cache and budget until the candidate commits.
 		// Completion also makes cache-only allocations from rejected loads safe to prune.
-		renderer.wait_idle()?;
-		let installed = candidate.and_then(|(scene, camera)| {
-			self.editor
-				.commit_play_scene(prepared, &mut self.input, self.authored.is_some())?;
-			// No fallible operations between committing the CPU world and its view.
-			self.scene = scene;
-			self.camera = self.editor.play_rig_camera().unwrap_or(camera);
-			Ok(())
+		timing.measure(BenchmarkPhase::Drain, || renderer.wait_idle())?;
+		let retain_recent = self.smoke_retain_recent_source && timing.is_benchmark_enabled();
+		let installed = timing.measure(BenchmarkPhase::Install, || {
+			let installed = candidate.and_then(|(scene, camera)| {
+				self.editor.commit_play_scene(
+					prepared,
+					&mut self.input,
+					self.authored.is_some(),
+				)?;
+				// No fallible operations between committing the CPU world and its view.
+				self.scene = scene;
+				self.camera = self.editor.play_rig_camera().unwrap_or(camera);
+				Ok(())
+			});
+			if installed.is_ok() && retain_recent {
+				assets.prune_after_scene_switch_benchmark();
+			} else {
+				assets.prune_unused();
+			}
+			installed
 		});
-		assets.prune_unused();
 		installed?;
 		self.feedback_audio.commit_scene_mix(scene_id, mix);
 		self.project_sound.stop_effect();

@@ -1,2 +1,29 @@
-:host { display: block; }
-.asset-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+@use './asset-tools' as tools;
+
+:host {
+  display: block;
+  min-width: 0;
+  padding: 0;
+}
+
+.asset-tool-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+button.asset-icon-button {
+  @include tools.icon-button;
+}
+
+textarea {
+  font-family: monospace;
+  min-height: 12rem;
+  resize: vertical;
+  width: 100%;
+}
+
+p {
+  margin: var(--space-1) 0;
+}

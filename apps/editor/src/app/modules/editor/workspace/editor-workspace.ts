@@ -1,12 +1,36 @@
-import {afterNextRender, Component, computed, DOCUMENT, effect, inject, Injector, input, output, signal, viewChild} from '@angular/core';
+import {
+    afterNextRender,
+    Component,
+    computed,
+    DestroyRef,
+    DOCUMENT,
+    effect,
+    ElementRef,
+    inject,
+    Injector,
+    input,
+    output,
+    signal,
+    viewChild
+} from '@angular/core';
+import {listen} from '@tauri-apps/api/event';
 import {EDITOR_ACTIONS, type EditorActionId} from '../../../core/editor/editor-actions';
-import {allowsFolder, availableObjectMenuActions, objectMenuEntry, type ObjectMenuAction} from '../../../core/editor/editor-object-menu';
+import {
+    allowsFolder,
+    availableObjectMenuActions,
+    OBJECT_MENU_GROUPS,
+    objectMenuEntry,
+    type ObjectMenuAction
+} from '../../../core/editor/editor-object-menu';
 import {resolveEditorShortcut} from '../../../core/editor/editor-keymap';
 import type {WorkspaceViewKind} from '../../../core/editor/workspace/workspace-view';
 import {Drawer} from '../../../shared/components/drawer/drawer';
 import {EditorPane} from '../../../shared/components/pane/pane';
-import {EditorIcon} from '../../../shared/icons/editor-icon';
+import {EditorIcon, type EditorIconName} from '../../../shared/icons/editor-icon';
 import {EditorDialog} from '../../../shared/components/dialog/dialog';
+import {ContextActionBuilder} from '../../../shared/actions/context-action';
+import {ContextMenuBuilder, type ContextMenuItem} from '../../../shared/builder/context-menu-builder';
+import {EditorContextMenuTrigger} from '../../../shared/components/context-menu/context-menu-trigger';
 import {ContextMenuService} from '../../../shared/components/context-menu/context-menu.service';
 import {EditorService} from "../../../core/editor/editor.service";
 import {SceneViewport} from "./scene-viewport/scene-viewport";
@@ -40,6 +64,7 @@ import {WorkspaceDraftReview} from './workspace-draft-review';
 import {WORKSPACE_LAYOUT_SCOPE_PROVIDER} from './workspace-layout-preferences';
 import {ScopedPaneRequests} from './scoped-pane-request';
 import {SceneActions} from './scene-actions/scene-actions';
+import {SceneFlow} from './scene-flow/scene-flow';
 import {SceneSwitchService} from './scene-actions/scene-switch.service';
 import {sceneSwitchProgress} from './scene-actions/scene-switch-progress';
 import {ProjectBuild} from './project-build/project-build';
@@ -58,7 +83,18 @@ import {BehaviorWorkspace} from './components/behavior-workspace';
 import {ParticleDesignerSession} from './particle-designer/particle-designer-session';
 import {SelectedCameraPreviewService} from './game-settings/selected-camera-preview.service';
 import {RuntimeInspector} from './runtime-inspector/runtime-inspector';
-import {CommandBuilder, type EditorCommand, type EditorSnapshot, type EntityKey, type FolderId, type PrimitiveKind} from '../../../core/editor/editor.models';
+import {
+    CommandBuilder,
+    type EditorCommand,
+    type EditorSnapshot,
+    type EntityKey,
+    type FolderId,
+    type PrimitiveKind,
+    type SceneId,
+    type Vec3,
+    type ViewportInput
+} from '../../../core/editor/editor.models';
+import {WorkspaceNavigation, type NavigationDirection} from './workspace-navigation';
 import type {SceneDependencyRequest} from '../../../core/editor/scene-verification.models';
 import {CommandPalette} from './command-palette/command-palette';
 import {FindUsages} from './find-usages/find-usages';
@@ -66,18 +102,31 @@ import {collectSceneReferences, type SceneReference} from './find-usages/scene-r
 import {editorProblems} from './problems-panel/editor-problems';
 import {type EditorProblem, type ProblemLocation, ProblemsPanel} from './problems-panel/problems-panel';
 
+interface SceneObjectPlacement {
+    readonly workspace_generation: number;
+    readonly revision: number;
+    readonly scene_id: SceneId;
+    readonly position: Vec3 | null;
+}
+
+interface SceneViewportContextMenu extends SceneObjectPlacement {
+    readonly client_x: number;
+    readonly client_y: number;
+}
+
 @Component({
     selector: 'editor-workspace',
     providers: [
         SceneEditingService, WorkspaceDraftReview, ScopedPaneRequests, ViewportEditorService, ViewportAssetDragService,
         WORKSPACE_LAYOUT_SCOPE_PROVIDER,
-        SceneSwitchService, WorkspaceViewService, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
+        SceneSwitchService, WorkspaceViewService, WorkspaceNavigation, PropAssetSelection, PropWorkspaceService, PropPreviewService, AnimationWorkspaceService,
         SelectedCameraPreviewService, InputActionsCatalog, ComponentWorkspaceSession, AgentSelectionContextService, AgentDrawerService, AgentAnswerActions,
         AnimatorAssets, AnimatorWorkspaceService, ControlGraphWorkspaceService, ParticleDesignerSession,
     ],
     imports: [
         Drawer, EditorPane, EditorIcon, SceneViewport, WorkspaceTabs, SceneEntitiesPanel, InspectorPanel, AgentDrawer,
-        WorkspaceToolbar, AssetsPanel, SceneActions, ProjectBuild, ViewportToolbar, GameInputManager,
+        WorkspaceToolbar, AssetsPanel, SceneActions, SceneFlow, ProjectBuild, ViewportToolbar, GameInputManager,
+        EditorContextMenuTrigger,
         CameraSettings, PhysicsLayersDialog, SceneLightsDialog, ParticleDesigner, RuntimeInspector, AudioWorkspace, BehaviorWorkspace,
         CommandPalette, FindUsages, ProblemsPanel, PropWorkspace, AnimationWorkspace, AnimatorWorkspace, ControlGraphWorkspace, EditorDialog,
     ],
@@ -121,11 +170,21 @@ export class EditorWorkspace {
     private readonly contextMenu = inject(ContextMenuService);
     protected readonly workspaceActionBlocked = computed(() => this.opening() || this.sceneSwitch.pending());
     protected readonly hierarchyError = signal<string | null>(null);
+    private readonly creatingObject = signal<string | null>(null);
+    private readonly createdObject = signal<{ key: EntityKey; context: string; message: string } | null>(null);
+    protected readonly hierarchyCreationStatus = computed(() => {
+        const current = this.creatingObject();
+        if (current) return current;
+        const created = this.createdObject();
+        return created?.context === this.sceneContext() && this.editorService.selection().includes(created.key)
+            ? created.message : null;
+    });
+    readonly objectActionsEnabled = computed(() =>
+        !this.workspaceActionBlocked() && this.sceneEditing.ready() && this.creatingObject() === null);
     readonly availableObjectActions = computed<readonly ObjectMenuAction[]>(() => {
-        if (!this.editorService.nativeAvailable || this.workspaceActionBlocked() || !this.sceneEditing.ready() ||
-            this.editorService.snapshot()?.mode !== 'edit') return [];
+        if (!this.editorService.nativeAvailable || this.editorService.snapshot()?.mode !== 'edit') return [];
         const capabilities = this.editorService.capabilities();
-        const primitives = capabilities?.primitive_assets === true && this.viewportEditor.state()?.workspace_generation != null;
+        const primitives = capabilities?.primitive_assets === true;
         return availableObjectMenuActions(new Set(capabilities?.commands?.map(command => command.name)), primitives);
     });
     protected readonly batchParentingEnabled = computed(() =>
@@ -165,7 +224,13 @@ export class EditorWorkspace {
             opening: this.opening(),
         });
     });
+    protected readonly maximizeScene = signal(false);
+    protected readonly sceneMaximized = computed(() => this.maximizeScene() &&
+        this.workspaceView.activeViewKind() === 'scene-viewport' && !this.previewingCamera() &&
+        !this.selectedCameraPreview.active() && this.showingViewport());
     private readonly sceneToolbar = viewChild(ViewportToolbar);
+    private readonly sceneSurface = viewChild<unknown, ElementRef<HTMLElement>>('sceneSurface', {read: ElementRef});
+    private readonly workspacePanel = viewChild<ElementRef<HTMLElement>>('workspacePanel');
     private readonly workspaceTabs = viewChild(WorkspaceTabs);
     private readonly workspaceToolbar = viewChild(WorkspaceToolbar);
     private readonly hierarchy = viewChild(SceneEntitiesPanel);
@@ -187,10 +252,16 @@ export class EditorWorkspace {
         !this.editorService.snapshot());
     private readonly cameraSettings = viewChild(CameraSettings);
     private readonly sceneActions = viewChild(SceneActions);
+    private readonly sceneFlow = viewChild(SceneFlow);
     private readonly gameInput = viewChild(GameInputManager);
     private readonly physicsLayers = viewChild(PhysicsLayersDialog);
     private readonly lights = viewChild(SceneLightsDialog);
     private readonly assets = viewChild(AssetsPanel);
+    private readonly navigation = inject(WorkspaceNavigation);
+    private readonly navigationBlocked = computed(() => this.workspaceActionBlocked() || this.editorService.playing() ||
+        !!this.viewportEditor.state()?.gesture);
+    readonly canGoBack = computed(() => !this.navigationBlocked() && this.navigation.canGoBack());
+    readonly canGoForward = computed(() => !this.navigationBlocked() && this.navigation.canGoForward());
     private readonly projectBuild = viewChild(ProjectBuild);
     protected readonly paletteOpen = signal(false);
     protected readonly problemsOpen = signal(false);
@@ -238,6 +309,7 @@ export class EditorWorkspace {
     });
 
     constructor() {
+        this.listenForViewportContextMenu();
         inject(AgentSelectionContextService).setSceneSubject(() => this.inspector()?.subject() ?? null);
         inject(AgentAnswerActions).setReveal((key, componentId) => {
             const context = this.sceneContext();
@@ -253,6 +325,7 @@ export class EditorWorkspace {
         });
         this.draftReview.setReviewers([
             () => this.gameInput()?.canLeaveProject() ?? true,
+            () => this.sceneFlow()?.canLeaveProject() ?? true,
             () => this.physicsLayers()?.canLeaveProject() ?? true,
             () => this.lights()?.canLeaveProject() ?? true,
             () => this.particles.canLeaveProject(),
@@ -335,10 +408,151 @@ export class EditorWorkspace {
                 ? action.command(this.viewportEditor.settings()) : action.command);
     }
 
+    protected readonly canOpenWorkspaceMenu = (event: Event): boolean => {
+        if (!this.workspaceMenuAvailable() || !(event.target instanceof Element)) return false;
+        if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog'))
+            return false;
+        return event.type !== 'contextmenu' || !event.target.closest('scene-viewport');
+    };
+
+    private listenForViewportContextMenu(): void {
+        if (!this.editorService.nativeAvailable) return;
+        const lifetime = inject(DestroyRef);
+        let unsubscribe: (() => void) | undefined;
+        lifetime.onDestroy(() => unsubscribe?.());
+        void listen<SceneViewportContextMenu>('editor://viewport-context-menu', ({payload}) => {
+            if (!lifetime.destroyed) this.openViewportContextMenu(payload);
+        }).then(release => {
+            if (lifetime.destroyed) release();
+            else unsubscribe = release;
+        }).catch(() => undefined);
+    }
+
+    private openViewportContextMenu(context: SceneViewportContextMenu): void {
+        if (!context || !this.workspaceMenuAvailable(true) || this.workspaceView.activeViewKind() !== 'scene-viewport' ||
+            this.previewingCamera() || this.selectedCameraPreview.active() ||
+            !this.currentObjectPlacement(context) || !Number.isFinite(context.client_x) || !Number.isFinite(context.client_y)) return;
+        const viewport = this.sceneSurface()?.nativeElement;
+        const surface = viewport?.querySelector<HTMLElement>('.surface');
+        const panel = this.workspacePanel()?.nativeElement;
+        if (!viewport || !surface || !panel) return;
+        const {left, top, right, bottom, width, height} = surface.getBoundingClientRect();
+        const x = context.client_x, y = context.client_y;
+        if (width <= 0 || height <= 0 || x < left - 2 || x > right + 2 || y < top - 2 || y > bottom + 2) return;
+        const position = context.position;
+        const placement = Array.isArray(position) && position.length === 3 &&
+        position.every(value => typeof value === 'number' && Number.isFinite(Math.fround(value)))
+            ? context : {...context, position: null};
+        this.contextMenu.open({
+            items: this.workspaceContextMenu(placement), label: 'Workspace actions', x, y, owner: viewport,
+            returnFocus: panel,
+        });
+    }
+
+    private currentObjectPlacement(placement: SceneObjectPlacement): boolean {
+        const snapshot = this.editorService.snapshot();
+        const viewport = this.viewportEditor.state();
+        return snapshot?.mode === 'edit' && snapshot.active_scene_id === placement.scene_id &&
+            snapshot.revision === placement.revision && viewport?.workspace_generation === placement.workspace_generation;
+    }
+
+    private readonly objectContextMenu = this.buildObjectContextMenu();
+
+    private buildObjectContextMenu(): ContextMenuBuilder<{ scene: string; placement?: SceneObjectPlacement }> {
+        return ContextMenuBuilder.create<{ scene: string; placement?: SceneObjectPlacement }>()
+            .submenu('workspace.create-object', 'Create Object', submenu => {
+                for (const [index, group] of OBJECT_MENU_GROUPS.entries()) {
+                    if (index) submenu.separator();
+                    for (const entry of group) {
+                        submenu.action(ContextActionBuilder.create<{ scene: string; placement?: SceneObjectPlacement }>(
+                            'workspace.' + entry.id, entry.label,
+                        ).when(() => this.availableObjectActions().includes(entry.id))
+                            .enabledWhen(({
+                                              scene,
+                                              placement
+                                          }) => scene === this.sceneContext() && this.workspaceMenuAvailable(!!placement) &&
+                                this.objectActionsEnabled() && (!placement || this.currentObjectPlacement(placement)))
+                            .run(({placement}) => this.runObjectAction(entry.id, null, placement)).build());
+                    }
+                }
+            }, 'plus');
+    }
+
+    protected readonly workspaceContextMenu = (placement?: SceneObjectPlacement): readonly ContextMenuItem[] => {
+        const context = this.sceneContext();
+        const toolbar = this.workspaceToolbar();
+        const build = this.projectBuild();
+        const run = (action: () => void | Promise<unknown>) => () => {
+            if (context === this.sceneContext() && this.workspaceMenuAvailable()) return action();
+        };
+        const workspaceCommand = (id: 'document.save' | 'document.save-all' | 'document.undo' |
+            'document.redo' | 'game.play' | 'game.stop', icon?: EditorIconName): ContextMenuItem => {
+            const action = EDITOR_ACTIONS[id];
+            return {
+                kind: 'action', id, label: action.label, icon, destructive: false,
+                disabled: toolbar?.canPerform(action.command) !== true,
+                execute: run(() => {
+                    this.dispatchEditorAction(id);
+                }),
+            };
+        };
+        const playing = this.editorService.playing();
+        let buildLabel = 'Build Game…';
+        if (playing) buildLabel = 'Build Game… (stop Play first)';
+        else if (this.editorService.dirty() || this.sceneEditing.hasChanges())
+            buildLabel = 'Build Game… (save changes first)';
+        return [
+            ...this.objectContextMenu.build({scene: context, placement}),
+            {
+                kind: 'action', id: 'project.build', label: buildLabel, icon: 'build',
+                destructive: false, disabled: build?.canExport() !== true,
+                execute: run(() => build?.exportProject())
+            },
+            {
+                kind: 'action', id: 'scene.create', label: 'New Scene…', icon: 'plus',
+                destructive: false, disabled: !this.canCreateScene(), execute: run(() => {
+                    this.openNewScene();
+                })
+            },
+            {kind: 'separator', id: 'workspace-edit'},
+            workspaceCommand('document.save', 'save'),
+            workspaceCommand('document.save-all', 'save'),
+            workspaceCommand('document.undo'),
+            workspaceCommand('document.redo'),
+            {kind: 'separator', id: 'workspace-play'},
+            playing ? workspaceCommand('game.stop', 'stop') : workspaceCommand('game.play', 'play'),
+            {
+                kind: 'action', id: 'workspace.problems', label: 'Problems', icon: 'script',
+                destructive: false, disabled: false, execute: run(() => this.openProblems())
+            },
+        ];
+    };
+
+    private workspaceMenuAvailable(nativeRelease = false): boolean {
+        const gesture = this.viewportEditor.state()?.gesture;
+        // A trusted right-release is emitted after Fly ends. Its status may
+        // still be queued behind the context menu event in the WebView.
+        return !!this.editorService.snapshot() && !this.workspaceActionBlocked() &&
+            (!gesture || (nativeRelease && gesture === 'fly')) && !this.document.querySelector('dialog[open]');
+    }
+
     protected openPalette(): boolean {
         if (!this.canOpenPalette() || this.document.querySelector('dialog[open]')) return false;
         this.paletteOpen.set(true);
         return true;
+    }
+
+    openSceneFlow(): boolean {
+        return !this.document.querySelector('dialog[open]') && (this.sceneFlow()?.show() ?? false);
+    }
+
+    canCreateScene(): boolean {
+        return !this.workspaceActionBlocked() && this.sceneActions()?.canCreateScene() === true;
+    }
+
+    openNewScene(): boolean {
+        return this.canCreateScene() && !this.document.querySelector('dialog[open]') &&
+            (this.sceneActions()?.showNewScene() ?? false);
     }
 
     openSceneInformation(): boolean {
@@ -349,6 +563,15 @@ export class EditorWorkspace {
         return this.gameInput()?.available() === true;
     }
 
+    protected canOpenInputActionsAsset(): boolean {
+        return !this.workspaceActionBlocked() && this.gameInput()?.canOpenInputActionsAsset() === true;
+    }
+
+    protected openInputActionsAsset(request: { readonly assetId: string; readonly workspaceGeneration: number }): void {
+        if (this.canOpenInputActionsAsset() && request.workspaceGeneration === this.editorService.workspaceGeneration() &&
+            !this.document.querySelector('dialog[open]')) this.gameInput()?.show(request.assetId);
+    }
+
     openControls(): void {
         if (!this.document.querySelector('dialog[open]')) this.gameInput()?.show();
     }
@@ -357,14 +580,59 @@ export class EditorWorkspace {
         return this.physicsLayers()?.show() ?? false;
     }
 
-    protected async requestWorkspaceView(view: WorkspaceViewKind): Promise<void> {
+    protected async requestWorkspaceView(view: WorkspaceViewKind, replayOrigin?: 'scene' | 'prop'): Promise<boolean> {
         this.paneRequests.invalidate();
         const context = this.sceneContext();
         if (this.workspaceView.animationView() && view !== 'animation-workspace' &&
-            !await this.animationPreview.reviewNavigation()) return;
+            !await this.animationPreview.reviewNavigation()) return false;
         if (this.componentPaneActive() && view !== this.workspaceView.activeViewKind() &&
-            !await this.componentWorkspace.reviewNavigation()) return;
-        if (context === this.sceneContext()) this.workspaceView.selectView(view);
+            !await this.componentWorkspace.reviewNavigation()) return false;
+        if (context !== this.sceneContext() || !this.workspaceView.availableViews().includes(view)) return false;
+        this.workspaceView.selectView(view, replayOrigin, replayOrigin === undefined);
+        return this.workspaceView.activeViewKind() === view;
+    }
+
+    protected recordAssetFolder(visit: {
+        readonly previous: string; readonly current: string; readonly direction?: NavigationDirection;
+    }): void {
+        this.navigation.record({kind: 'folder', path: visit.previous}, {
+            kind: 'folder',
+            path: visit.current
+        }, visit.direction);
+    }
+
+    async navigateHistory(direction: NavigationDirection): Promise<void> {
+        if (this.navigationBlocked() || this.contextMenu.request() || this.document.querySelector('dialog[open], :popover-open')) return;
+        await this.navigation.step(direction, async location => {
+            if (location.kind === 'folder') {
+                if (this.workspaceView.animationView() || !this.assets()?.replayFolder(location.path, direction)) return 'unavailable';
+                this.maximizeScene.set(false);
+                return 'applied';
+            }
+            if (location.kind === 'scene') {
+                const snapshot = this.editorService.snapshot();
+                if (!snapshot || location.id === snapshot.active_scene_id ||
+                    !snapshot.scenes.some(scene => scene.id === location.id)) return 'unavailable';
+                return await this.sceneSwitch.request(location.id, false) ? 'applied' : 'cancelled';
+            }
+            const active = this.workspaceView.navigationLocation();
+            if (!this.workspaceView.availableViews().includes(location.view) ||
+                active.view === location.view && active.origin === location.origin) return 'unavailable';
+            return await this.requestWorkspaceView(location.view, location.origin) ? 'applied' : 'cancelled';
+        });
+    }
+
+    protected handleNativeNavigation(input: ViewportInput): void {
+        if (input.kind === 'pointer_up' && (input.button === 'back' || input.button === 'forward')) {
+            void this.navigateHistory(input.button);
+        } else if (input.kind === 'key_down' && !input.repeat && !input.modifiers.control &&
+            !input.modifiers.super_key && !input.modifiers.shift) {
+            if (input.code === 'BrowserBack' || input.modifiers.alt && input.code === 'ArrowLeft') {
+                void this.navigateHistory('back');
+            } else if (input.code === 'BrowserForward' || input.modifiers.alt && input.code === 'ArrowRight') {
+                void this.navigateHistory('forward');
+            }
+        }
     }
 
     protected async requestRightDrawer(mode: RightDrawerMode): Promise<void> {
@@ -383,6 +651,7 @@ export class EditorWorkspace {
     }
 
     private focusRightDrawer(mode: RightDrawerMode): void {
+        this.maximizeScene.set(false);
         const focus = () => {
             if (this.rightDrawerView() !== mode) return;
             if (mode === 'agent') this.agentDrawer()?.focus();
@@ -400,19 +669,32 @@ export class EditorWorkspace {
         }, {injector: this.injector});
     }
 
-    async runObjectAction(id: ObjectMenuAction, folder: FolderId | null = null): Promise<void> {
+    async runObjectAction(
+        id: ObjectMenuAction, folder: FolderId | null = null, placement?: SceneObjectPlacement,
+    ): Promise<void> {
         const entry = objectMenuEntry(id);
-        if (!entry || !this.availableObjectActions().includes(id) || this.document.querySelector('dialog[open]')) return;
+        if (!entry || !this.objectActionsEnabled() || !this.availableObjectActions().includes(id) ||
+            this.document.querySelector('dialog[open]')) return;
         if (folder && (!allowsFolder(entry) || !this.hierarchyFoldersEnabled())) return;
         const target = this.draftReview.capture();
         await this.draftReview.run(target, async () => {
-            if (!this.availableObjectActions().includes(id)) return;
+            if (!this.objectActionsEnabled() || !this.availableObjectActions().includes(id) ||
+                (placement && !this.currentObjectPlacement(placement))) return;
+            this.maximizeScene.set(false);
             this.workspaceView.selectView('scene-viewport');
             const action = entry.action;
             if (action.kind === 'browse') this.assets()?.browse(action.asset);
             else if (action.kind === 'scene-settings') this.lights()?.show();
-            else if (action.kind === 'primitive') await this.createPrimitive(action.primitive, folder);
-            else await this.createSceneObject(action.command, folder);
+            else {
+                this.creatingObject.set('Creating ' + entry.label + '…');
+                this.createdObject.set(null);
+                try {
+                    if (action.kind === 'primitive') await this.createPrimitive(action.primitive, folder, placement);
+                    else await this.createSceneObject(action.command, folder);
+                } finally {
+                    this.creatingObject.set(null);
+                }
+            }
         });
     }
 
@@ -511,7 +793,7 @@ export class EditorWorkspace {
                     return;
                 }
                 this.animationPreview.library.set('imported');
-                this.workspaceView.selectView('animation-workspace');
+                this.workspaceView.selectView('animation-workspace', 'scene');
                 this.animationPreview.chooseScope('scene');
                 this.workspaceTabs()?.focusTab('animation-workspace');
                 return;
@@ -599,7 +881,6 @@ export class EditorWorkspace {
     private async createSceneObject(command: EditorCommand, folder: FolderId | null): Promise<void> {
         const context = this.sceneContext();
         this.hierarchyError.set(null);
-        let emitter: EntityKey | undefined;
         const accepted = await this.sceneEditing.withCommittedEdit(async () => {
             if (context !== this.sceneContext() || this.workspaceActionBlocked()) return;
             const current = this.editorService.snapshot();
@@ -610,42 +891,67 @@ export class EditorWorkspace {
                 ? await this.createInFolder(create, folder, generation, current.revision)
                 : await create(current.revision);
             if (context !== this.sceneContext()) return;
-            const key = snapshot.selection[0];
-            if (key) this.hierarchy()?.revealEntity(key);
-            if (command.type === 'create_particle_emitter') emitter = key;
+            this.revealCreatedObject(snapshot, context);
         });
         if (context !== this.sceneContext()) return;
         if (!accepted) {
             this.hierarchyError.set(this.sceneEditing.error() ?? 'Finish the current edit before creating the object.');
         }
-        if (emitter) await this.particles.openSelected(emitter);
     }
 
-    async createPrimitive(kind: PrimitiveKind, folder: FolderId | null = null): Promise<void> {
+    private revealCreatedObject(snapshot: EditorSnapshot, context: string): void {
+        const key = snapshot.selection[0];
+        if (!key || context !== this.sceneContext()) return;
+        this.rightDrawerMode.set('inspector');
+        const drawer = this.authoringDrawer();
+        if (drawer && (drawer.collapsed() || !drawer.isExpanded())) {
+            drawer.config.update(config => ({...config, collapsed: false, expanded: true}));
+        }
+        this.hierarchy()?.revealEntity(key);
+        const name = snapshot.document.entities.find(entity => entity.key === key)?.name;
+        if (name) this.createdObject.set({key, context, message: 'Created ' + name + '. Edit it in the Inspector.'});
+    }
+
+    async createPrimitive(
+        kind: PrimitiveKind, folder: FolderId | null = null, placement?: SceneObjectPlacement,
+    ): Promise<void> {
         const context = this.sceneContext();
         const editor = this.editorService;
         const generation = editor.workspaceGeneration();
-        const nativeGeneration = this.viewportEditor.state()?.workspace_generation;
-        if (nativeGeneration == null || this.workspaceActionBlocked()) return;
+        if (this.workspaceActionBlocked()) return;
 
         this.hierarchyError.set(null);
-        const current = () => context === this.sceneContext() && !this.workspaceActionBlocked() &&
-            nativeGeneration === this.viewportEditor.state()?.workspace_generation;
+        const current = () => context === this.sceneContext() && !this.workspaceActionBlocked();
         const accepted = await this.sceneEditing.withCommittedEdit(async () => {
             const before = editor.snapshot();
             if (!current() || !before) return;
             const {active_scene_id: sceneId, revision} = before;
-            const {asset} = await editor.ensurePrimitive(kind, {workspaceGeneration: generation, nativeGeneration, revision});
-            const after = editor.snapshot();
-            if (!current() || !after || after.active_scene_id !== sceneId) return;
-            const create = (nextRevision: number) =>
-                editor.importModel(asset.path, [0, 0, 0], generation, nextRevision, {nativeGeneration, sceneId});
+            const scope = await editor.authoringScope(generation);
+            if (!current()) return;
+            if (scope.revision !== revision || editor.snapshot()?.revision !== revision ||
+                (placement && (placement.revision !== revision || placement.workspace_generation !== scope.nativeGeneration))) {
+                throw new Error('The scene changed while preparing the object. Choose the object again.');
+            }
+
+            const {asset, snapshot: registered} = await editor.ensurePrimitive(kind, scope);
+            if (!current()) return;
             try {
+                const active = await editor.authoringScope(generation);
+                if (!current()) return;
+                if (active.nativeGeneration !== scope.nativeGeneration || active.revision !== registered.revision ||
+                    editor.snapshot()?.revision !== registered.revision || registered.active_scene_id !== sceneId) {
+                    throw new Error('The project changed while preparing the object. Choose the object again.');
+                }
+                const position: Vec3 = placement?.position ?? [0, 0, 0];
+                const create = (nextRevision: number) =>
+                    editor.importModel(asset.path, position, generation, nextRevision, {
+                        nativeGeneration: scope.nativeGeneration,
+                        sceneId
+                    });
                 const placed = folder
-                    ? await this.createInFolder(create, folder, generation, after.revision)
-                    : await create(after.revision);
-                const key = placed.selection[0];
-                if (key && current()) this.hierarchy()?.revealEntity(key);
+                    ? await this.createInFolder(create, folder, generation, registered.revision)
+                    : await create(registered.revision);
+                if (current()) this.revealCreatedObject(placed, context);
             } catch (cause) {
                 const detail = cause instanceof Error ? cause.message : String(cause);
                 throw new Error(`${asset.name} is available in Assets. ${detail}`, {cause});

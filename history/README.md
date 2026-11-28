@@ -11,6 +11,7 @@ The [developer guides](../docs/main.md) cover using and maintaining the current 
 
 ## Roadmaps
 
+- [Milestones 246–256 · Normal maps](roadmaps/normal-maps-246-256.md)
 - [Milestones 223–232 · Persistence, viewport, Blender and Agent](roadmaps/adr-implementation-223-232.md)
 - [Milestones 203–222 · Architecture implementation](roadmaps/adr-implementation-203-222.md)
 - [Milestones 163–202 · Object authoring and Agent](roadmaps/object-authoring-roadmap-163-202.md)

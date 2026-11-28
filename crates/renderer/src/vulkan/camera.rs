@@ -6,7 +6,10 @@ use std::{
 
 use ash::{Device, Instance, vk};
 
-use super::{LightingUniform, VulkanBuffer, VulkanBufferError, VulkanDevice};
+use super::{
+	LightingUniform, VulkanBuffer, VulkanBufferError, VulkanDepthBufferError, VulkanDevice,
+	shadow::{ShadowMap, ShadowUniform},
+};
 
 mod projection;
 
@@ -18,6 +21,8 @@ pub struct VulkanCamera {
 
 	uniform_buffer: VulkanBuffer,
 	lighting_buffer: VulkanBuffer,
+	shadow_buffer: VulkanBuffer,
+	shadow: Option<ShadowMap>,
 
 	descriptor_set_layout: vk::DescriptorSetLayout,
 
@@ -30,6 +35,7 @@ pub struct VulkanCamera {
 pub enum VulkanCameraError {
 	Vulkan(vk::Result),
 	Buffer(VulkanBufferError),
+	Shadow(VulkanDepthBufferError),
 }
 
 impl Display for VulkanCameraError {
@@ -39,6 +45,7 @@ impl Display for VulkanCameraError {
 				write!(formatter, "Vulkan camera error: {error:?}",)
 			}
 
+			Self::Shadow(error) => write!(formatter, "Vulkan shadow depth error: {error}"),
 			Self::Buffer(error) => {
 				write!(formatter, "Vulkan camera buffer error: {error}",)
 			}
@@ -51,6 +58,7 @@ impl Error for VulkanCameraError {
 		match self {
 			Self::Vulkan(error) => Some(error),
 			Self::Buffer(error) => Some(error),
+			Self::Shadow(error) => Some(error),
 		}
 	}
 }
@@ -77,6 +85,9 @@ impl VulkanCamera {
 				.unwrap(),
 			lighting_buffer: VulkanBuffer::host_vertex(device, size_of::<LightingUniform>() as u64)
 				.unwrap(),
+			shadow_buffer: VulkanBuffer::host_vertex(device, size_of::<ShadowUniform>() as u64)
+				.unwrap(),
+			shadow: None,
 			descriptor_set_layout: vk::DescriptorSetLayout::null(),
 			descriptor_pool: vk::DescriptorPool::null(),
 			descriptor_set: vk::DescriptorSet::null(),
@@ -104,6 +115,16 @@ impl VulkanCamera {
 		)?;
 		lighting_buffer.write(&[LightingUniform::default()])?;
 
+		let shadow = ShadowMap::new(instance, device).map_err(VulkanCameraError::Shadow)?;
+		let shadow_buffer = VulkanBuffer::new(
+			instance,
+			device,
+			size_of::<ShadowUniform>() as u64,
+			vk::BufferUsageFlags::UNIFORM_BUFFER,
+			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		)?;
+		shadow_buffer.write(&[ShadowUniform::default()])?;
+
 		let bindings = [
 			vk::DescriptorSetLayoutBinding::default()
 				.binding(0)
@@ -115,6 +136,16 @@ impl VulkanCamera {
 				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
 				.descriptor_count(1)
 				.stage_flags(vk::ShaderStageFlags::FRAGMENT),
+			vk::DescriptorSetLayoutBinding::default()
+				.binding(2)
+				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+				.descriptor_count(1)
+				.stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
+			vk::DescriptorSetLayoutBinding::default()
+				.binding(3)
+				.descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+				.descriptor_count(1)
+				.stage_flags(vk::ShaderStageFlags::FRAGMENT),
 		];
 
 		let layout_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
@@ -122,11 +153,16 @@ impl VulkanCamera {
 		let descriptor_set_layout =
 			unsafe { ash_device.create_descriptor_set_layout(&layout_info, None)? };
 
-		let pool_sizes = [vk::DescriptorPoolSize {
-			ty: vk::DescriptorType::UNIFORM_BUFFER,
-
-			descriptor_count: 2,
-		}];
+		let pool_sizes = [
+			vk::DescriptorPoolSize {
+				ty: vk::DescriptorType::UNIFORM_BUFFER,
+				descriptor_count: 3,
+			},
+			vk::DescriptorPoolSize {
+				ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+				descriptor_count: 1,
+			},
+		];
 
 		let pool_info = vk::DescriptorPoolCreateInfo::default()
 			.pool_sizes(&pool_sizes)
@@ -175,6 +211,10 @@ impl VulkanCamera {
 			.buffer(lighting_buffer.raw())
 			.offset(0)
 			.range(size_of::<LightingUniform>() as u64)];
+		let shadow_info = [vk::DescriptorBufferInfo::default()
+			.buffer(shadow_buffer.raw())
+			.range(size_of::<ShadowUniform>() as u64)];
+		let shadow_texture = [shadow.descriptor()];
 		let writes = [
 			vk::WriteDescriptorSet::default()
 				.dst_set(descriptor_set)
@@ -186,6 +226,16 @@ impl VulkanCamera {
 				.dst_binding(1)
 				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
 				.buffer_info(&lighting_info),
+			vk::WriteDescriptorSet::default()
+				.dst_set(descriptor_set)
+				.dst_binding(2)
+				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+				.buffer_info(&shadow_info),
+			vk::WriteDescriptorSet::default()
+				.dst_set(descriptor_set)
+				.dst_binding(3)
+				.descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+				.image_info(&shadow_texture),
 		];
 
 		unsafe {
@@ -220,6 +270,8 @@ impl VulkanCamera {
 
 			uniform_buffer,
 			lighting_buffer,
+			shadow_buffer,
+			shadow: Some(shadow),
 
 			descriptor_set_layout,
 			descriptor_pool,
@@ -239,6 +291,16 @@ impl VulkanCamera {
 		lighting: &LightingUniform,
 	) -> Result<(), VulkanCameraError> {
 		self.lighting_buffer.write(std::slice::from_ref(lighting))?;
+		Ok(())
+	}
+
+	pub(crate) fn shadow_map(&self) -> Option<&ShadowMap> {
+		self.shadow.as_ref()
+	}
+
+	/// The caller must finish the previous frame before updating uniforms.
+	pub(crate) fn update_shadow(&self, uniform: &ShadowUniform) -> Result<(), VulkanCameraError> {
+		self.shadow_buffer.write(std::slice::from_ref(uniform))?;
 		Ok(())
 	}
 

@@ -24,8 +24,10 @@ mod controls_graph;
 mod input_actions;
 mod mesh_source;
 mod migration;
+mod particle_sprite;
 mod prefab;
 mod primitive;
+mod script;
 mod sky_panorama;
 
 pub use animation_clip::{prepare_animation_clip, read_animation_clip};
@@ -35,13 +37,18 @@ pub use audio_clip::{load_audio_clip, prepare_audio_clip_import};
 pub use controls_graph::prepare_control_graph;
 pub use input_actions::{active_input_actions, load_input_actions, prepare_input_actions};
 use mesh_source::{hydrate_legacy_meshes, signatures};
-pub use migration::migrate_catalog;
+pub use migration::{migrate_catalog, migrate_project_catalog};
+pub use particle_sprite::prepare_particle_sprite_import;
 use prefab::prefab_dependencies;
 pub use primitive::{PreparedPrimitive, prepare_primitive};
+pub use script::prepare_rust_script;
 pub use sky_panorama::{prepare_sky_panorama_import, read_sky_panorama};
 
 const MAX_SOURCE: usize = 64 * 1024 * 1024;
 fn asset_byte_limit(kind: AssetKind) -> usize {
+	if kind == AssetKind::RustScript {
+		return engine_core::components::MAX_RUST_SCRIPT_BYTES;
+	}
 	if kind == AssetKind::SkyPanorama {
 		return engine_core::components::MAX_SKY_PANORAMA_FILE_BYTES;
 	}
@@ -174,16 +181,21 @@ pub(super) fn load_catalog_for_warming(
 }
 
 pub fn resolve_asset(asset_root: &Path, reference: &AssetRef) -> Result<AssetRef, String> {
-	resolve_asset_with_model(asset_root, reference, |_| ()).map(|(reference, ())| reference)
+	resolve_asset_with_model(asset_root, reference, &mut None, |_| ())
+		.map(|(reference, ())| reference)
 }
 
 pub(super) fn resolve_asset_with_model<T>(
 	asset_root: &Path,
 	reference: &AssetRef,
+	catalog: &mut Option<AssetCatalog>,
 	use_model: impl FnOnce(Option<&PersistentAsset>) -> T,
 ) -> Result<(AssetRef, T), String> {
 	reference.validate()?;
-	let catalog = load_catalog(asset_root)?;
+	let catalog = match catalog {
+		Some(catalog) => catalog,
+		vacant => vacant.insert(load_catalog(asset_root)?),
+	};
 	match catalog.resolve_mesh_reference(reference)? {
 		Some((asset, index)) => {
 			let physical_index =
@@ -464,6 +476,7 @@ fn prepare(
 			} else {
 				let mut old = old.clone();
 				if old.fingerprint != asset.fingerprint {
+					mesh_source::check_character_reimport(&asset_root, &old, &bytes)?;
 					hydrate_legacy_meshes(&asset_root, &mut old)?;
 				}
 				old.preserve_mesh_ids(&mut asset, used)?;

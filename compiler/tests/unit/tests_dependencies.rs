@@ -97,6 +97,40 @@ mod model_dependencies {
 		}
 	}
 
+	#[test]
+	fn an_external_normal_map_is_packaged_and_a_missing_map_fails_before_publication() {
+		let fixture = AssetFixture::new();
+		let source = fixture.0.join("source");
+		let (project, _) = authored_scene_fixture(&source);
+		fs::write(source.join("payload.bin"), [0u8; 36]).unwrap();
+		attach_payload_dependency(&source, "../payload.bin", 36);
+		let path = source.join("models/payload.gltf");
+		let mut model: serde_json::Value =
+			serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+		model["images"] = serde_json::json!([{"uri":"../textures/normal.png"}]);
+		model["textures"] = serde_json::json!([{"source":0}]);
+		model["materials"] = serde_json::json!([{"normalTexture":{"index":0}}]);
+		model["meshes"][0]["primitives"][0]["material"] = serde_json::json!(0);
+		fs::write(path, serde_json::to_vec(&model).unwrap()).unwrap();
+		let missing = prepare_project(&project, &source).err().unwrap();
+		assert!(missing.contains("normal.png"), "{missing}");
+		assert!(!fixture.0.join(&project.name).exists());
+
+		let image = fs::read(
+			Path::new(env!("CARGO_MANIFEST_DIR")).join("../apps/game/assets/textures/crate.png"),
+		)
+			.unwrap();
+		fs::create_dir(source.join("textures")).unwrap();
+		fs::write(source.join("textures/normal.png"), &image).unwrap();
+		let prepared = prepare_project(&project, &source).unwrap();
+		let staged = stage_prepared_project(&prepared, fixture.0.to_str().unwrap()).unwrap();
+		validate_export_snapshot(&staged, None).unwrap();
+		assert_eq!(
+			fs::read(staged.path().join("assets/textures/normal.png")).unwrap(),
+			image
+		);
+	}
+
 	#[cfg(windows)]
 	#[test]
 	fn case_variant_references_stage_one_canonical_model_and_dependency_snapshot() {

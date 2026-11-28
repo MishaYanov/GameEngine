@@ -149,6 +149,7 @@ export function runtimeDefinition(graph: AnimatorGraph): string {
             : {kind: 'imported', source: {
                 asset_id: clip.source.asset_id, expected_sha256: clip.source.expected_sha256,
                 scene_index: clip.source.scene_index, mesh_node: clip.source.mesh_node, skin_index: clip.source.skin_index,
+                        ...(clip.source.character === undefined ? {} : {character: clip.source.character}),
             }, clip_index: clip.clip_index}, looping})),
         parameters: graph.parameters.map(({id, source}) => ({
             id, name: '', source: source.kind === 'moving' ? {kind: source.kind, minimum_mm_per_second: source.minimum_mm_per_second}

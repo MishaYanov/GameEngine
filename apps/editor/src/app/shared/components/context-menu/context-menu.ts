@@ -53,7 +53,10 @@ export class EditorContextMenu {
                 if (event.target instanceof Node && !surface.contains(event.target)) this.menu.close(false);
             };
             const scroll = (event: Event) => {
-                if (!(event.target instanceof Node) || !surface.contains(event.target)) this.menu.close();
+                const scroller = event.target;
+                if (scroller instanceof Node && !surface.contains(scroller) && scroller.contains(request.owner)) {
+                    this.menu.close();
+                }
             };
             const dismiss = () => this.menu.close(false);
             this.document.addEventListener('pointerdown', outside, true);
@@ -95,8 +98,13 @@ export class EditorContextMenu {
             const last = panels.at(-1);
             const index = active[panels.length - 1] ?? 0;
             const focused = last?.querySelector<HTMLElement>(`[data-index="${index}"]`);
-            focused?.focus({preventScroll: true});
-            focused?.scrollIntoView?.({block: 'nearest', inline: 'nearest'});
+            if (last && focused) {
+                focused.focus({preventScroll: true});
+                const viewport = last.getBoundingClientRect();
+                const row = focused.getBoundingClientRect();
+                if (row.top < viewport.top) last.scrollTop += row.top - viewport.top;
+                else if (row.bottom > viewport.bottom) last.scrollTop += row.bottom - viewport.bottom;
+            }
         });
     }
 

@@ -1,9 +1,40 @@
-<div class="asset-controls" aria-label="Asset authoring">
-    <button type="button" [disabled]="!availableAssetScope()" (click)="chooseImport()">Import GLB…</button>
-    <button #wavImport type="button" [disabled]="!availableAssetScope()" (click)="chooseImport('wav', wavImport)">Import Audio Clip…</button>
-    <button type="button" [disabled]="!canReimport()" (click)="reimport()">Reimport GLB…</button>
-    <button type="button" [disabled]="!canMove()" (click)="show('move')">Move Asset…</button>
-    <button type="button" [disabled]="!available() || !editor.snapshot()?.selection?.length" (click)="show('prefab')">Save Gameplay Prefab…</button>
+<div class="asset-tool-group" role="group" aria-label="Asset authoring">
+    <button class="asset-icon-button" type="button" aria-label="Import GLB…" title="Import GLB…"
+            [disabled]="!availableAssetScope()" (click)="chooseImport()">
+        <editor-icon name="importFile"/>
+    </button>
+    <button #wavImport class="asset-icon-button" type="button" aria-label="Import Audio Clip…"
+            title="Import Audio Clip…"
+            [disabled]="!availableAssetScope()" (click)="chooseImport('wav', wavImport)">
+        <editor-icon name="importAudio"/>
+    </button>
+    <button #pngImport class="asset-icon-button" type="button" aria-label="Import Particle Sprite…"
+            title="Import Particle Sprite…"
+            [disabled]="!availableAssetScope()" (click)="chooseImport('png', pngImport)">
+        <editor-icon name="importFile"/>
+    </button>
+    <button class="asset-icon-button" type="button" aria-label="Reimport GLB…" title="Reimport selected GLB…"
+            [disabled]="!canReimport()" (click)="reimport()">
+        <editor-icon name="refresh"/>
+    </button>
+    <button class="asset-icon-button" type="button" aria-label="Move Asset…" title="Move selected asset…"
+            [disabled]="!canMove()" (click)="show('move')">
+        <editor-icon name="folderMove"/>
+    </button>
+    <button class="asset-icon-button" type="button" aria-label="Save Gameplay Prefab…" title="Save Gameplay Prefab…"
+            [disabled]="!available() || !editor.snapshot()?.selection?.length" (click)="show('prefab')">
+        <editor-icon name="save"/>
+    </button>
+    <button class="asset-icon-button" type="button" aria-label="New Rust Script…" title="New Rust Script…"
+            [disabled]="!availableAssetScope()" (click)="createScript()">
+        <editor-icon name="plus"/>
+    </button>
+    @if (selectedScript()) {
+        <button class="asset-icon-button" type="button" aria-label="Edit Rust Script…" title="Edit Rust Script…"
+                [disabled]="!availableAssetScope()" (click)="editScript()">
+            <editor-icon name="edit"/>
+        </button>
+    }
 </div>
 @if (unsupportedLegacyModel()) {
     <p>Reimport and move require a self-contained GLB. Import a GLB copy to use these operations.</p>
@@ -16,15 +47,29 @@
     @if (mode() === 'import-audio') {
         <p>Use a canonical 16 kHz, 16-bit mono PCM WAV up to 30 seconds long.</p>
     }
+    @if (mode() === 'import-sprite') {
+        <p>Use a PNG up to 1024 × 1024 pixels and 4 MiB.</p>
+    }
     @if (mode() === 'prefab') {
         <p>Saving to an existing prefab updates that assembly and preserves its asset identity.</p>
+    } @else if (mode() === 'rust-script') {
+        <p>Attach the saved file through the Script component. The Editor compiles it when entering Play.</p>
     } @else {
         <p>Existing destination files are preserved.</p>
     }
     <fieldset class="fields" [disabled]="!!pending()">
         <legend>{{ title() }}</legend>
-        <label>Destination path<input [formField]="fields.path" autocomplete="off"
-            [placeholder]="'asset' + destinationExtension()"/></label>
+        <label>Destination path
+            @if (mode() === 'rust-script' && scriptReplacement()) {
+                <input [value]="draft().path" readonly/>
+            } @else {
+                <input [formField]="fields.path" autocomplete="off" [placeholder]="'asset' + destinationExtension()"/>
+            }
+        </label>
+        @if (mode() === 'rust-script') {
+            <label>Rust source<textarea #code rows="14" spellcheck="false" [value]="scriptText()"
+                                        (input)="scriptText.set(code.value)"></textarea></label>
+        }
     </fieldset>
     @if (error(); as text) { <p class="error" role="alert">{{ text }}</p> }
     @if (pending(); as text) { <p role="status">{{ text }}</p> }

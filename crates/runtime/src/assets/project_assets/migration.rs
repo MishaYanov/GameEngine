@@ -1,8 +1,10 @@
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
 use engine_core::asset_catalog::{
 	AssetCatalog, AssetId, AssetKind, CATALOG_FILE, MAX_CATALOG_BYTES, PersistentAsset,
 };
+
+use engine_core::scene_catalog::SceneCatalog;
 
 use super::prefab::prefab_dependencies;
 use super::{
@@ -16,12 +18,27 @@ const MAX_MIGRATION_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 /// Register legacy on-disk models without rewriting authored scene documents.
 /// This is explicit, bounded migration; aliases resolve old paths after moves.
 pub fn migrate_catalog(asset_root: &Path) -> Result<AssetCatalog, String> {
-	migrate_catalog_with_budget(asset_root, MAX_MIGRATION_SOURCE_BYTES)
+	migrate_catalog_with_budget(asset_root, MAX_MIGRATION_SOURCE_BYTES, None)
 }
+
+/// Use the owning Project's Scene paths while discovering legacy prefabs.
+pub fn migrate_project_catalog(
+	asset_root: &Path,
+	scenes: &SceneCatalog,
+) -> Result<AssetCatalog, String> {
+	migrate_catalog_with_budget(asset_root, MAX_MIGRATION_SOURCE_BYTES, Some(scenes))
+}
+
 pub(super) fn migrate_catalog_with_budget(
 	asset_root: &Path,
 	source_budget: u64,
+	scenes: Option<&SceneCatalog>,
 ) -> Result<AssetCatalog, String> {
+	let scene_paths: HashSet<_> = scenes
+		.into_iter()
+		.flat_map(SceneCatalog::iter)
+		.map(|entry| entry.asset_path().to_lowercase())
+		.collect();
 	let asset_root = root(asset_root)?;
 	let original_catalog = catalog_bytes(&asset_root)?;
 	let mut catalog = load_catalog(&asset_root)?;
@@ -62,7 +79,7 @@ pub(super) fn migrate_catalog_with_budget(
 		})?;
 	}
 	for relative in prefab_paths(&asset_root)? {
-		if catalog.by_path(&relative).is_some() {
+		if scene_paths.contains(&relative.to_lowercase()) || catalog.by_path(&relative).is_some() {
 			continue;
 		}
 		let path = asset_path(&asset_root, &relative, true)?;
@@ -79,6 +96,7 @@ pub(super) fn migrate_catalog_with_budget(
 		if value.get("entities").is_none()
 			|| value.get("schema_version").is_none()
 			|| value.get("camera").is_some()
+			|| (value.get("bindings").is_some() && value.get("default_game_camera").is_some())
 		{
 			continue;
 		}
@@ -152,11 +170,12 @@ fn prefab_paths(asset_root: &Path) -> Result<Vec<String>, String> {
 			if visited > 10_000 {
 				return Err("Asset catalog exceeds 10000 entries".into());
 			}
-			let kind = entry.file_type().map_err(|e| e.to_string())?;
-			if kind.is_symlink() {
+			let path = entry.path();
+			let metadata = entry.metadata().map_err(|e| e.to_string())?;
+			if crate::scene_io::paths::is_linked(&metadata) {
 				continue;
 			}
-			let path = entry.path();
+			let kind = metadata.file_type();
 			if kind.is_dir() {
 				pending.push((path, depth + 1));
 			} else if kind.is_file()

@@ -22,8 +22,7 @@
         </fieldset>
     }
     @if (!showingAssets()) {
-    <p>Map physical keys to movement and game actions. An action can drive a boolean animation parameter while its key
-        is held.</p>
+        <p>Bind keys to movement and game actions. Add a mouse button to trigger an action with either input.</p>
 
     <fieldset [disabled]="pending()">
         <legend>Movement</legend>
@@ -60,6 +59,14 @@
                         }
                     </select>
                 </label>
+                <label>Mouse button
+                    <select [formField]="fields.actions[index].mouseButton">
+                        <option value="">None</option>
+                        @for (choice of mouseButtons; track choice.button) {
+                            <option [value]="choice.button">{{ choice.label }}</option>
+                        }
+                    </select>
+                </label>
                 <label>Animation parameter
                     <input [formField]="fields.actions[index].parameter" autocomplete="off" placeholder="Optional"/>
                 </label>
@@ -75,9 +82,9 @@
     </fieldset>
 
     <section (blur)="clearPreview()" (keydown)="previewKey($event, true)" (keyup)="previewKey($event, false)"
-             aria-label="Test game bindings" class="preview" tabindex="0">
-        <h3>Test bindings</h3>
-        <p>Focus this area and press your keys. The animation output is a parameter preview.</p>
+             aria-label="Test keyboard bindings" class="preview" tabindex="0">
+        <h3>Test keyboard bindings</h3>
+        <p>Focus this area and press your keys. Try mouse bindings in Game view during Play.</p>
         <dl>
             <dt>Movement</dt>
             <dd>{{ preview().movement[0].toFixed(2) }}, {{ preview().movement[1].toFixed(2) }}</dd>

@@ -74,6 +74,38 @@ describe('Vector3Field', () => {
         expect(x().value).toBe('9');
     });
 
+    it('shows concise resting values while editing and emitting full precision', async () => {
+        const value = 180.00000265910896;
+        const edited = -179.123456789;
+        fixture.componentRef.setInput('compactNumbers', true);
+        fixture.componentRef.setInput('value', [value, -3.123456789e-17, 6.012345e20]);
+        await fixture.whenStable();
+        const field = x();
+        expect(field.value).toBe('180');
+        expect(field.title).toBe(String(value));
+        const display = [...(fixture.nativeElement as HTMLElement).querySelectorAll('input')].map(input => input.value);
+        expect(display.every(number => number.length <= 8)).toBe(true);
+        expect(Number(display[1])).not.toBe(0);
+
+        const values: Vector3Change[] = [];
+        fixture.componentInstance.valueChanged.subscribe(change => values.push(change));
+        field.focus();
+        await fixture.whenStable();
+        expect(field.value).toBe(String(value));
+        expect(values).toEqual([]);
+
+        field.value = String(edited);
+        field.dispatchEvent(new Event('input'));
+        fixture.componentRef.setInput('value', [edited, -3.123456789e-17, 6.012345e20]);
+        await fixture.whenStable();
+        expect(values).toEqual([{axis: 0, value: edited}]);
+        expect(field.value).toBe(String(edited));
+        field.blur();
+        await fixture.whenStable();
+        expect(field.value).toBe('-179.123');
+        expect(field.title).toBe(String(edited));
+    });
+
     it('opts into an accessible link toggle and keeps it disabled with the field', async () => {
         const host: HTMLElement = fixture.nativeElement;
         const findToggle = () => host.querySelector<HTMLButtonElement>('button[aria-label="Link Position axes"]');

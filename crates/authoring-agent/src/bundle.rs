@@ -9,7 +9,7 @@ const EDITOR_PROFILE: &str = "editor-guidance";
 const MAX_MANIFEST_BYTES: usize = 8 * 1024;
 const MANIFEST: &[u8] = include_bytes!(concat!(
 	env!("CARGO_MANIFEST_DIR"),
-	"/../../agent-profiles/game-development-support/bundle.json"
+"/profiles/game-development-support.json"
 ));
 const WORKFLOW_GUIDANCE: &str = include_str!(concat!(
 	env!("CARGO_MANIFEST_DIR"),

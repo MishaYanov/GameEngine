@@ -2,9 +2,9 @@ mod support;
 
 use engine_core::{
 	animation::{
-		AnimationClipRef, AnimationSourceRef, AnimatorBinding, AnimatorCondition, AnimatorGraph,
-		AnimatorNodePosition, AnimatorParameter, AnimatorParameterSource, AnimatorSettings,
-		AnimatorState, AnimatorTransition,
+		AnimationCharacterIdentity, AnimationClipRef, AnimationSourceRef, AnimatorBinding,
+		AnimatorCondition, AnimatorGraph, AnimatorNodePosition, AnimatorParameter,
+		AnimatorParameterSource, AnimatorSettings, AnimatorState, AnimatorTransition,
 	},
 	asset_catalog::AssetId,
 	command::{EditorCommandDto as Command, EditorCommandRequest},
@@ -20,7 +20,39 @@ fn rig() -> AnimationSourceRef {
 		scene_index: 0,
 		mesh_node: 0,
 		skin_index: 0,
+		character: None,
 	}
+}
+
+#[test]
+fn character_joint_map_round_trips_inside_a_tagged_animator_binding() {
+	let mut source = rig();
+	source.character = Some(AnimationCharacterIdentity {
+		clips: vec!["idle".into()],
+		joints: [(3, "foot".into()), (5, "knee".into())].into(),
+		root_node: Some(1),
+	});
+	let binding = AnimatorBinding::Imported { source };
+	let json = serde_json::to_string(&binding).unwrap();
+	assert_eq!(
+		serde_json::from_str::<AnimatorBinding>(&json).unwrap(),
+		binding
+	);
+	assert!(json.contains(r#""3":"foot""#));
+	let duplicate = json.replace(r#""3":"foot""#, r#""3":"foot","3":"knee""#);
+	assert!(
+		serde_json::from_str::<AnimatorBinding>(&duplicate)
+			.unwrap_err()
+			.to_string()
+			.contains("repeats a joint node")
+	);
+	let ambiguous = json.replace(r#""3":"foot""#, r#""03":"foot""#);
+	assert!(
+		serde_json::from_str::<AnimatorBinding>(&ambiguous)
+			.unwrap_err()
+			.to_string()
+			.contains("canonical and bounded")
+	);
 }
 
 fn graph(source: &AnimationSourceRef) -> AnimatorGraph {
@@ -114,6 +146,7 @@ fn two_objects_can_store_one_animator_and_legacy_playback_is_unaffected_until_ad
 	};
 	let settings = AnimatorSettings {
 		root_motion_source_node: None,
+		foot_ik: None,
 		asset_id: AssetId::generate(),
 		binding: AnimatorBinding::Imported { source },
 	};

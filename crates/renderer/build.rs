@@ -7,12 +7,14 @@ use std::{
 fn main() {
 	println!("cargo:rerun-if-changed=shaders/triangle.vert");
 	println!("cargo:rerun-if-changed=shaders/triangle.frag");
+	println!("cargo:rerun-if-changed=shaders/normal-map.glsl");
 
-	compile_shader("shaders/triangle.vert", "triangle.vert.spv");
+	compile_shader("shaders/triangle.vert", "triangle.vert.spv", &[]);
 
-	compile_shader("shaders/triangle.frag", "triangle.frag.spv");
+	compile_shader("shaders/triangle.frag", "triangle.frag.spv", &[]);
 	for shader in [
 		"skinned.vert",
+		"shadow.frag",
 		"editor-grid.vert",
 		"editor-grid.frag",
 		"editor-lines.vert",
@@ -22,11 +24,24 @@ fn main() {
 		"sky_panorama.frag",
 	] {
 		println!("cargo:rerun-if-changed=shaders/{shader}");
-		compile_shader(&format!("shaders/{shader}"), &format!("{shader}.spv"));
+		compile_shader(&format!("shaders/{shader}"), &format!("{shader}.spv"), &[]);
+	}
+	println!("cargo:rerun-if-changed=shaders/editor-vertex-marker.glsl");
+	for mesh in ["triangle", "skinned"] {
+		compile_shader(
+			&format!("shaders/{mesh}.vert"),
+			&format!("{mesh}-shadow.vert.spv"),
+			&["-DDIRECTIONAL_SHADOW"],
+		);
+		compile_shader(
+			&format!("shaders/{mesh}.vert"),
+			&format!("{mesh}-markers.vert.spv"),
+			&["-DEDITOR_VERTEX_MARKERS"],
+		);
 	}
 }
 
-fn compile_shader(source: &str, output_name: &str) {
+fn compile_shader(source: &str, output_name: &str, options: &[&str]) {
 	let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is not set"));
 
 	let output = out_dir.join(output_name);
@@ -34,6 +49,7 @@ fn compile_shader(source: &str, output_name: &str) {
 	let glslc = find_glslc();
 
 	let status = Command::new(&glslc)
+		.args(options)
 		.arg(source)
 		.arg("-o")
 		.arg(&output)

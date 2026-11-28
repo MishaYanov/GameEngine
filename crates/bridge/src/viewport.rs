@@ -69,6 +69,14 @@ pub enum ViewportView {
 }
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ViewportShading {
+	#[default]
+	Lit,
+	Unlit,
+	Wireframe,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ViewportOrientation {
 	#[default]
 	Free,
@@ -96,6 +104,10 @@ pub struct ViewportSettingsDto {
 	pub projection: ViewportProjection,
 	pub plane: ViewportPlane,
 	pub view: ViewportView,
+	#[serde(default)]
+	pub shading: ViewportShading,
+	#[serde(default)]
+	pub show_vertices: bool,
 }
 impl Default for ViewportSettingsDto {
 	fn default() -> Self {
@@ -113,6 +125,8 @@ impl Default for ViewportSettingsDto {
 			projection: ViewportProjection::Perspective,
 			plane: ViewportPlane::Xz,
 			view: ViewportView::Scene,
+			shading: ViewportShading::Lit,
+			show_vertices: false,
 		}
 	}
 }
@@ -219,6 +233,9 @@ pub struct ViewportEditorStateDto {
 	pub transform_preview: Option<ViewportTransformPreviewDto>,
 	#[serde(default)]
 	pub game_status: Option<crate::editor::PlayStatusDto>,
+	/// Aggregate logical GPU scene-asset bytes for the active streaming world.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub world_gpu_asset_bytes: Option<u64>,
 	#[serde(default)]
 	pub orbit_status: Option<OrbitStatusDto>,
 	#[serde(default)]
@@ -247,6 +264,7 @@ impl Default for ViewportEditorStateDto {
 			collider_error: None,
 			transform_preview: None,
 			game_status: None,
+			world_gpu_asset_bytes: None,
 			orbit_status: None,
 			scene_warming_result: None,
 		}
@@ -300,6 +318,12 @@ pub enum ViewportActionDto {
 	},
 	SetView {
 		view: ViewportView,
+	},
+	SetShading {
+		shading: ViewportShading,
+	},
+	SetShowVertices {
+		visible: bool,
 	},
 	Orient {
 		orientation: ViewportOrientation,
@@ -370,5 +394,27 @@ impl ViewportActionDto {
 			}
 			_ => Ok(()),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::ViewportEditorStateDto;
+
+	#[test]
+	fn streaming_world_gpu_bytes_are_optional_and_zero_is_preserved() {
+		let without = serde_json::to_value(ViewportEditorStateDto::default()).unwrap();
+		assert!(without.get("world_gpu_asset_bytes").is_none());
+		let old: ViewportEditorStateDto = serde_json::from_value(without).unwrap();
+		assert_eq!(old.world_gpu_asset_bytes, None);
+
+		let reading = ViewportEditorStateDto {
+			world_gpu_asset_bytes: Some(0),
+			..ViewportEditorStateDto::default()
+		};
+		let wire = serde_json::to_value(reading).unwrap();
+		assert_eq!(wire["world_gpu_asset_bytes"], 0);
+		let restored: ViewportEditorStateDto = serde_json::from_value(wire).unwrap();
+		assert_eq!(restored.world_gpu_asset_bytes, Some(0));
 	}
 }

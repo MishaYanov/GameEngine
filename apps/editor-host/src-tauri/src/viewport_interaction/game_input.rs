@@ -1,4 +1,8 @@
+use std::borrow::Cow;
+
 use super::*;
+use gameplay_catalog::cinder_oath::{CinderProgress, Phase};
+use runtime::MouseButton;
 
 /// Identity established by a successful native grab. Every sample retains it until release.
 pub(crate) struct GameCameraCapture {
@@ -8,13 +12,14 @@ pub(crate) struct GameCameraCapture {
 }
 
 impl GameCameraCapture {
-	pub fn acquire(
+	pub fn acquire<G>(
 		interaction: &ViewportInteraction,
 		workspace: &EditorWorkspace,
 		native_focused: bool,
-		grab: impl FnOnce() -> Result<(), String>,
-	) -> Result<Option<Self>, String> {
-		if !workspace.backend.session().action_map_uses_pointer_look()
+		grab: impl FnOnce() -> Result<G, String>,
+	) -> Result<Option<(Self, G)>, String> {
+		if cinder_finished(workspace)
+			|| !workspace.backend.session().action_map_uses_pointer_look()
 			|| !native_focused
 			|| !interaction.keyboard_focused()
 			|| !interaction.game_keyboard_active()
@@ -25,12 +30,15 @@ impl GameCameraCapture {
 		let Some(owner) = workspace.backend.camera_input_owner() else {
 			return Ok(None);
 		};
-		grab()?;
-		Ok(Some(Self {
-			workspace: workspace.generation,
-			epoch: workspace.camera_capture_epoch,
-			owner,
-		}))
+		let native_grab = grab()?;
+		Ok(Some((
+			Self {
+				workspace: workspace.generation,
+				epoch: workspace.camera_capture_epoch,
+				owner,
+			},
+			native_grab,
+		)))
 	}
 
 	pub fn current(&self, workspace: &EditorWorkspace) -> bool {
@@ -39,12 +47,48 @@ impl GameCameraCapture {
 			&& workspace.backend.owns_camera_input(&self.owner)
 	}
 
+	pub fn accepts_input(&self, workspace: &EditorWorkspace) -> bool {
+		self.current(workspace) && !cinder_finished(workspace)
+	}
+
+	pub fn release(
+		self,
+		interaction: &mut ViewportInteraction,
+		workspace: Option<&mut EditorWorkspace>,
+	) {
+		interaction.clear_captured_primary();
+		// Terminal progress disables input while the grab still owns the
+		// current orbit. Clear its queued camera and action samples on release.
+		if let Some(workspace) = workspace.filter(|w| self.current(w)) {
+			interaction.clear_play_input(workspace);
+		}
+	}
+
+	/// Route a button transition only while this native capture still owns Play.
+	pub fn set_primary_button(
+		&self,
+		interaction: &mut ViewportInteraction,
+		workspace: &mut EditorWorkspace,
+		pressed: bool,
+	) -> Result<(), String> {
+		if !self.accepts_input(workspace)
+			|| !interaction.keyboard_focused()
+			|| !interaction.game_keyboard_active()
+			|| interaction.preview_active()
+			|| interaction.captured_primary_held == pressed
+		{
+			return Ok(());
+		}
+		interaction.captured_primary_held = pressed;
+		interaction.route_game_input(workspace)
+	}
+
 	pub fn submit(
 		&self,
 		workspace: &mut EditorWorkspace,
 		intent: CameraIntent,
 	) -> Result<(), String> {
-		if self.workspace != workspace.generation || self.epoch != workspace.camera_capture_epoch {
+		if !self.accepts_input(workspace) {
 			return Err("Game camera capture expired".into());
 		}
 		workspace.backend.submit_camera_input(
@@ -53,6 +97,14 @@ impl GameCameraCapture {
 			intent,
 		)
 	}
+}
+
+fn cinder_finished(workspace: &EditorWorkspace) -> bool {
+	workspace
+		.backend
+		.session()
+		.play_progress::<CinderProgress>()
+		.is_some_and(|progress| matches!(progress.phase(), Phase::Victory | Phase::Defeat))
 }
 
 impl ViewportInteraction {
@@ -152,10 +204,54 @@ impl ViewportInteraction {
 		Ok(())
 	}
 
+	pub fn clear_captured_primary(&mut self) {
+		self.captured_primary_held = false;
+	}
+
 	pub fn clear_play_input(&mut self, workspace: &mut EditorWorkspace) {
+		self.clear_captured_primary();
 		self.keys.clear();
 		self.play_gamepad.reset();
 		workspace.backend.clear_play_input();
+	}
+
+	pub(super) fn set_bound_game_mouse(
+		&mut self,
+		workspace: &mut EditorWorkspace,
+		button: Option<&str>,
+		pressed: bool,
+		inside_game: bool,
+	) -> Result<(), String> {
+		let button = match button {
+			Some("left") => MouseButton::Left,
+			Some("right") => MouseButton::Right,
+			Some("middle") => MouseButton::Middle,
+			Some("back") => MouseButton::Back,
+			Some("forward") => MouseButton::Forward,
+			_ => return Ok(()),
+		};
+		let Some(code) = button.input_code() else {
+			return Ok(());
+		};
+		let changed = if pressed {
+			let session = workspace.backend.session();
+			let bound = inside_game
+				&& !session.is_paused()
+				&& !session.has_authored_input_actions()
+				&& session
+				.project()
+				.input_profile
+				.as_ref()
+				.is_some_and(|profile| profile.contains_mouse_button(button));
+			bound && self.keys.insert(code.into())
+		} else {
+			// A release can arrive outside the letterboxed Game content.
+			self.keys.remove(code)
+		};
+		if changed {
+			self.route_game_input(workspace)?;
+		}
+		Ok(())
 	}
 
 	pub(crate) fn route_game_input(
@@ -163,11 +259,39 @@ impl ViewportInteraction {
 		workspace: &mut EditorWorkspace,
 	) -> Result<(), String> {
 		let physical = self.play_gamepad.sample();
+		let keys = if let Some(key) = self.cinder_attack_key(workspace) {
+			let mut keys = self.keys.clone();
+			keys.insert(key.physical_code());
+			Cow::Owned(keys)
+		} else {
+			Cow::Borrowed(&self.keys)
+		};
 		workspace.backend.set_action_controls_from_codes(
-			&self.keys,
+			&keys,
 			physical,
 			runtime::input::ControllerBindings::default().resolve(physical),
 		)
+	}
+
+	/// Cinder Oath's legacy profile gives captured left-click the same
+	/// attack action as its keyboard binding, matching the standalone Player.
+	fn cinder_attack_key(&self, workspace: &EditorWorkspace) -> Option<runtime::Key> {
+		let session = workspace.backend.session();
+		if !self.captured_primary_held
+			|| session.has_authored_input_actions()
+			|| session.play_progress::<CinderProgress>()?.phase() != Phase::Duel
+		{
+			return None;
+		}
+		let profile = session.project().input_profile.as_ref()?;
+		if profile.contains_mouse_button(MouseButton::Left) {
+			return None;
+		}
+		profile
+			.actions
+			.iter()
+			.find(|binding| binding.id == "attack")
+			.map(|binding| binding.key)
 	}
 
 	#[cfg(windows)]

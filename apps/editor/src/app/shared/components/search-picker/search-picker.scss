@@ -42,7 +42,9 @@ button:disabled {
 
 .results {
   display: grid;
-  max-height: 14rem;
+  align-content: start;
+  min-inline-size: 0;
+  max-block-size: min(14rem, 42dvh);
   margin: 0;
   padding: var(--space-1);
   overflow: auto;
@@ -59,11 +61,13 @@ button:disabled {
 
 [role='option'] {
   display: grid;
-  gap: var(--space-1);
-  min-height: var(--layout-control-height);
+  gap: 2px;
+  min-inline-size: 0;
+  min-block-size: var(--layout-control-height);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   cursor: var(--cursor-action);
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 

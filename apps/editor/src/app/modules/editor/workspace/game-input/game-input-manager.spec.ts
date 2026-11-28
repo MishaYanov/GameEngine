@@ -4,6 +4,7 @@ import {vi} from 'vitest';
 import axe from 'axe-core';
 import type {EditorCommand, EditorSnapshot, ProjectData} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import {DEFAULT_GAME_INPUT} from '../../../../core/game-input/game-input.models';
 import {LAYOUT_PREFERENCES_STORAGE} from '../../../../shared/services/layout-preferences-storage';
 import {GameInputManager} from './game-input-manager';
 import {InputActionsKeyField} from './input-actions-key-field';
@@ -120,10 +121,10 @@ describe('Game Input Manager', () => {
         else Reflect.deleteProperty(prototype, 'close');
     });
 
-    async function setup(withInspector = false) {
+    async function setup(withInspector = false, initialProject = project) {
         const snapshot = signal<Pick<EditorSnapshot, 'mode' | 'project' | 'transaction' | 'revision'>>({
             mode: 'edit',
-            project,
+            project: initialProject,
             transaction: null,
             revision: 7,
         });
@@ -234,6 +235,64 @@ describe('Game Input Manager', () => {
                 }
             }
         }, 1, 7);
+    });
+
+    function mouseSelect(row: Element): HTMLSelectElement {
+        return row.querySelectorAll<HTMLSelectElement>('select')[1];
+    }
+
+    it('loads project mouse buttons and keeps aliases attached to renamed actions on Apply', async () => {
+        const {fixture, root, button, snapshot} = await setup(false, {
+            ...project, input_profile: {
+                ...DEFAULT_GAME_INPUT,
+                actions: [{id: 'jump', key: 'space'}, {id: 'step', key: 'e'}],
+                mouse_actions: [{id: 'step', button: 'left'}, {id: 'jump', button: 'right'}],
+            }
+        });
+        const [jump, step] = root.querySelectorAll('.action-row');
+        expect(mouseSelect(jump).value).toBe('right');
+        expect(mouseSelect(step).value).toBe('left');
+        expect(button('Apply Bindings').disabled).toBe(true);
+
+        const name = jump.querySelector('input')!;
+        name.value = 'leap';
+        name.dispatchEvent(new Event('input'));
+        step.querySelector('button')!.click();
+        await fixture.whenStable();
+        button('Apply Bindings').click();
+        await fixture.whenStable();
+        expect(snapshot().project.input_profile).toMatchObject({
+            actions: [{id: 'leap', key: 'space'}],
+            mouse_actions: [{id: 'leap', button: 'right'}],
+        });
+        expect(button('Apply Bindings').disabled).toBe(true);
+    });
+
+    it('rejects duplicate mouse buttons and applies a new button after the conflict is resolved', async () => {
+        const {fixture, root, button, execute, snapshot} = await setup(false, {
+            ...project, input_profile: {
+                ...DEFAULT_GAME_INPUT,
+                actions: [{id: 'jump', key: 'space'}, {id: 'step', key: 'e'}],
+                mouse_actions: [{id: 'step', button: 'left'}],
+            }
+        });
+        const jump = mouseSelect(root.querySelector('.action-row')!);
+        expect(jump.value).toBe('');
+        jump.value = 'left';
+        jump.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        expect(root.querySelector('.error')?.textContent).toContain('Left button is already assigned');
+        expect(button('Apply Bindings').disabled).toBe(true);
+        expect(execute).not.toHaveBeenCalled();
+
+        jump.value = 'right';
+        jump.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        button('Apply Bindings').click();
+        await fixture.whenStable();
+        expect(snapshot().project.input_profile?.mouse_actions).toEqual([
+            {id: 'jump', button: 'right'}, {id: 'step', button: 'left'},
+        ]);
     });
 
     it('closes the draft when a different project becomes active', async () => {

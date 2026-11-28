@@ -3,6 +3,7 @@ import {invoke} from '@tauri-apps/api/core';
 import {listen, type UnlistenFn} from '@tauri-apps/api/event';
 import type {EntityKey, SceneId} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
+import type {ViewportShading} from '../../../../core/editor/viewport-editor.models';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import {WorkspaceViewService} from '../scene-viewport/workspace-view.service';
 import {PropWorkspaceService} from './prop-workspace.service';
@@ -12,6 +13,29 @@ type PropPreviewTarget =
     | {readonly kind: 'instance'; readonly scene_id: SceneId; readonly root_key: EntityKey};
 
 export type PropPreviewEnvironment = 'neutral' | 'scene';
+
+interface PropPreviewDisplay {
+    readonly shading: ViewportShading;
+    readonly showVertices: boolean;
+    readonly showNormalDetail: boolean;
+}
+
+interface ImportedNormalInfo {
+    readonly image: number;
+    readonly texture: number;
+    readonly tex_coord: number;
+    readonly scale: number;
+}
+
+interface PropPreviewMaterials {
+    readonly model_path: string;
+    readonly materials: readonly {
+        readonly index: number | null;
+        readonly name: string;
+        readonly normal: ImportedNormalInfo | null;
+        readonly primitives: readonly { readonly index: number; readonly detail: string }[];
+    }[];
+}
 
 type PreviewState = {
     readonly token: string;
@@ -28,6 +52,7 @@ interface PreviewOwner {
 }
 
 let nextPreviewRequest = 0;
+const DEFAULT_PROP_DISPLAY: PropPreviewDisplay = {shading: 'lit', showVertices: false, showNormalDetail: true};
 
 /** Owns one native preview lease while the Prop tab is active. */
 @Injectable()
@@ -42,9 +67,19 @@ export class PropPreviewService {
     private readonly previewEnvironment = signal<PropPreviewEnvironment>('neutral');
     private readonly environmentBusy = signal(false);
     private readonly environmentFailure = signal<string | null>(null);
+    private readonly previewDisplay = signal(DEFAULT_PROP_DISPLAY);
+    private readonly displayBusy = signal(false);
+    private readonly displayFailure = signal<string | null>(null);
+    private readonly materialInfo = signal<PropPreviewMaterials | null>(null);
+    private readonly materialBusy = signal(false);
+    private readonly materialFailure = signal<string | null>(null);
     private readonly retryVersion = signal(0);
     private readonly subscriptions: UnlistenFn[] = [];
     private request = 0;
+    private ownerKey: string | null = null;
+    private openingToken: string | undefined;
+    private selectionQueue = Promise.resolve();
+    private materialQueue = Promise.resolve();
     private destroyed = false;
 
     readonly ready = computed(() => this.state() !== null && !this.failure());
@@ -54,6 +89,24 @@ export class PropPreviewService {
     readonly environment = this.previewEnvironment.asReadonly();
     readonly environmentPending = this.environmentBusy.asReadonly();
     readonly environmentError = this.environmentFailure.asReadonly();
+    readonly display = this.previewDisplay.asReadonly();
+    readonly displayPending = this.displayBusy.asReadonly();
+    readonly displayError = this.displayFailure.asReadonly();
+    readonly materials = this.materialInfo.asReadonly();
+    readonly materialsPending = this.materialBusy.asReadonly();
+    readonly materialsError = this.materialFailure.asReadonly();
+    private readonly materialTarget = computed(() => {
+        const token = this.state()?.token;
+        if (!token || this.props.selectedPlacement()) return null;
+        const object = this.props.selectedObject();
+        if (!object?.components.some(component => component.data.kind === 'mesh_renderer')) return null;
+        const document = this.props.document();
+        const revision = document?.kind === 'source' ? document.draft.draft_revision : this.editor.snapshot()?.scene_revision;
+        return {token, key: object.key, revision, assets: this.editor.modelAssets()};
+    }, {
+        equal: (a, b) => a?.token === b?.token && a?.key === b?.key &&
+            a?.revision === b?.revision && a?.assets === b?.assets
+    });
     readonly supportsEnvironment = computed(() =>
         this.editor.capabilities()?.commands?.some(command => command.name === 'set_scene_environment') ?? false,
     );
@@ -83,6 +136,12 @@ export class PropPreviewService {
             const owner = this.owner();
             untracked(() => this.synchronize(owner));
         });
+        effect(() => {
+            const state = this.state();
+            if (state?.selection && this.props.selectedPlacement()) {
+                untracked(() => void this.updateNativeSelection(null));
+            }
+        });
         if (this.editor.nativeAvailable) {
             this.subscribe('editor://prop-preview-selection', value => {
                 const state = readPreviewState(value);
@@ -98,11 +157,34 @@ export class PropPreviewService {
                 }
             });
         }
+        effect(() => {
+            const target = this.materialTarget();
+            this.materialInfo.set(null);
+            this.materialFailure.set(null);
+            this.materialBusy.set(target !== null);
+            if (!target) return;
+            const current = () => !this.destroyed && this.materialTarget() === target;
+            this.materialQueue = this.materialQueue.then(async () => {
+                if (!current()) return;
+                const {token, key} = target;
+                try {
+                    const materials = await invoke<PropPreviewMaterials | null>('editor_prop_preview_materials', {
+                        token,
+                        key
+                    });
+                    if (current()) this.materialInfo.set(materials);
+                } catch (error) {
+                    if (current()) this.materialFailure.set(error instanceof Error ? error.message : String(error));
+                } finally {
+                    if (current()) this.materialBusy.set(false);
+                }
+            });
+        });
         inject(DestroyRef).onDestroy(() => {
             this.destroyed = true;
             this.request++;
             for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
-            this.closeToken(this.state()?.token);
+            this.releasePreview();
         });
     }
 
@@ -136,29 +218,64 @@ export class PropPreviewService {
         }
     }
 
+    async setDisplay(display: PropPreviewDisplay): Promise<void> {
+        const current = this.state();
+        if (!current || !this.matches(current) || !this.ready() || this.displayBusy()) return;
+        this.displayBusy.set(true);
+        this.displayFailure.set(null);
+        try {
+            await this.applyDisplay(current.token, display);
+            if (this.matches(current)) this.previewDisplay.set(display);
+        } catch (error) {
+            if (this.matches(current)) this.displayFailure.set(error instanceof Error ? error.message : String(error));
+        } finally {
+            if (this.matches(current)) this.displayBusy.set(false);
+        }
+    }
+
     async select(key: EntityKey): Promise<void> {
         this.props.selectObject(key);
+        await this.updateNativeSelection(key);
+    }
+
+    private updateNativeSelection(key: EntityKey | null): Promise<void> {
         const current = this.state();
-        if (!current || !this.ready()) return;
-        try {
-            const selected = readPreviewState(await invoke('editor_prop_preview_select', {token: current.token, key}));
-            if (selected && this.matches(selected) && this.props.selectedObject()?.key === selected.selection) {
-                this.state.set(selected);
+        if (!current || !this.ready()) return Promise.resolve();
+        const update = this.selectionQueue.then(async () => {
+            if (!this.matches(current)) return;
+            const placement = this.props.selectedPlacement();
+            if (key === null ? !placement || !this.state()?.selection : !!placement) return;
+            try {
+                const selected = readPreviewState(await invoke('editor_prop_preview_select', {
+                    token: current.token,
+                    key
+                }));
+                if (selected && this.matches(selected)) this.state.set(selected);
+            } catch (error) {
+                this.reportFailure(current, error);
             }
-        } catch (error) {
-            this.reportFailure(current, error);
-        }
+        });
+        this.selectionQueue = update;
+        return update;
     }
 
     private synchronize(owner: PreviewOwner | null): void {
         const request = ++nextPreviewRequest;
         this.request = request;
-        this.closeToken(this.state()?.token);
+        this.ownerKey = owner?.key ?? null;
+        this.selectionQueue = Promise.resolve();
+        this.releasePreview();
         this.state.set(null);
         this.failure.set(null);
         this.previewEnvironment.set('neutral');
         this.environmentBusy.set(false);
         this.environmentFailure.set(null);
+        this.displayBusy.set(false);
+        this.displayFailure.set(null);
+        this.previewDisplay.update(display => display.showNormalDetail ? display : {
+            ...display,
+            showNormalDetail: true
+        });
         const revision = this.editor.snapshot()?.revision;
         this.busy.set(owner !== null && revision !== undefined);
         if (!owner || revision === undefined) return;
@@ -181,7 +298,22 @@ export class PropPreviewService {
                 this.closeToken(state?.token);
                 throw new Error('The Prop preview returned a different view owner.');
             }
+            const display = this.previewDisplay();
+            if (display.shading !== DEFAULT_PROP_DISPLAY.shading || display.showVertices) {
+                this.openingToken = state.token;
+                try {
+                    await this.applyDisplay(state.token, display);
+                } catch (error) {
+                    if (this.current(owner, request)) {
+                        this.previewDisplay.set(DEFAULT_PROP_DISPLAY);
+                        this.displayFailure.set(error instanceof Error ? error.message : String(error));
+                    }
+                }
+                if (!this.current(owner, request)) return;
+                this.openingToken = undefined;
+            }
             this.state.set(state);
+            if (this.props.selectedPlacement()) return;
             if (state.selection) this.props.selectObject(state.selection);
             else {
                 const selected = this.props.selectedObject()?.key;
@@ -202,7 +334,11 @@ export class PropPreviewService {
         const current = this.state();
         return !this.destroyed && current?.token === other.token &&
             current.workspace_generation === other.workspace_generation && current.revision === other.revision &&
-            current.request_id === other.request_id;
+            current.request_id === other.request_id && this.ownerKey === this.owner()?.key;
+    }
+
+    private applyDisplay(token: string, display: PropPreviewDisplay): Promise<void> {
+        return invoke<void>('editor_prop_preview_display', {token, ...display});
     }
 
     private reportFailure(state: PreviewState, error: unknown): void {
@@ -218,6 +354,11 @@ export class PropPreviewService {
 
     private closeToken(token?: string): void {
         if (token) void invoke<void>('editor_prop_preview_close', {token}).catch(() => undefined);
+    }
+
+    private releasePreview(): void {
+        this.closeToken(this.openingToken ?? this.state()?.token);
+        this.openingToken = undefined;
     }
 }
 

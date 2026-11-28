@@ -1,9 +1,9 @@
 //! Run with cargo run -p game --example renderer_smoke (requires native Vulkan).
-use runtime::{Transform, assets, model_instance::ModelInstance, scene::Scene};
+use runtime::{EntityKey, Transform, assets, model_instance::ModelInstance, scene::Scene};
 
 use renderer::{
-	DrawStatus, WindowRenderer,
-	vulkan::{CameraUniform, Light, ModelPushConstants},
+	DrawStatus, EditorGrid, EditorShadingMode, EditorVisuals, WindowRenderer,
+	vulkan::{CameraUniform, Light, ModelPushConstants, RenderObject, Vertex, mesh::SkinInfluence},
 };
 use std::{
 	sync::Arc,
@@ -30,6 +30,8 @@ struct Smoke {
 	pipeline_ids: Option<Vec<u64>>,
 	warmed_sky: bool,
 }
+
+const INSPECTED_OBJECT: &str = "preview-robot";
 
 fn pipeline_ids(renderer: &WindowRenderer) -> Option<Vec<u64>> {
 	renderer.resource_metrics().map(|metrics| {
@@ -196,7 +198,7 @@ impl ApplicationHandler for Smoke {
 		);
 		let size = window.inner_size();
 		let mut renderer =
-			WindowRenderer::new(Arc::clone(&window), size.width, size.height).unwrap();
+			WindowRenderer::new_editor(Arc::clone(&window), size.width, size.height).unwrap();
 		renderer.set_lights(&[]).unwrap();
 		renderer
 			.set_lights(&[
@@ -237,7 +239,6 @@ impl ApplicationHandler for Smoke {
 			self.warmed_sky = renderer.draw(&camera, &[]).unwrap() == DrawStatus::Rendered;
 			assert!(self.warmed_sky);
 		}
-		self.pipeline_ids = pipeline_ids(&renderer);
 		let mut assets = assets::AssetManager::new(
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"),
 		)
@@ -341,7 +342,13 @@ impl ApplicationHandler for Smoke {
 			.spawn(ModelInstance::new(Arc::clone(&model), first_transform));
 		let second = self
 			.scene
-			.spawn(ModelInstance::new(Arc::clone(&model), second_transform));
+			.spawn_keyed_model(
+				EntityKey::new(INSPECTED_OBJECT).unwrap(),
+				"Preview robot",
+				"props/robot.glb",
+				ModelInstance::new(Arc::clone(&model), second_transform),
+			)
+			.unwrap();
 		{
 			let objects = self.scene.render_objects();
 			assert_eq!(objects.len(), model.parts().len() * 2);
@@ -465,6 +472,68 @@ impl ApplicationHandler for Smoke {
 			);
 		}
 		if self.frames == 2 {
+			let selected = [EntityKey::new(INSPECTED_OBJECT).unwrap()];
+			let (mut objects, _) = self
+				.scene
+				.try_render_editor_visible(None, &selected)
+				.unwrap();
+			let vertices = [
+				Vertex::new([-0.3, -0.3, 0.2], [0.0, 0.0]),
+				Vertex::new([0.3, -0.3, 0.2], [1.0, 0.0]),
+				Vertex::new([0.0, 0.3, 0.2], [0.5, 1.0]),
+			];
+			let influences = [SkinInfluence {
+				joints: [0; 4],
+				weights: [1.0, 0.0, 0.0, 0.0],
+			}; 3];
+			let skinned_mesh = renderer
+				.upload_skinned_mesh(&vertices, &[0, 1, 2], &influences)
+				.unwrap();
+			let palette = [glam::Mat4::IDENTITY.to_cols_array()];
+			let material = self.scene.instances().next().unwrap().model().parts()[0].material();
+			objects.push(
+				RenderObject::new(&skinned_mesh, material, ModelPushConstants::identity())
+					.with_skin_palette(&palette)
+					.with_vertex_markers(),
+			);
+			renderer
+				.set_editor_visuals(&EditorVisuals {
+					grid: Some(EditorGrid::default()),
+					..EditorVisuals::default()
+				})
+				.unwrap();
+			let editor_camera = CameraUniform::perspective(
+				[1.2, 1.7, 3.6],
+				[0.0; 3],
+				[0.0, 1.0, 0.0],
+				60.0_f32.to_radians(),
+				width as f32 / height as f32,
+				0.1,
+				100.0,
+			);
+			let mut draws = [0; 3];
+			for (mode, draw_calls) in [
+				EditorShadingMode::Lit,
+				EditorShadingMode::Unlit,
+				EditorShadingMode::Wireframe,
+			]
+				.into_iter()
+				.zip(&mut draws)
+			{
+				assert_eq!(
+					renderer
+						.draw_editor_in_rect(&editor_camera, &objects, [0, 0, width, height], mode)
+						.unwrap(),
+					DrawStatus::Rendered,
+					"editor draw with a work grid and selected vertices in {mode:?}"
+				);
+				*draw_calls = renderer.last_metrics().draw_calls;
+			}
+			assert_eq!(draws[0], draws[1], "Lit and Unlit share surface passes");
+			assert!(draws[2] > draws[0], "Wireframe also draws visible edges");
+			drop(objects);
+			renderer.set_editor_visuals(&EditorVisuals::default()).unwrap();
+			self.pipeline_ids = pipeline_ids(renderer);
 			renderer.wait_idle().unwrap();
 			self.scene = Scene::default();
 			self.assets.as_mut().unwrap().clear();
@@ -528,6 +597,6 @@ fn main() {
 		"native validation logged errors: {errors:?}"
 	);
 	println!(
-		"PASS: scene resource mapping, render-object budget, retained GPU accounting/pruning, instanced tinted/lit draws, resource release, zero-size suspension, empty resize/draw, shutdown"
+		"PASS: scene resource mapping, render-object budget, GPU accounting, instanced draws, editor shading modes with selected vertices, resource release, resize, shutdown"
 	);
 }

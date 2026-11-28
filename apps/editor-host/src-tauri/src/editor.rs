@@ -153,7 +153,7 @@ impl EditorWorkspace {
 		let saved_files = SavedFiles::new(manifest_fingerprint, documents.fingerprints);
 		let backend = runtime::EngineBuilder::new(scene, project)
 			.with_scenes(documents.scenes)
-			.module_resolver(Arc::new(gameplay_catalog::resolve))
+			.module_resolver(gameplay_catalog::project_resolver(&asset_root, gameplay_catalog::project_scripts::ScriptSource::Rust))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
 			.control_graph_resolver(control_graph_resolver(&asset_root))
@@ -201,7 +201,7 @@ impl EditorWorkspace {
 		let saved_files = SavedFiles::new(manifest_fingerprint, documents.fingerprints);
 		let backend = runtime::EngineBuilder::new(scene, project)
 			.with_scenes(documents.scenes)
-			.module_resolver(Arc::new(gameplay_catalog::resolve))
+			.module_resolver(gameplay_catalog::project_resolver(&asset_root, gameplay_catalog::project_scripts::ScriptSource::Rust))
 			.animation_resolver(animation_resolver(&asset_root))
 			.input_actions_resolver(input_actions_resolver(&asset_root))
 			.control_graph_resolver(control_graph_resolver(&asset_root))

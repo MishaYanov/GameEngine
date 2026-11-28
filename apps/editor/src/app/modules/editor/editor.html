@@ -1,9 +1,16 @@
 <main class="editor-main">
     <editor-header
+            [canGoBack]="workspace.canGoBack()"
+            [canGoForward]="workspace.canGoForward()"
+            (backRequested)="navigateWorkspace('back')"
+            (forwardRequested)="navigateWorkspace('forward')"
             (exitRequested)="exitEditor()"
             (openProjectRequested)="openProject()"
             (objectActionRequested)="workspace.runObjectAction($event)"
             (sceneInformationRequested)="workspace.openSceneInformation()"
+            (newSceneRequested)="workspace.openNewScene()"
+            [canCreateScene]="workspace.canCreateScene()"
+            (sceneFlowRequested)="workspace.openSceneFlow()"
             (controlsRequested)="workspace.openControls()"
             (physicsLayersRequested)="workspace.openPhysicsLayers()"
             (projectSetupRequested)="openProjectSetup($event)"
@@ -12,6 +19,7 @@
             [canOpen]="canOpenProject()"
             [canOpenControls]="workspace.canOpenControls()"
             [availableObjectActions]="workspace.availableObjectActions()"
+            [objectActionsEnabled]="workspace.objectActionsEnabled()"
             [canOpenSettings]="!opening()"
             [opening]="opening()"
     />

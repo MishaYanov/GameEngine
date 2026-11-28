@@ -73,7 +73,11 @@ pub(in crate::assets) fn load_scene_metadata(
 	let used_images: std::collections::HashSet<_> = scene
 		.materials
 		.iter()
-		.filter_map(|material| material.base_color_image_index)
+		.flat_map(|material| {
+			[material.base_color_image_index, material.normal_image_index]
+				.into_iter()
+				.flatten()
+		})
 		.collect();
 	budget.reserve_product(used_images.len(), 64)?;
 	for image in document

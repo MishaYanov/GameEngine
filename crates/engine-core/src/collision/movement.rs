@@ -181,6 +181,17 @@ impl CollisionWorld {
 		world_delta: [f32; 3],
 		remaining: &mut usize,
 	) -> Result<MovementResult, String> {
+		self.move_entity_with_limit(world, key, world_delta, remaining, |delta| delta)
+	}
+
+	pub(crate) fn move_entity_with_limit(
+		&mut self,
+		world: &mut crate::world::RuntimeWorld,
+		key: &EntityKey,
+		world_delta: [f32; 3],
+		remaining: &mut usize,
+		limit: impl Fn(Vec3) -> Vec3,
+	) -> Result<MovementResult, String> {
 		let mut result = MovementResult {
 			requested_delta: world_delta,
 			applied_delta: [0.0; 3],
@@ -195,6 +206,7 @@ impl CollisionWorld {
 		let index = world
 			.entity_index(key)
 			.ok_or("Movement target does not exist")?;
+		let delta = limit(delta);
 		if delta == Vec3::ZERO {
 			return Ok(result);
 		}
@@ -208,6 +220,7 @@ impl CollisionWorld {
 			return Err("Movement produces a nonfinite local position".into());
 		}
 		let (applied, contacts) = self.slide_delta(world, index, delta, remaining)?;
+		let applied = limit(applied);
 		result.blocked_by = contacts.first().map(|contact| contact.entity.clone());
 		result.contacts = contacts;
 		if applied == Vec3::ZERO {

@@ -89,6 +89,7 @@ impl EditorCamera {
 		Ok(matrix)
 	}
 
+	#[cfg(test)]
 	pub fn project(
 		&self,
 		point: Vec3,

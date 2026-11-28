@@ -99,6 +99,118 @@ fn one_completed_gizmo_drag_creates_exactly_one_undo_action() {
 }
 
 #[test]
+fn selected_bounds_draw_short_corner_brackets_instead_of_full_edges() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	select(&mut workspace, &["entity-0"]);
+	controller.settings.tool = ViewportTool::Hand;
+	controller.settings.colliders = false;
+	for projection in [
+		ViewportProjection::Perspective,
+		ViewportProjection::Orthographic,
+	] {
+		controller.settings.projection = projection;
+		let visuals = controller.visuals(&workspace, EXTENT, 1.0).unwrap();
+		visuals.validate().unwrap();
+		assert!((8..=24).contains(&visuals.lines.len()));
+		for line in &visuals.lines {
+			let project = |point| {
+				controller
+					.camera
+					.project(Vec3::from_array(point), EXTENT, projection)
+					.unwrap()
+			};
+			assert!(project(line.start).distance(project(line.end)) <= 14.02);
+			assert!(!line.depth_test);
+		}
+	}
+}
+
+#[test]
+fn the_active_gizmo_handle_stays_high_contrast_without_a_hover_target() {
+	const HIGHLIGHT: [f32; 4] = [1.0, 0.86, 0.4, 1.0];
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	axis_drag_start(&mut controller, &mut workspace);
+	controller.hover_handle = None;
+	let visuals = controller.visuals(&workspace, EXTENT, 2.0).unwrap();
+	visuals.validate().unwrap();
+	let line = visuals.lines.last().unwrap();
+	assert_eq!(line.color, HIGHLIGHT);
+	assert!(line.width > 6.0);
+	assert!(!line.depth_test);
+	assert!(visuals.lines.iter().any(|outline| {
+		outline.start == line.start
+			&& outline.end == line.end
+			&& outline.color != HIGHLIGHT
+			&& outline.width > line.width
+	}));
+}
+
+#[test]
+fn the_move_handle_commits_the_release_position_without_a_motion_event() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	let original = workspace.backend.session().authored_document().entities[0]
+		.transform
+		.clone();
+	let start = axis_drag_start(&mut controller, &mut workspace);
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_up", [start[0] + 25.0, start[1]], Some("left")),
+	);
+	assert!(!workspace.backend.session().has_transaction());
+	let moved = workspace.backend.session().authored_document().entities[0]
+		.transform
+		.clone();
+	assert!((moved.position[0] - original.position[0]).abs() > 0.05);
+	assert_eq!(moved.position[1..], original.position[1..]);
+	assert_eq!(moved.rotation, original.rotation);
+	assert_eq!(moved.scale, original.scale);
+	command(&mut workspace, Command::Undo);
+	assert_eq!(
+		workspace.backend.session().authored_document().entities[0].transform,
+		original
+	);
+}
+
+#[test]
+fn a_move_handle_explains_when_another_edit_owns_the_transaction() {
+	let fixture = Fixture::new(1);
+	let mut workspace = fixture.open();
+	let mut controller = controller(&mut workspace);
+	select(&mut workspace, &["entity-0"]);
+	let gizmo = controller.gizmo(&workspace, EXTENT, 1.0).unwrap().unwrap();
+	let start = pixel(&controller, gizmo.pivot + gizmo.axes[0] * gizmo.size * 0.7);
+	command(
+		&mut workspace,
+		Command::BeginTransaction {
+			label: "Edit Position".into(),
+		},
+	);
+
+	send(
+		&mut controller,
+		&mut workspace,
+		event("pointer_down", start, Some("left")),
+	);
+
+	assert!(!controller.captured());
+	assert_eq!(
+		controller.state().error.as_deref(),
+		Some("Finish the current edit before dragging a transform handle")
+	);
+	assert_eq!(
+		workspace.backend.session().state().transaction.as_deref(),
+		Some("Edit Position")
+	);
+}
+
+#[test]
 fn native_transform_motion_publishes_only_a_compact_local_preview_until_commit() {
 	let fixture = Fixture::new(1);
 	let mut workspace = fixture.open();

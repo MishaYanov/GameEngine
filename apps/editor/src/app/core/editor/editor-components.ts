@@ -1,6 +1,11 @@
 import {validAudioSourceSettings, type AudioSourceSettings} from './audio-source.models';
 import {validSkySettings, type SkySettings} from './sky.models';
-import {validParticleEmitterSettings, type ParticleEmitterSettings} from './particle-emitter.models';
+import {
+    validParticleBurstSettings,
+    validParticleEmitterSettings,
+    type ParticleBurstSettings,
+    type ParticleEmitterSettings
+} from './particle-emitter.models';
 import type { CameraComponentSettings, Collider, Light, MaterialOverride, Vec3 } from './editor.models';
 import { validMachine, type MachineDefinition } from './state-machine.models';
 import {
@@ -48,7 +53,23 @@ export type NativeBehaviorSpec =
 			readonly lifetime_ticks: number;
 			readonly spawn_offset: Vec3;
 			readonly bindings: Readonly<Record<string, string>>;
-	  };
+}
+    | { readonly kind: 'projectile'; readonly settings: ProjectileSettings }
+    | { readonly kind: 'projectile_launcher'; readonly settings: ProjectileLauncherSettings };
+
+export interface ProjectileSettings {
+    readonly speed: number;
+    readonly lifetime_ticks: number;
+    readonly collision_mask: number;
+    readonly impact?: ParticleBurstSettings;
+}
+
+export interface ProjectileLauncherSettings {
+    readonly prefab_path: string;
+    readonly action: string;
+    readonly max_alive: number;
+    readonly spawn_offset: Vec3;
+}
 
 export type LightSettings = Pick<Light, 'kind' | 'color' | 'intensity' | 'range'>;
 
@@ -277,6 +298,19 @@ export function validComponentRecord(value: unknown): value is ComponentRecord {
 					([name, target]) => /^[A-Za-z0-9_-]{1,64}$/.test(name) && nonempty(target),
 				)
 			);
+        case 'projectile': {
+            const settings = behavior['settings'];
+            return record(settings) && typeof settings['speed'] === 'number' &&
+                Math.fround(settings['speed']) >= Math.fround(0.01) && Math.fround(settings['speed']) <= 1000 &&
+                integer(settings['lifetime_ticks'], 1, 1_000_000) && integer(settings['collision_mask'], 0, 0xffff_ffff) &&
+                (settings['impact'] === undefined || validParticleBurstSettings(settings['impact']));
+        }
+        case 'projectile_launcher': {
+            const settings = behavior['settings'];
+            return record(settings) && nonempty(settings['prefab_path']) &&
+                validGameActionId(settings['action']) && integer(settings['max_alive'], 1, 128) &&
+                vector(settings['spawn_offset'], 3, -1000, 1000);
+        }
 		default:
 			return false;
 	}

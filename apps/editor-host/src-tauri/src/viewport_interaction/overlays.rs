@@ -1,5 +1,15 @@
 use super::*;
 
+const SELECTED_BOUNDS_COLOR: [f32; 4] = [1.0, 0.72, 0.22, 0.85];
+// At most 24 lines per selection. Leave room for colliders and the active gizmo.
+const MAX_INDIVIDUAL_SELECTION_BOUNDS: usize = renderer::MAX_EDITOR_LINES / 32;
+
+const GIZMO_AXIS_COLORS: [[f32; 4]; 3] = [
+	[1.0, 0.33, 0.29, 1.0],
+	[0.40, 0.91, 0.51, 1.0],
+	[0.38, 0.67, 1.0, 1.0],
+];
+
 impl ViewportInteraction {
 	pub fn visuals(
 		&self,
@@ -64,57 +74,88 @@ impl ViewportInteraction {
 				);
 			}
 		}
-		if selection.len() > 1024 {
-			if let Some(bounds) = self.selected_bounds(workspace) {
-				box_lines(
-					&mut visuals,
-					bounds,
-					[1.0, 0.72, 0.22, 1.0],
-					1.5 * dpi as f32,
-				);
-			}
-		} else {
-			for key in selection {
-				if let Some(&index) = self.target_indices.get(key.as_str()) {
-					box_lines(
-						&mut visuals,
-						self.targets[index].bounds,
-						[1.0, 0.72, 0.22, 1.0],
-						1.5 * dpi as f32,
-					);
+		if !selection.is_empty() {
+			let matrix = self
+				.camera
+				.view_projection(extent, self.settings.projection)?;
+			if selection.len() > MAX_INDIVIDUAL_SELECTION_BOUNDS {
+				if let Some(bounds) = self.selected_bounds(workspace) {
+					selection_brackets(&mut visuals, bounds, matrix, extent, dpi as f32);
+				}
+			} else {
+				for key in selection {
+					if let Some(&index) = self.target_indices.get(key.as_str()) {
+						selection_brackets(
+							&mut visuals,
+							self.targets[index].bounds,
+							matrix,
+							extent,
+							dpi as f32,
+						);
+					}
 				}
 			}
 		}
 		if let Some(gizmo) = self.gizmo(workspace, extent, dpi)? {
-			for axis in gizmo.axes {
-				let half = axis * gizmo.size * 0.045;
-				visuals.lines.push(EditorLine {
-					start: (gizmo.pivot - half).to_array(),
-					end: (gizmo.pivot + half).to_array(),
-					color: [1.0, 0.86, 0.4, 1.0],
-					width: 3.0 * dpi as f32,
-					depth_test: false,
-				});
-			}
-			for segment in gizmo.segments(self.settings.tool) {
-				let color = if self.hover_handle == Some(segment.handle) {
-					[1.0, 0.86, 0.4, 1.0]
-				} else {
-					match segment.axis {
-						0 => [0.94, 0.26, 0.24, 1.0],
-						1 => [0.36, 0.85, 0.49, 1.0],
-						2 => [0.3, 0.57, 1.0, 1.0],
-						_ => [1.0, 0.8, 0.3, 1.0],
+			let highlighted = self
+				.drag
+				.as_ref()
+				.map(GizmoDrag::handle)
+				.or(self.hover_handle);
+			let mut strokes = Vec::new();
+			for segment in gizmo.visible_segments(
+				&self.camera,
+				extent,
+				self.settings.projection,
+				self.settings.tool,
+			) {
+				let active = highlighted == Some(segment.handle);
+				let rear_ring = matches!(segment.handle, tools::Handle::Rotate(_))
+					&& ((segment.a + segment.b) * 0.5 - gizmo.pivot).dot(self.camera.forward())
+					> gizmo.size * 0.04;
+				let (mut color, width) = match segment.handle {
+					tools::Handle::Screen | tools::Handle::UniformScale => {
+						([0.86, 0.91, 0.98, 1.0], 2.1)
 					}
+					tools::Handle::Plane(_, _) => (GIZMO_AXIS_COLORS[segment.axis], 1.8),
+					_ => (GIZMO_AXIS_COLORS[segment.axis], 2.6),
 				};
-				visuals.lines.push(EditorLine {
+				if active {
+					color = [1.0, 0.86, 0.4, 1.0];
+				} else if rear_ring {
+					color[3] = 0.46;
+				}
+				let width = if active { width + 0.8 } else { width };
+				let line = EditorLine {
 					start: segment.a.to_array(),
 					end: segment.b.to_array(),
 					color,
-					width: 2.2 * dpi as f32,
+					width: (width * dpi as f32).min(32.0),
 					depth_test: false,
+				};
+				visuals.lines.push(EditorLine {
+					color: [
+						0.025,
+						0.032,
+						0.05,
+						if rear_ring && !active { 0.65 } else { 0.94 },
+					],
+					width: ((width + 2.0) * dpi as f32).min(32.0),
+					..line
 				});
+				strokes.push((active, line));
 			}
+			// Keep the selected handle readable where gizmo shapes cross.
+			visuals.lines.extend(
+				strokes
+					.iter()
+					.filter_map(|(active, line)| (!active).then_some(*line)),
+			);
+			visuals.lines.extend(
+				strokes
+					.into_iter()
+					.filter_map(|(active, line)| active.then_some(line)),
+			);
 		}
 		if let Some(position) = self
 			.placement
@@ -166,6 +207,46 @@ impl ViewportInteraction {
 			self.collider_visuals.append(&mut visuals, dpi);
 		}
 		Ok(visuals)
+	}
+}
+
+fn selection_brackets(
+	visuals: &mut EditorVisuals,
+	bounds: Bounds3,
+	matrix: Mat4,
+	extent: [u32; 2],
+	dpi: f32,
+) {
+	let corners = bounds_corners(bounds);
+	let projected = corners.map(|corner| {
+		tools::project(matrix, extent, corner).map(|point| (point, (matrix * corner.extend(1.0)).w))
+	});
+
+	for (index, corner) in corners.into_iter().enumerate() {
+		let Some((origin, start_w)) = projected[index] else {
+			continue;
+		};
+		for axis in [1, 2, 4] {
+			let other_index = index ^ axis;
+			let Some((other, end_w)) = projected[other_index] else {
+				continue;
+			};
+			let length = origin.distance(other);
+			if length < 1.0 {
+				continue;
+			}
+			let screen_fraction = (14.0 * dpi / length).min(0.22);
+			// Convert the desired projected fraction to a world-edge fraction.
+			let world_fraction = screen_fraction * start_w
+				/ ((1.0 - screen_fraction) * end_w + screen_fraction * start_w);
+			visuals.lines.push(EditorLine {
+				start: corner.to_array(),
+				end: corner.lerp(corners[other_index], world_fraction).to_array(),
+				color: SELECTED_BOUNDS_COLOR,
+				width: (1.35 * dpi).min(32.0),
+				depth_test: false,
+			});
+		}
 	}
 }
 

@@ -1,8 +1,10 @@
 //! Project gameplay registration shared by the Player, editor, exporter, and replays.
 
+mod maze;
+pub mod project_scripts;
 mod rotation_routine;
 
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use engine_core::{
 	command::GameplayModuleDescriptorDto,
@@ -10,8 +12,9 @@ use engine_core::{
 	project::ProjectData,
 	scene_catalog::SceneId,
 	simulation_session::{
-		GameModule, GameModuleFactory, ModuleSettingReferences, ObjectScriptRegistration,
-		PreparedModuleConfig, resolve_default_gameplay,
+		GameModule, GameModuleFactory, GameModuleResolver, ModuleSettingReferences,
+		ObjectScriptRegistration, PreparedModuleConfig, ProjectScriptRegistration,
+		resolve_default_gameplay,
 	},
 };
 
@@ -24,7 +27,7 @@ const OBJECT_SCRIPTS: [ObjectScriptRegistration; 2] = [
 ];
 
 pub fn descriptors() -> Vec<GameplayModuleDescriptorDto> {
-	vec![cinder_oath_gameplay::descriptor()]
+	vec![cinder_oath_gameplay::descriptor(), maze::descriptor()]
 }
 
 pub fn script_descriptors() -> Vec<engine_core::components::ScriptDescriptor> {
@@ -35,20 +38,48 @@ pub fn script_descriptors() -> Vec<engine_core::components::ScriptDescriptor> {
 }
 
 pub fn resolve(project: &ProjectData) -> Result<Arc<dyn GameModuleFactory>, String> {
+	resolve_factory(project, None)
+}
+
+pub fn project_resolver(root: &Path, source: project_scripts::ScriptSource) -> GameModuleResolver {
+	let root = root.to_path_buf();
+	Arc::new(move |project| {
+		resolve_factory(
+			project,
+			Some(project_scripts::ProjectScripts::new(
+				root.clone(),
+				source.clone(),
+			)),
+		)
+	})
+}
+
+fn resolve_factory(
+	project: &ProjectData,
+	scripts: Option<project_scripts::ProjectScripts>,
+) -> Result<Arc<dyn GameModuleFactory>, String> {
 	let module = match project.gameplay_module.as_deref() {
 		Some(CINDER_OATH_ID) => cinder_oath_gameplay::resolve(project),
+		Some(maze::ID) => maze::resolve(project),
 		_ => resolve_default_gameplay(project),
 	}?;
-	Ok(Arc::new(RegisteredFactory { module }))
+	Ok(Arc::new(RegisteredFactory { module, scripts }))
 }
 
 struct RegisteredFactory {
 	module: Arc<dyn GameModuleFactory>,
+	scripts: Option<project_scripts::ProjectScripts>,
 }
 
 impl GameModuleFactory for RegisteredFactory {
 	fn object_scripts(&self) -> &[ObjectScriptRegistration] {
 		&OBJECT_SCRIPTS
+	}
+
+	fn project_scripts(&self) -> Result<Vec<ProjectScriptRegistration>, String> {
+		self.scripts
+			.as_ref()
+			.map_or_else(|| Ok(Vec::new()), |scripts| scripts.registrations())
 	}
 
 	fn prefab_references(

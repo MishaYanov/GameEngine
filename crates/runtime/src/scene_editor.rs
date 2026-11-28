@@ -16,6 +16,7 @@ use std::collections::HashMap;
 mod authoring;
 mod play;
 mod play_input;
+mod world_regions;
 pub use authoring::movement_direction;
 pub use engine_core::game_session::PreparedScene;
 pub use engine_core::project::{BehaviorSpace, BehaviorSpec, ProjectData};

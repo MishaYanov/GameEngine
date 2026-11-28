@@ -1,5 +1,8 @@
 use super::*;
-use runtime::input::{GameInputBinding, MovementBindings};
+use runtime::{
+	Key, MouseButton,
+	input::{GameInputBinding, MouseActionBinding, MovementBindings},
+};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -76,6 +79,36 @@ fn capture_filters_unbound_keys_and_preserves_a_complete_tap_before_tick() {
 			json!({"type":"keyboard_input","keys":["KeyE"]}),
 			json!({"type":"keyboard_input","keys":[]}),
 			json!({"type":"tick","count":5}),
+		]
+	);
+}
+
+#[test]
+fn capture_retains_the_authored_mouse_button_and_filters_unbound_clicks() {
+	let scratch = Scratch::new();
+	let mut profile = profile();
+	profile.mouse_actions.push(MouseActionBinding {
+		id: "interact".into(),
+		button: MouseButton::Right,
+	});
+	let mut trace = PlayTrace::new(scratch.output(), &profile, &profile).unwrap();
+	let mut input = InputState::default();
+	input.press(Key::D);
+	input.press(MouseButton::Left);
+	trace.record_controls(&input, GamepadSample::default());
+	input.press(MouseButton::Right);
+	trace.record_controls(&input, GamepadSample::default());
+	input.release(MouseButton::Right);
+	trace.record_controls(&input, GamepadSample::default());
+	trace.record_steps(1);
+
+	assert_eq!(
+		scratch.finish(trace),
+		[
+			json!({"type":"keyboard_input","keys":["KeyD"]}),
+			json!({"type":"keyboard_input","keys":["KeyD","MouseRight"]}),
+			json!({"type":"keyboard_input","keys":["KeyD"]}),
+			json!({"type":"tick","count":1}),
 		]
 	);
 }

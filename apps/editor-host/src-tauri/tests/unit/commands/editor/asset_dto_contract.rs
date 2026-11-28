@@ -1,4 +1,20 @@
 use super::*;
+
+#[test]
+fn catalog_lists_registered_models_and_game_audio_without_migration() {
+	let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../projects/cinder-oath/assets");
+	let assets = editor_asset_catalog(&root, None).unwrap();
+	assert!(assets
+		.iter()
+		.any(|asset| asset.kind == "model" && asset.path == "actors/knight.glb"));
+	assert!(assets
+		.iter()
+		.any(|asset| asset.kind == "game_audio" && asset.path == "audio/the-vault.wav"));
+	assert!(assets
+		.iter()
+		.any(|asset| asset.kind == "game_audio" && asset.path == "audio/soundtrack.json"));
+	assert!(assets.windows(2).all(|pair| pair[0].path < pair[1].path));
+}
 #[test]
 fn catalog_dto_carries_stable_identity_and_format_kind() {
 	let mut asset = runtime::asset_catalog::PersistentAsset {

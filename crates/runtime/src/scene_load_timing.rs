@@ -1,7 +1,9 @@
 //! Monotonic, one-shot request measurements shared by the native scene hosts.
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
+
+use crate::assets::AssetManager;
 
 pub const LOG_TARGET: &str = "scene_load";
 
@@ -30,7 +32,72 @@ pub struct SceneLoadTiming {
 	cpu_ready: Option<Instant>,
 	gpu_started: Option<Instant>,
 	installed: Option<Instant>,
+	benchmark: Option<SceneLoadBenchmark>,
 	terminal: bool,
+}
+
+/// Non-overlapping wall-clock spans recorded only during a switch benchmark.
+#[derive(Clone, Copy)]
+pub enum BenchmarkPhase {
+	Read,
+	Simulation,
+	Drain,
+	Install,
+}
+
+#[derive(Clone, Copy, Default, Serialize)]
+pub struct SceneLoadBenchmark {
+	read_us: Option<u64>,
+	simulation_us: Option<u64>,
+	native_assembly_us: Option<u64>,
+	drain_us: Option<u64>,
+	install_us: Option<u64>,
+	assets: Option<AssetLoadBenchmark>,
+	overlap: Option<SceneLoadResources>,
+}
+
+/// Assembly subspans for static GLB model cache lookups and uploads.
+#[derive(Clone, Copy, Default, Serialize)]
+pub(crate) struct AssetLoadBenchmark {
+	pub(crate) cache_hits: usize,
+	pub(crate) cache_misses: usize,
+	pub(crate) static_import_us: u64,
+	pub(crate) static_upload_us: u64,
+}
+
+#[derive(Clone, Copy, Serialize)]
+pub struct SceneLoadResources {
+	models: usize,
+	cpu_retained_source_bytes: usize,
+	logical_gpu_bytes: usize,
+	logical_gpu_resources: usize,
+	tracked_gpu: Option<TrackedGpuResources>,
+}
+
+impl SceneLoadResources {
+	pub fn capture(assets: &AssetManager, renderer: &renderer::WindowRenderer) -> Self {
+		Self {
+			models: assets.loaded_model_count(),
+			cpu_retained_source_bytes: assets.retained_source_bytes(),
+			logical_gpu_bytes: assets.gpu_logical_bytes(),
+			logical_gpu_resources: assets.gpu_resource_count(),
+			tracked_gpu: renderer
+				.resource_metrics()
+				.map(|metrics| TrackedGpuResources {
+					allocations: metrics.totals.live_allocations,
+					bytes: metrics.totals.allocation_bytes,
+					peak_bytes: metrics.totals.peak_allocation_bytes,
+				}),
+		}
+	}
+}
+
+#[derive(Clone, Copy, Serialize)]
+struct TrackedGpuResources {
+	allocations: u64,
+	bytes: u64,
+	// Includes transient staging observed by the tracker over the process lifetime.
+	peak_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -58,6 +125,7 @@ impl SceneLoadTiming {
 			cpu_ready: None,
 			gpu_started: None,
 			installed: None,
+			benchmark: None,
 			terminal: false,
 		}
 	}
@@ -80,6 +148,54 @@ impl SceneLoadTiming {
 
 	pub fn installed(&mut self) {
 		self.installed.get_or_insert_with(Instant::now);
+	}
+
+	/// Keep diagnostics separate from the established scene_load timing record.
+	pub fn enable_benchmark(&mut self) {
+		self.benchmark = Some(SceneLoadBenchmark::default());
+	}
+
+	pub fn is_benchmark_enabled(&self) -> bool {
+		self.benchmark.is_some()
+	}
+
+	pub fn benchmark(&self) -> Option<SceneLoadBenchmark> {
+		self.benchmark
+	}
+
+	pub fn measure<T>(&mut self, phase: BenchmarkPhase, work: impl FnOnce() -> T) -> T {
+		let Some(benchmark) = &mut self.benchmark else {
+			return work();
+		};
+		let started = Instant::now();
+		let result = work();
+		let elapsed_us = micros(started.elapsed());
+		let slot = match phase {
+			BenchmarkPhase::Read => &mut benchmark.read_us,
+			BenchmarkPhase::Simulation => &mut benchmark.simulation_us,
+			BenchmarkPhase::Drain => &mut benchmark.drain_us,
+			BenchmarkPhase::Install => &mut benchmark.install_us,
+		};
+		*slot = Some(elapsed_us);
+		result
+	}
+
+	pub fn measure_native_assembly<T>(
+		&mut self,
+		assets: &mut AssetManager,
+		renderer: &renderer::WindowRenderer,
+		assemble: impl FnOnce(&mut AssetManager) -> T,
+	) -> T {
+		let Some(benchmark) = &mut self.benchmark else {
+			return assemble(assets);
+		};
+		let started = Instant::now();
+		assets.start_scene_load_benchmark();
+		let result = assemble(assets);
+		benchmark.native_assembly_us = Some(micros(started.elapsed()));
+		benchmark.assets = assets.finish_scene_load_benchmark();
+		benchmark.overlap = Some(SceneLoadResources::capture(assets, renderer));
+		result
 	}
 
 	pub fn finish(self, outcome: Outcome) {
@@ -136,6 +252,10 @@ impl Drop for SceneLoadTiming {
 			self.emit(Outcome::Cancelled, Instant::now());
 		}
 	}
+}
+
+pub(crate) fn micros(span: Duration) -> u64 {
+	span.as_micros().min(u64::MAX as u128) as u64
 }
 
 #[cfg(test)]

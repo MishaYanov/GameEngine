@@ -1,4 +1,11 @@
 use super::*;
+use runtime::{
+	animation::{
+		animated_bounds, global_pose, AnimationComponent, AnimationPlayback, AnimationSettings,
+	},
+	assets::gltf_loader::GltfLoaderError,
+	components::ComponentId,
+};
 
 const BOUNDS_JOB_BYTES: usize = 64 * 1024 * 1024;
 // Keep half of the default 256 MiB broker available for a user import.
@@ -341,12 +348,87 @@ impl EditorWorkspace {
 		)?;
 		let path = reference.path.as_str();
 		resolve_existing(&self.asset_root, path)?;
-		let imported = file_operation(
-			"import_model",
-			self.metadata.load_scene(path).map_err(|e| e.to_string()),
-		)?;
-		self.adopt_import(path, &imported, position)?;
+		match self.metadata.load_scene(path) {
+			Ok(imported) => self.adopt_import(path, &imported, position)?,
+			Err(runtime::assets::AssetManagerError::Gltf(GltfLoaderError::SkinnedScene)) => {
+				self.adopt_character(&reference, position)?;
+			}
+			Err(error) => return file_operation("import_model", Err(error.to_string())),
+		}
 		self.backend.snapshot().map_err(|e| e.to_string())
+	}
+	fn adopt_character(&mut self, reference: &AssetRef, position: [f32; 3]) -> Result<(), String> {
+		if self.backend.session().is_playing() || self.backend.session().has_transaction() {
+			return Err("Stop Play and finish the current edit before placing a character".into());
+		}
+		let catalog = runtime::assets::project_assets::load_catalog(&self.asset_root)?;
+		let model = reference
+			.asset_id
+			.as_ref()
+			.and_then(|id| catalog.by_id(id))
+			.filter(|model| model.path == reference.path)
+			.ok_or("Import the character GLB into the project catalog before placing it")?;
+		let asset = file_operation(
+			"import_character",
+			bridge::animation_asset::load_path(&self.asset_root, &model.path),
+		)?;
+		if model.fingerprint != asset.source_sha256 {
+			return Err("The character GLB changed. Reimport the model before placing it".into());
+		}
+		let mesh = model
+			.meshes
+			.iter()
+			.find(|mesh| mesh.index == asset.skin.mesh_index as usize)
+			.ok_or("The skinned mesh is missing from the project catalog")?;
+		let name = Path::new(&model.path)
+			.file_stem()
+			.and_then(|stem| stem.to_str())
+			.filter(|stem| !stem.trim().is_empty())
+			.unwrap_or("Character");
+		let key = EntityKey::generate();
+		let mut entity = EntityData::new(key.clone(), name, &model.path)
+			.with_asset_id(Some(model.id.clone()))
+			.with_mesh_index(Some(mesh.index));
+		entity.transform.position = position;
+		entity.mesh_id = mesh.identity.as_ref().map(|identity| identity.id.clone());
+		let clip = asset
+			.clips
+			.first()
+			.ok_or("The character has no animation clip")?;
+		let settings = AnimationSettings {
+			source: asset.source_ref(model.id.clone()),
+			playback: AnimationPlayback::SingleClip {
+				clip_index: clip.source_index,
+				looping: true,
+			},
+			speed_numerator: 1,
+			speed_denominator: 1,
+		};
+		asset.validate_settings(&settings)?;
+		entity.animation = Some(AnimationComponent {
+			id: ComponentId::generate(),
+			enabled: true,
+			settings,
+		});
+		let rest: Vec<_> = asset.nodes.iter().map(|node| node.rest).collect();
+		let globals = global_pose(&asset, &rest)?;
+		let bounds = animated_bounds(&asset, &globals, glam::Mat4::IDENTITY)?;
+		let metadata = AssetMetadata {
+			bounds: Some(bounds),
+			estimated_bytes: asset.retained_bytes() as u64,
+		};
+		let mesh_reference = entity.model_reference()?;
+		self.backend
+			.replace_entities_with_assets(
+				vec![entity],
+				vec![key],
+				"Import character",
+				vec![(mesh_reference, metadata)],
+			)
+			.map_err(|error| error.to_string())?;
+		self.cache_bounds();
+		engine_logger::info!(target: "editor", "Character placed: generation={}, joints={}, clips={}", self.generation, asset.joint_count(), asset.clips.len());
+		Ok(())
 	}
 	fn adopt_import(
 		&mut self,

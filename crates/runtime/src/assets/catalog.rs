@@ -26,10 +26,11 @@ pub fn scan_models(root: impl AsRef<Path>) -> Result<Vec<ModelAsset>, String> {
 			if visited > 10_000 {
 				return Err("Asset catalog exceeds 10,000 entries".into());
 			}
-			let kind = entry.file_type().map_err(|error| error.to_string())?;
-			if kind.is_symlink() {
+			let metadata = entry.metadata().map_err(|error| error.to_string())?;
+			if crate::scene_io::paths::is_linked(&metadata) {
 				continue;
 			}
+			let kind = metadata.file_type();
 			let path = entry
 				.path()
 				.canonicalize()

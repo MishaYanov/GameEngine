@@ -39,6 +39,18 @@ impl ImageResource {
 }
 
 impl Resources {
+	pub(in crate::assets) fn is_embedded_static(&self) -> bool {
+		self.document.animations().next().is_none()
+			&& self.document.skins().next().is_none()
+			&& self.document.buffers().all(|buffer| match buffer.source() {
+			gltf::buffer::Source::Bin => true,
+			gltf::buffer::Source::Uri(uri) => uri.starts_with("data:"),
+		}) && self.document.images().all(|image| match image.source() {
+			gltf::image::Source::View { .. } => true,
+			gltf::image::Source::Uri { uri, .. } => uri.starts_with("data:"),
+		})
+	}
+
 	pub(in crate::assets) fn retained_bytes(&self) -> usize {
 		// Every buffer, encoded image and decoded image was charged to the
 		// bounded import budget before being retained.
@@ -116,12 +128,19 @@ impl Resources {
 		}
 		let required: HashSet<_> = mesh
 			.primitives()
-			.filter_map(|primitive| {
-				primitive
-					.material()
-					.pbr_metallic_roughness()
-					.base_color_texture()
-					.map(|texture| texture.texture().source().index())
+			.flat_map(|primitive| {
+				let material = primitive.material();
+				[
+					material
+						.pbr_metallic_roughness()
+						.base_color_texture()
+						.map(|texture| texture.texture().source().index()),
+					material
+						.normal_texture()
+						.map(|texture| texture.texture().source().index()),
+				]
+					.into_iter()
+					.flatten()
 			})
 			.collect();
 		let mut budget = self.budget;

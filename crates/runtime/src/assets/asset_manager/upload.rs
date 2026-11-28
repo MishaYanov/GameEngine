@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
-use renderer::{WindowRenderer, vulkan::Vertex};
+use renderer::{TextureColorSpace, WindowRenderer, vulkan::Vertex};
 
 use super::{AssetManager, AssetManagerError};
 use crate::assets::{ImageAsset, MeshData, gltf_loader::ImportedPrimitive};
@@ -14,6 +14,7 @@ enum PendingUpload<'a> {
 	Texture {
 		id: String,
 		image: &'a ImageAsset,
+		color_space: TextureColorSpace,
 	},
 }
 
@@ -48,22 +49,15 @@ impl AssetManager {
 				})?;
 				entries += 1;
 			}
-			let image_key = part.base_color_image_index.map_or_else(
-				|| "builtin:white".to_owned(),
-				|index| format!("{}#image:{index}", path.display()),
-			);
-			if !self.image_textures.contains_key(&image_key) && images.insert(image_key) {
-				bytes = bytes
-					.checked_add(
-						part.material
-							.base_color_image
-							.as_ref()
-							.map_or(4, |image| image.pixels().len()),
-					)
-					.ok_or_else(|| {
-						AssetManagerError::ResourceBudget("texture byte count overflow".into())
-					})?;
-				entries += 1;
+			for (id, image, _) in primitive_textures(path, part) {
+				if !self.image_textures.contains_key(&id) && images.insert(id) {
+					bytes = bytes
+						.checked_add(image.map_or(4, |image| image.pixels().len()))
+						.ok_or_else(|| {
+							AssetManagerError::ResourceBudget("texture byte count overflow".into())
+						})?;
+					entries += 1;
+				}
 			}
 		}
 		self.gpu_budget.admit(bytes, entries)
@@ -92,15 +86,14 @@ impl AssetManager {
 					bytes: mesh_bytes(&part.mesh)?,
 				});
 			}
-			let image_id = part.base_color_image_index.map_or_else(
-				|| "builtin:white".to_owned(),
-				|index| format!("{}#image:{index}", path.display()),
-			);
-			if !self.image_textures.contains_key(&image_id) && images.insert(image_id.clone()) {
-				pending.push(PendingUpload::Texture {
-					id: image_id,
-					image: part.material.base_color_image.as_ref().unwrap_or(&white),
-				});
+			for (id, image, color_space) in primitive_textures(path, part) {
+				if !self.image_textures.contains_key(&id) && images.insert(id.clone()) {
+					pending.push(PendingUpload::Texture {
+						id,
+						image: image.unwrap_or(&white),
+						color_space,
+					});
+				}
 			}
 		}
 		let mut remaining = pending.as_slice();
@@ -113,8 +106,17 @@ impl AssetManager {
 					PendingUpload::Mesh { id, data, .. } => {
 						self.load_mesh(renderer, id.clone(), data)?;
 					}
-					PendingUpload::Texture { id, image } => {
-						self.load_image_texture(renderer, id.clone(), image)?;
+					PendingUpload::Texture {
+						id,
+						image,
+						color_space,
+					} => {
+						self.load_image_texture_in_color_space(
+							renderer,
+							id.clone(),
+							image,
+							*color_space,
+						)?;
 					}
 				}
 			} else {
@@ -131,16 +133,19 @@ impl AssetManager {
 				let textures: Vec<_> = batch
 					.iter()
 					.filter_map(|upload| match upload {
-						PendingUpload::Texture { image, .. } => Some(renderer::Rgba8Upload {
+						PendingUpload::Texture {
+							image, color_space, ..
+						} => Some(renderer::Rgba8UploadWithColorSpace {
 							width: image.width(),
 							height: image.height(),
 							pixels: image.pixels(),
+							color_space: *color_space,
 						}),
 						_ => None,
 					})
 					.collect();
 				let uploaded = renderer
-					.upload_batch(&meshes, &textures)
+					.upload_batch_with_color_space(&meshes, &textures)
 					.map_err(AssetManagerError::Upload)?;
 				let mut meshes = uploaded.meshes.into_iter();
 				let mut textures = uploaded.textures.into_iter();
@@ -170,6 +175,33 @@ impl AssetManager {
 		}
 		Ok(())
 	}
+}
+
+pub(super) fn normal_image_key(path: &Path, index: usize) -> String {
+	format!("{}#normal-image:{index}", path.display())
+}
+
+fn primitive_textures<'a>(
+	path: &Path,
+	part: &'a ImportedPrimitive,
+) -> impl Iterator<Item=(String, Option<&'a ImageAsset>, TextureColorSpace)> {
+	let color_id = part.base_color_image_index.map_or_else(
+		|| "builtin:white".to_owned(),
+		|index| format!("{}#image:{index}", path.display()),
+	);
+	let normal = part.normal_map.as_ref().map(|normal| {
+		(
+			normal_image_key(path, normal.image_index),
+			Some(&normal.image),
+			TextureColorSpace::Linear,
+		)
+	});
+	std::iter::once((
+		color_id,
+		part.material.base_color_image.as_ref(),
+		TextureColorSpace::Srgb,
+	))
+		.chain(normal)
 }
 
 fn next_upload_batch_len(sizes: impl Iterator<Item = usize>) -> usize {

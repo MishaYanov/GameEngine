@@ -18,12 +18,21 @@
   color: var(--color-text);
 }
 
-h1 {
-  font-size: var(--font-size-display);
+h1,
+h2 {
   font-weight: var(--font-weight-semibold);
   line-height: var(--font-line-height-tight);
+}
+
+h1 {
+  font-size: var(--font-size-display);
   letter-spacing: var(--font-tracking-tight);
   margin: var(--space-4) 0;
+}
+
+h2 {
+  font-size: var(--font-size-xl);
+  margin: var(--space-8) 0 var(--space-2);
 }
 
 .intro {
@@ -32,7 +41,7 @@ h1 {
 }
 
 form {
-  margin-top: var(--space-8);
+  margin-top: var(--space-4);
 }
 
 label {
@@ -107,15 +116,16 @@ button {
   box-shadow: inset 0 0 0 var(--border-width) var(--color-border);
 }
 
-button:enabled:hover {
+button:enabled:not([aria-disabled="true"]):hover {
   background: var(--setup-button-hover, var(--color-action-hover));
 }
 
-button:enabled:active {
+button:enabled:not([aria-disabled="true"]):active {
   background: var(--setup-button-pressed, var(--color-action-pressed));
 }
 
 button:disabled,
+button[aria-disabled="true"],
 input:disabled,
 select:disabled {
   background: var(--color-control-disabled);

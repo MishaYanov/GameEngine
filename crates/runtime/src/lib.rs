@@ -1,8 +1,8 @@
 pub mod assets;
 pub use engine_core::{
 	animation, asset_catalog, asset_jobs, asset_registry, audio_clip, camera_input,
-	character_controller, events, game_progress, game_session, material_graph, project,
-	scene_catalog, simulation_session, world,
+	character_controller, events, game_camera, game_progress, game_session, material_graph, project,
+	scene_catalog, sequence, simulation_session, world,
 };
 pub mod bounds;
 pub mod camera;
@@ -30,6 +30,7 @@ pub mod simulation;
 pub mod time;
 pub mod transform;
 pub mod visibility;
+pub mod world_streaming;
 
 pub use bounds::Bounds3;
 pub use camera::Camera;

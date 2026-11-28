@@ -3,37 +3,75 @@
         @for (tool of tools; track tool.command.tool) {
             <button (click)="dispatch(tool.command)" [attr.aria-pressed]="settings().tool === tool.command.tool"
                     [disabled]="tool.command.tool === 'hand' ? !available() : !authoringAvailable()"
-                    [title]="tool.label + ' (' + tool.shortcut + ')'" type="button">{{ tool.label }}
-                <kbd>{{ tool.shortcut }}</kbd></button>
+                    [attr.aria-label]="tool.label" [title]="tool.label + ' (' + tool.shortcut + ')'"
+                    class="tool-icon" type="button">
+                <editor-icon [name]="tool.icon"/>
+            </button>
         }
     </div>
+    <button class="tool-icon" (click)="dispatch({type: 'set_grid', visible: !settings().grid})"
+            [attr.aria-pressed]="settings().grid" [disabled]="!available()" aria-label="Grid" title="Toggle grid"
+            type="button">
+        <editor-icon name="grid"/>
+    </button>
+    <button class="tool-icon" (click)="dispatch({type: 'set_snap', enabled: !settings().snap})"
+            [attr.aria-pressed]="settings().snap" [disabled]="!authoringAvailable()" aria-label="Snap"
+            title="Toggle snapping" type="button">
+        <editor-icon name="snap"/>
+    </button>
+    <button class="tool-icon frame-selection" (click)="dispatch(frame)" [disabled]="!available()"
+            aria-label="Frame Selection"
+            [title]="'Frame Selection (' + frameKey + ')'" type="button">
+        <editor-icon name="locate"/>
+    </button>
+    <button class="options-toggle" type="button" aria-controls="scene-viewport-options"
+            [attr.aria-label]="'View options, ' + shadingLabel()" title="Scene view options"
+            [attr.aria-expanded]="optionsOpen()" (click)="optionsOpen.set(!optionsOpen())">
+        <span class="view-prefix">View</span> <span class="shading-label">{{ shadingLabel() }}</span>
+    </button>
+    @if (editor.snapshot()) {
+        <button class="scene-size" type="button" [disabled]="opening()"
+                [class.tool-icon]="!maximized()"
+                [attr.aria-label]="maximized() ? 'Restore Scene Panels' : 'Maximize Scene'"
+                [title]="maximized() ? 'Restore Scene Panels' : 'Maximize Scene'"
+                (click)="maximizeRequested.emit()">
+            <editor-icon [name]="maximized() ? 'restore' : 'maximize'"/>
+            @if (maximized()) {
+                <span>Restore panels</span>
+            }
+        </button>
+    }
+    @if (viewport.authoringGesture()) {
+        <button (click)="dispatch({type: 'cancel'})" type="button">Cancel Gesture <kbd>{{ cancelKey }}</kbd></button>
+    }
+</div>
+<div id="scene-viewport-options" class="viewport-options" [hidden]="!optionsOpen()"
+     role="group" aria-label="Scene view options">
     <label>Space <select #spaceInput [value]="settings().space" [disabled]="!authoringAvailable()" (change)="space(spaceInput.value)"><option value="world">World</option><option value="local">Local</option></select></label>
     <label>Handle <select #pivotInput [value]="settings().pivot" [disabled]="!authoringAvailable()" (change)="pivot(pivotInput.value)"><option value="pivot">Pivot</option><option value="center">Center</option></select></label>
-    <button (click)="dispatch({type: 'set_grid', visible: !settings().grid})" [attr.aria-pressed]="settings().grid"
-            [disabled]="!available()"
-            type="button">Grid
-    </button>
     <button (click)="dispatch({type: 'set_colliders', visible: !settings().colliders})"
             [attr.aria-pressed]="settings().colliders" [disabled]="!available()"
             title="Show collision outlines for selected entities" type="button">Colliders</button>
     <label>Plane <select #planeInput [value]="settings().plane" [disabled]="!available()" (change)="plane(planeInput.value)"><option value="xz">XZ</option><option value="xy">XY</option><option value="yz">YZ</option></select></label>
     <label>Grid step <input #spacing type="number" min="0.0001" step="any" [value]="settings().grid_spacing" [disabled]="!available()" (change)="gridSpacing(spacing)"/></label>
-    <button (click)="dispatch({type: 'set_snap', enabled: !settings().snap})" [attr.aria-pressed]="settings().snap"
-            [disabled]="!authoringAvailable()"
-            type="button">Snap
-    </button>
-    <button (click)="dispatch(frame)" [disabled]="!available()" type="button">Frame Selection <kbd>{{ frameKey }}</kbd>
-    </button>
     <button (click)="dispatch(zoomIn)" [disabled]="!available()" aria-label="Zoom in" type="button">+</button>
     <button (click)="dispatch(zoomOut)" [disabled]="!available()" aria-label="Zoom out" type="button">−</button>
     <label>Projection <select #projectionInput [value]="settings().projection" [disabled]="!available()" (change)="projection(projectionInput.value)"><option value="perspective">Perspective</option><option value="orthographic">Orthographic</option></select></label>
     <label>View <select #orientation [disabled]="!available()" (change)="orient(orientation.value)">@for (view of views; track view.value) { <option [value]="view.value">{{ view.label }}</option> }</select></label>
+    <label>Shading
+        <select #shadingInput [value]="settings().shading" [disabled]="!displayAvailable()"
+                (change)="setShading(shadingInput)">
+            <option value="lit">Lit</option>
+            <option value="unlit">Unlit</option>
+            <option value="wireframe">Wireframe</option>
+        </select>
+    </label>
+    <button (click)="toggleVertices()" [attr.aria-pressed]="settings().show_vertices" [disabled]="!displayAvailable()"
+            title="Show mesh vertices for the current selection" type="button">Show Vertices
+    </button>
     <button type="button" [attr.aria-expanded]="help()" (click)="help.set(!help())">Navigation &amp; Snap</button>
-    @if (viewport.authoringGesture()) {
-        <button (click)="dispatch({type: 'cancel'})" type="button">Cancel Gesture <kbd>{{ cancelKey }}</kbd></button>
-    }
 </div>
-@if (help()) {
+@if (optionsOpen() && help()) {
     <div class="viewport-help">
         <p>Click the Scene viewport to give its keyboard shortcuts focus.</p>
         <dl aria-label="Scene and editing shortcuts" class="shortcut-legend">

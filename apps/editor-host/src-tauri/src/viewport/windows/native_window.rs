@@ -1,4 +1,11 @@
 use super::*;
+use windows_sys::Win32::{
+	Foundation::{POINT, RECT},
+	UI::WindowsAndMessaging::{
+		ClipCursor, GetClipCursor, GetCursorPos, GetSystemMetrics, GetWindowRect, WindowFromPoint,
+		SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+	},
+};
 
 fn window_handle(window: &Window) -> Result<HWND, String> {
 	let handle = window.window_handle().map_err(|error| error.to_string())?;
@@ -32,6 +39,132 @@ fn show_viewport_window(window: &Window) -> Result<(), String> {
 		));
 	}
 	Ok(())
+}
+
+/// A one-pixel Win32 clip belonging to the focused Game viewport child.
+pub(super) struct GameCursorClip {
+	hwnd: HWND,
+	rect: RECT,
+}
+
+impl GameCursorClip {
+	pub(super) fn acquire(parent: HWND, window: &Window) -> Result<Self, String> {
+		let hwnd = window_handle(window)?;
+		let mut bounds = RECT {
+			left: 0,
+			top: 0,
+			right: 0,
+			bottom: 0,
+		};
+		// SAFETY: The worker owns this live child HWND and the output RECT.
+		if unsafe { GetWindowRect(hwnd, &mut bounds) } == 0 {
+			return Err(std::io::Error::last_os_error().to_string());
+		}
+		if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
+			return Err("Game viewport has no screen area".into());
+		}
+
+		let mut point = POINT { x: 0, y: 0 };
+		// SAFETY: Read the position on the input desktop into a valid POINT.
+		let cursor_is_over_child =
+			unsafe { GetCursorPos(&mut point) != 0 && WindowFromPoint(point) == hwnd };
+		if !cursor_is_over_child {
+			// The child is undecorated. Its center stays inside the rendered
+			// Game content even when the aspect ratio adds letterboxing.
+			point = POINT {
+				x: bounds.left.midpoint(bounds.right),
+				y: bounds.top.midpoint(bounds.bottom),
+			};
+		}
+
+		// SAFETY: Read-only queries on the worker's DPI-aware thread.
+		let desktop = unsafe {
+			let left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+			let top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+			RECT {
+				left,
+				top,
+				right: left + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+				bottom: top + GetSystemMetrics(SM_CYVIRTUALSCREEN),
+			}
+		};
+		let baseline = cursor_clip().map_err(|error| error.to_string())?;
+		if !same_rect(&baseline, &desktop) {
+			return Err("The cursor is already confined".into());
+		}
+
+		// Winit compares the captured HWND with GetActiveWindow(), which
+		// reports a top-level HWND. The embedded WS_CHILD owns GetFocus().
+		// SAFETY: The worker owns the child and checks the foreground and
+		// the topmost window at the lock point before touching the OS clip.
+		if unsafe {
+			GetForegroundWindow() != parent || GetFocus() != hwnd || WindowFromPoint(point) != hwnd
+		} || point.x < bounds.left
+			|| point.x >= bounds.right
+			|| point.y < bounds.top
+			|| point.y >= bounds.bottom
+			|| point.x < desktop.left
+			|| point.x >= desktop.right
+			|| point.y < desktop.top
+			|| point.y >= desktop.bottom
+		{
+			return Err("The Game viewport does not own the cursor point".into());
+		}
+
+		let rect = RECT {
+			left: point.x,
+			top: point.y,
+			right: point.x + 1,
+			bottom: point.y + 1,
+		};
+		// SAFETY: The rectangle is a nonempty, validated screen-pixel area.
+		if unsafe { ClipCursor(&rect) } == 0 {
+			return Err(std::io::Error::last_os_error().to_string());
+		}
+		Ok(Self { hwnd, rect })
+	}
+
+	pub(super) fn is_current(&self) -> bool {
+		let point = POINT {
+			x: self.rect.left,
+			y: self.rect.top,
+		};
+		// SAFETY: Read-only check that the clip point still lies on the child.
+		let point_owned = unsafe { WindowFromPoint(point) == self.hwnd };
+		point_owned && cursor_clip().is_ok_and(|current| same_rect(&current, &self.rect))
+	}
+}
+
+impl Drop for GameCursorClip {
+	fn drop(&mut self) {
+		// The cursor clip is shared by the desktop. Leave any later
+		// restriction installed by another owner alone.
+		if cursor_clip().is_ok_and(|current| same_rect(&current, &self.rect)) {
+			// SAFETY: Passing NULL removes this still-current restriction.
+			if unsafe { ClipCursor(std::ptr::null()) } == 0 {
+				let error = std::io::Error::last_os_error();
+				engine_logger::warn!(target: "editor_viewport", "Could not release the Game camera cursor: {error}");
+			}
+		}
+	}
+}
+
+fn cursor_clip() -> Result<RECT, std::io::Error> {
+	let mut rect = RECT {
+		left: 0,
+		top: 0,
+		right: 0,
+		bottom: 0,
+	};
+	// SAFETY: The OS writes the current clip into this valid RECT.
+	if unsafe { GetClipCursor(&mut rect) } == 0 {
+		return Err(std::io::Error::last_os_error());
+	}
+	Ok(rect)
+}
+
+fn same_rect(a: &RECT, b: &RECT) -> bool {
+	[a.left, a.top, a.right, a.bottom] == [b.left, b.top, b.right, b.bottom]
 }
 
 pub(super) struct KeyboardFocusHook {

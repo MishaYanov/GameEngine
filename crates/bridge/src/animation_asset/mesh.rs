@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
 use engine_core::animation::{
-	AnimationImage, MAX_ANIMATION_BYTES, SkinPrimitive, SkinVertex, validated_influences,
+	AnimationImage, MAX_ANIMATION_BYTES, SkinNormalMap, SkinPrimitive, SkinVertex,
+	validated_influences,
 };
 
 use super::decode::{charge, require_f32};
+use crate::normal_tangents::{self, GENERATED_TANGENT_BYTES_PER_CORNER, NormalVertex};
 
 const MAX_IMAGE_DIMENSION: u32 = 4096;
 
@@ -168,11 +170,13 @@ pub(super) fn decode_mesh(
 				position: positions[i],
 				normal: normal.to_array(),
 				uv: uv[i],
+				normal_uv: [0.; 2],
+				tangent: [0.; 4],
 				joints,
 				weights,
 			});
 		}
-		let indices: Vec<u32> = reader
+		let mut indices: Vec<u32> = reader
 			.read_indices()
 			.map(|v| v.into_u32().collect())
 			.unwrap_or_else(|| (0..count as u32).collect());
@@ -191,12 +195,11 @@ pub(super) fn decode_mesh(
 		{
 			return Err("Animated base-color factors must be finite values in 0..=1".into());
 		}
-		if material.normal_texture().is_some()
-			|| material.occlusion_texture().is_some()
+		if material.occlusion_texture().is_some()
 			|| material.emissive_texture().is_some()
 			|| pbr.metallic_roughness_texture().is_some()
 		{
-			return Err("Animated material supports base-color texture only".into());
+			return Err("Animated material supports base-color and normal textures only".into());
 		}
 		let base_color_image = if let Some(info) = pbr.base_color_texture() {
 			if info.tex_coord() != 0 || primitive.get(&gltf::Semantic::TexCoords(0)).is_none() {
@@ -217,61 +220,80 @@ pub(super) fn decode_mesh(
 					"Animated texture supports linear/repeat sampling without mipmaps".into(),
 				);
 			}
-			let source = texture.source();
-			let original = source.index();
-			if let Some(index) = image_map.get(&original) {
-				Some(*index)
-			} else {
-				if images.len() >= 64 {
-					return Err("Animation exceeds 64 material images".into());
-				}
-				let gltf::image::Source::View { view, mime_type } = source.source() else {
-					return Err("Animation texture must be embedded".into());
-				};
-				let format = match mime_type {
-					"image/png" => image::ImageFormat::Png,
-					"image/jpeg" => image::ImageFormat::Jpeg,
-					_ => return Err("Animation image must be PNG or JPEG".into()),
-				};
-				let end = view
-					.offset()
-					.checked_add(view.length())
-					.ok_or("Image view overflow")?;
-				let encoded = bin
-					.get(view.offset()..end)
-					.ok_or("Image view exceeds BIN")?;
-				let (width, height) =
-					image::ImageReader::with_format(std::io::Cursor::new(encoded), format)
-						.into_dimensions()
-						.map_err(|e| e.to_string())?;
-				if width == 0
-					|| height == 0 || width > MAX_IMAGE_DIMENSION
-					|| height > MAX_IMAGE_DIMENSION
-				{
-					return Err("Animation image exceeds 4096-pixel dimension limit".into());
-				}
-				charge(remaining, width as usize * height as usize, 4)?;
-				let mut reader =
-					image::ImageReader::with_format(std::io::Cursor::new(encoded), format);
-				let mut limits = image::Limits::default();
-				limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
-				limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
-				limits.max_alloc = Some(MAX_ANIMATION_BYTES as u64);
-				reader.limits(limits);
-				let rgba = reader
-					.decode()
-					.map_err(|e| e.to_string())?
-					.to_rgba8()
-					.into_raw();
-				let index = images.len();
-				images.push(AnimationImage {
-					width,
-					height,
-					rgba,
-				});
-				image_map.insert(original, index);
-				Some(index)
+			Some(decode_texture(
+				texture,
+				bin,
+				remaining,
+				&mut image_map,
+				&mut images,
+			)?)
+		} else {
+			None
+		};
+		let normal_map = if let Some(info) = material.normal_texture() {
+			normal_tangents::report_normal_mip_fallback(&info);
+			normal_tangents::validate_normal_texture(&info)?;
+			let uv = primitive
+				.get(&gltf::Semantic::TexCoords(info.tex_coord()))
+				.ok_or("Animated normal texture is missing its declared TEXCOORD set")?;
+			if uv.count() != count || !normal_tangents::valid_normal_uv(&uv) {
+				return Err("Invalid animated normal texture UV accessor".into());
 			}
+			charge(remaining, count, size_of::<[f32; 2]>())?;
+			let normal_uv: Vec<_> = reader
+				.read_tex_coords(info.tex_coord())
+				.ok_or("Missing animated normal texture coordinates")?
+				.into_f32()
+				.collect();
+			if normal_uv.len() != count || normal_uv.iter().flatten().any(|v| !v.is_finite()) {
+				return Err("Invalid animated normal texture coordinates".into());
+			}
+			for (vertex, normal_uv) in vertices.iter_mut().zip(normal_uv) {
+				vertex.normal_uv = normal_uv;
+			}
+			if let Some(accessor) = primitive.get(&gltf::Semantic::Tangents) {
+				require_f32(&accessor, gltf::accessor::Dimensions::Vec4)?;
+				if accessor.count() != count {
+					return Err("Skin TANGENT count differs from POSITION".into());
+				}
+				let tangents = reader.read_tangents().ok_or("Unreadable skin tangents")?;
+				if tangents.len() != count {
+					return Err("Invalid decoded skin tangent count".into());
+				}
+				for (vertex, tangent) in vertices.iter_mut().zip(tangents) {
+					if tangent.iter().any(|v| !v.is_finite()) || tangent[3].abs() != 1.0 {
+						return Err("Nonfinite skin TANGENT or invalid handedness".into());
+					}
+					vertex.tangent = normal_tangents::normal_tangent(tangent, vertex.normal);
+				}
+			} else {
+				charge(remaining, count, size_of::<NormalVertex>())?;
+				charge(remaining, indices.len(), GENERATED_TANGENT_BYTES_PER_CORNER)?;
+				let geometry: Vec<_> = vertices
+					.iter()
+					.map(|vertex| NormalVertex {
+						position: vertex.position,
+						normal: Some(vertex.normal),
+						uv: vertex.normal_uv,
+					})
+					.collect();
+				let frames = normal_tangents::generate(&geometry, &mut indices);
+				vertices_total += frames.len() - vertices.len();
+				if vertices_total > 100_000 {
+					return Err("Animated tangent seams exceed the vertex limit".into());
+				}
+				vertices = frames
+					.into_iter()
+					.map(|frame| SkinVertex {
+						tangent: frame.tangent,
+						..vertices[frame.source]
+					})
+					.collect();
+			}
+			Some(SkinNormalMap {
+				image: decode_texture(info.texture(), bin, remaining, &mut image_map, &mut images)?,
+				scale: info.scale(),
+			})
 		} else {
 			None
 		};
@@ -282,10 +304,69 @@ pub(super) fn decode_mesh(
 			double_sided: material.double_sided(),
 			material_index: material.index(),
 			base_color_image,
+			normal_map,
 		});
 	}
 	if primitives.is_empty() {
 		return Err("Skin mesh has no primitives".into());
 	}
 	Ok((primitives, images))
+}
+
+fn decode_texture(
+	texture: gltf::Texture<'_>,
+	bin: &[u8],
+	remaining: &mut usize,
+	image_map: &mut BTreeMap<usize, usize>,
+	images: &mut Vec<AnimationImage>,
+) -> Result<usize, String> {
+	let source = texture.source();
+	let original = source.index();
+	if let Some(index) = image_map.get(&original) {
+		return Ok(*index);
+	}
+	if images.len() >= 64 {
+		return Err("Animation exceeds 64 material images".into());
+	}
+	let gltf::image::Source::View { view, mime_type } = source.source() else {
+		return Err("Animation texture must be embedded".into());
+	};
+	let format = match mime_type {
+		"image/png" => image::ImageFormat::Png,
+		"image/jpeg" => image::ImageFormat::Jpeg,
+		_ => return Err("Animation image must be PNG or JPEG".into()),
+	};
+	let end = view
+		.offset()
+		.checked_add(view.length())
+		.ok_or("Image view overflow")?;
+	let encoded = bin
+		.get(view.offset()..end)
+		.ok_or("Image view exceeds BIN")?;
+	let (width, height) = image::ImageReader::with_format(std::io::Cursor::new(encoded), format)
+		.into_dimensions()
+		.map_err(|e| e.to_string())?;
+	if width == 0 || height == 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
+		return Err("Animation image exceeds 4096-pixel dimension limit".into());
+	}
+	charge(remaining, width as usize * height as usize, 4)?;
+	let mut reader = image::ImageReader::with_format(std::io::Cursor::new(encoded), format);
+	let mut limits = image::Limits::default();
+	limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+	limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+	limits.max_alloc = Some(MAX_ANIMATION_BYTES as u64);
+	reader.limits(limits);
+	let rgba = reader
+		.decode()
+		.map_err(|e| e.to_string())?
+		.to_rgba8()
+		.into_raw();
+	let index = images.len();
+	images.push(AnimationImage {
+		width,
+		height,
+		rgba,
+	});
+	image_map.insert(original, index);
+	Ok(index)
 }

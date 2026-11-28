@@ -1,7 +1,12 @@
 import {afterNextRender, Component, computed, ElementRef, inject, Injector, signal} from '@angular/core';
 import {
+    canResolveAnimationSource,
+    resolveAnimationClip,
+    sameAnimationRevision
+} from '../../../../core/editor/animation.models';
+import {
     type AnimatorClipRef, type AnimatorCondition, type AnimatorGraph, type AnimatorParameterSource,
-    type AnimatorState, type AnimatorTransition, sameAnimatorSource,
+    type AnimatorState, type AnimatorTransition,
 } from '../../../../core/editor/animator.models';
 import {EditorService} from '../../../../core/editor/editor.service';
 import {validGameActionId} from '../../../../core/game-input/game-input.models';
@@ -94,9 +99,17 @@ export class AnimatorWorkspace {
             let clips: readonly ClipChoice[];
             if (state.clip.kind === 'imported') {
                 const expected = state.clip.source;
-                const review = await this.editor.inspectAnimation(expected.asset_id, scope.nativeGeneration, scope.revision);
-                if (!sameAnimatorSource(expected, review.metadata.source)) throw new Error('The imported animation source changed. Review its binding before changing clips.');
-                clips = review.metadata.clips.map(clip => ({
+                const review = await this.editor.inspectAnimation(expected.asset_id, scope.workspaceGeneration, scope.revision);
+                const revised = review.metadata.source;
+                if (!canResolveAnimationSource(expected, revised)) throw new Error('The imported animation source changed. Review its binding before changing clips.');
+                const sameRevision = sameAnimationRevision(expected, revised);
+                const clipSlots = sameRevision ? review.metadata.clips : (expected.character?.clips ?? []).map((_, index) => {
+                    const actual = resolveAnimationClip(expected, revised, index);
+                    const metadata = review.metadata.clips.find(clip => clip.index === actual);
+                    if (!metadata) throw new Error('A previously assigned clip is missing from the reviewed Character.');
+                    return {...metadata, index};
+                });
+                clips = clipSlots.map(clip => ({
                     label: clip.name,
                     clip: {kind: 'imported', source: expected, clip_index: clip.index},
                 }));

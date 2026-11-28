@@ -101,7 +101,7 @@ try
     $player = Join-Path $buildDirectory 'game.exe'
     $agentFiles = [ordered]@{
         'authoring-agent-worker.exe' = Join-Path $buildDirectory 'authoring-agent-worker.exe'
-        'bundle.json' = Join-Path $root 'agent-profiles/game-development-support/bundle.json'
+        'bundle.json' = Join-Path $root 'crates/authoring-agent/profiles/game-development-support.json'
         'engine-help/editor-workspace.md' = Join-Path $root 'docs/editor-workspace.md'
         'engine-help/authoring-objects.md' = Join-Path $root 'docs/authoring-objects.md'
         'engine-help/scene-editing.md' = Join-Path $root 'docs/scene-editing.md'

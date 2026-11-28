@@ -11,3 +11,14 @@ Existing engine documentation belongs to the Engine Developer space. Keep Game A
 Read [.agents/rules/project.md](.agents/rules/project.md) before changing this project. The rules and relevant reusable
 skills are indexed in [.agents/README.md](.agents/README.md). For editor code, also
 follow [apps/editor/AGENTS.md](apps/editor/AGENTS.md). Load only the skill needed for the current task.
+
+# Project handoffs
+
+For work that spans chats, contributors, or multiple areas of the repo, start
+at [Project status](project-status/README.md)
+and follow the [coordination rules](.agents/rules/coordination.md). The primary agent owns scope, delegation,
+integration,
+and the handoff. Read the matching task note before resuming and update it after a material change or a blocker.
+
+When the user is stuck on a feature or structure decision that needs their judgment, offer the
+[Grill Me design interview](.agents/skills/grill-me/SKILL.md).

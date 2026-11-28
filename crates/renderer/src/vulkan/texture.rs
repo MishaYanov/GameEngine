@@ -12,6 +12,32 @@ use super::{VulkanBuffer, VulkanBufferError, VulkanDevice};
 
 mod upload;
 
+/// How sampled RGBA8 channels represent their stored values.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum TextureColorSpace {
+	/// Gamma-encoded RGB for color. Alpha remains linear.
+	#[default]
+	Srgb,
+	/// Linear values for texture data such as tangent-space normals.
+	Linear,
+}
+
+impl TextureColorSpace {
+	pub(crate) fn format(self) -> vk::Format {
+		match self {
+			Self::Srgb => vk::Format::R8G8B8A8_SRGB,
+			Self::Linear => vk::Format::R8G8B8A8_UNORM,
+		}
+	}
+
+	fn filter(self) -> vk::Filter {
+		match self {
+			Self::Srgb => vk::Filter::NEAREST,
+			Self::Linear => vk::Filter::LINEAR,
+		}
+	}
+}
+
 #[derive(Debug)]
 pub enum VulkanTextureError {
 	Vulkan(vk::Result),
@@ -88,11 +114,16 @@ pub struct VulkanTexture {
 	material_layout: Arc<VulkanMaterialLayout>,
 	descriptor_pool: vk::DescriptorPool,
 	descriptor_set: vk::DescriptorSet,
+	color_space: TextureColorSpace,
 }
 
 impl VulkanTexture {
 	pub(crate) fn belongs_to(&self, device: &Device) -> bool {
 		self.device.handle() == device.handle()
+	}
+
+	pub(super) fn shares_device(&self, other: &Self) -> bool {
+		other.belongs_to(&self.device)
 	}
 
 	pub fn set_debug_label(&self, label: &str) {
@@ -148,8 +179,35 @@ impl VulkanTexture {
 
 		pixels: &[u8],
 	) -> Result<Self, VulkanTextureError> {
-		let resources =
-			Self::prepare_upload(instance, device, material_layout, width, height, pixels)?;
+		Self::from_rgba8_with_color_space(
+			instance,
+			device,
+			material_layout,
+			width,
+			height,
+			pixels,
+			TextureColorSpace::Srgb,
+		)
+	}
+
+	pub fn from_rgba8_with_color_space(
+		instance: &Instance,
+		device: &VulkanDevice,
+		material_layout: Arc<VulkanMaterialLayout>,
+		width: u32,
+		height: u32,
+		pixels: &[u8],
+		color_space: TextureColorSpace,
+	) -> Result<Self, VulkanTextureError> {
+		let resources = Self::prepare_upload(
+			instance,
+			device,
+			material_layout,
+			width,
+			height,
+			pixels,
+			color_space,
+		)?;
 		let (texture, _) =
 			super::upload::submit(device, resources, |(texture, staging), raw, command| {
 				texture.record_upload(raw, command, staging, width, height);
@@ -185,6 +243,7 @@ impl VulkanTexture {
 		width: u32,
 		height: u32,
 		pixels: &[u8],
+		color_space: TextureColorSpace,
 	) -> Result<(Self, VulkanBuffer), VulkanTextureError> {
 		Self::validate_upload(width, height, pixels)?;
 
@@ -217,7 +276,7 @@ impl VulkanTexture {
 			})
 			.mip_levels(1)
 			.array_layers(1)
-			.format(vk::Format::R8G8B8A8_SRGB)
+			.format(color_space.format())
 			.tiling(vk::ImageTiling::OPTIMAL)
 			.initial_layout(vk::ImageLayout::UNDEFINED)
 			.usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
@@ -269,7 +328,7 @@ impl VulkanTexture {
 			image_size,
 			requirements.size,
 			memory_type_index,
-			&format!("{width}x{height} RGBA8_SRGB"),
+			&format!("{width}x{height} {:?}", color_space.format()),
 		);
 
 		if let Err(error) = unsafe { ash_device.bind_image_memory(image, memory, 0) } {
@@ -292,7 +351,7 @@ impl VulkanTexture {
 		let view_info = vk::ImageViewCreateInfo::default()
 			.image(image)
 			.view_type(vk::ImageViewType::TYPE_2D)
-			.format(vk::Format::R8G8B8A8_SRGB)
+			.format(color_space.format())
 			.subresource_range(range);
 
 		let view = match unsafe { ash_device.create_image_view(&view_info, None) } {
@@ -310,8 +369,8 @@ impl VulkanTexture {
 		};
 
 		let sampler_info = vk::SamplerCreateInfo::default()
-			.mag_filter(vk::Filter::NEAREST)
-			.min_filter(vk::Filter::NEAREST)
+			.mag_filter(color_space.filter())
+			.min_filter(color_space.filter())
 			.mipmap_mode(vk::SamplerMipmapMode::NEAREST)
 			.address_mode_u(vk::SamplerAddressMode::REPEAT)
 			.address_mode_v(vk::SamplerAddressMode::REPEAT)
@@ -443,6 +502,7 @@ impl VulkanTexture {
 				material_layout,
 				descriptor_pool,
 				descriptor_set,
+				color_space,
 			},
 			staging,
 		))
@@ -457,6 +517,10 @@ impl VulkanTexture {
 		height: u32,
 	) {
 		upload::record_upload(raw, command, staging.raw(), self.image, width, height);
+	}
+
+	pub fn color_space(&self) -> TextureColorSpace {
+		self.color_space
 	}
 
 	pub fn descriptor_set_layout(&self) -> vk::DescriptorSetLayout {

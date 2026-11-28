@@ -1,12 +1,12 @@
-"""Installable Blender add-on for the Game Engine static model profile."""
+"""Installable Blender add-on for Game Engine model exports."""
 
 bl_info = {
     "name": "Game Engine Static GLB",
     "author": "Game Engine",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (4, 0, 0),
     "location": "File > Export > Game Engine (.glb)",
-    "description": "Export a selected static hierarchy for Game Engine import or reimport",
+    "description": "Export static models or skinned characters for Game Engine import and reimport",
     "category": "Import-Export",
 }
 

@@ -4,24 +4,33 @@ import type {ProjectTemplate} from '../../../../core/project/project.service';
 import {EditorService} from "../../../../core/editor/editor.service";
 import {OBJECT_MENU_GROUPS, type ObjectMenuAction} from '../../../../core/editor/editor-object-menu';
 import type {ContextMenuItem} from '../../../../shared/builder/context-menu-builder';
+import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {ContextMenuService} from '../../../../shared/components/context-menu/context-menu.service';
 
 @Component({
     selector: 'editor-header',
-    imports: [EditorFileMenu],
+    imports: [EditorFileMenu, EditorIcon],
     templateUrl: './editor-header.html',
     styleUrl: './editor-header.scss',
 })
 export class EditorHeader {
     readonly canOpen = input(false);
+    readonly canGoBack = input(false);
+    readonly canGoForward = input(false);
+    readonly backRequested = output<void>();
+    readonly forwardRequested = output<void>();
     readonly canOpenControls = input(false);
+    readonly canCreateScene = input(false);
     readonly canOpenSettings = input(true);
     readonly canExit = input(false);
     readonly opening = input(false);
     readonly availableObjectActions = input<readonly ObjectMenuAction[]>([]);
+    readonly objectActionsEnabled = input(true);
     readonly openProjectRequested = output<void>();
     readonly projectSetupRequested = output<ProjectTemplate>();
     readonly sceneInformationRequested = output<void>();
+    readonly newSceneRequested = output<void>();
+    readonly sceneFlowRequested = output<void>();
     readonly controlsRequested = output<void>();
     readonly physicsLayersRequested = output<void>();
     readonly objectActionRequested = output<ObjectMenuAction>();
@@ -40,7 +49,7 @@ export class EditorHeader {
     }
 
     protected openObjects(trigger: HTMLButtonElement): void {
-        if (this.opening() || !this.availableObjectActions().length) return;
+        if (this.opening() || !this.objectActionsEnabled() || !this.availableObjectActions().length) return;
         if (this.contextMenu.request()?.owner === trigger) {
             this.contextMenu.close();
             return;
@@ -60,7 +69,7 @@ export class EditorHeader {
                     destructive: false,
                     disabled: !this.availableObjectActions().includes(id),
                     execute: () => {
-                        if (!this.opening() && this.availableObjectActions().includes(id) &&
+                        if (!this.opening() && this.objectActionsEnabled() && this.availableObjectActions().includes(id) &&
                             generation === this.editorService.workspaceGeneration() &&
                             scene === this.editorService.snapshot()?.active_scene_id) this.objectActionRequested.emit(id);
                     },

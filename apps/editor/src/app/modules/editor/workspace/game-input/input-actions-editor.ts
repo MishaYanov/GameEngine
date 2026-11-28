@@ -7,6 +7,7 @@ import {
     layoutMatches, MAX_ACTION_BINDINGS, MAX_CONDITIONAL_INPUT_LAYOUTS, MAX_INPUT_ACTIONS, type NamedInputAction, starterInputActions,
     validInputActionsPath, validateInputActions,
 } from '../../../../core/game-input/input-actions.models';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
 import {SceneEditingService} from '../scene-editing.service';
 import {InputActionsCatalog} from './input-actions-catalog.service';
 import {InputActionsKeyField} from './input-actions-key-field';
@@ -22,7 +23,7 @@ const PRESETS: readonly {id: LayoutPreset; label: string}[] = [
 
 @Component({
     selector: 'editor-input-actions-editor',
-    imports: [InputActionsKeyField, InputActionsMonitor],
+    imports: [InputActionsKeyField, InputActionsMonitor, EditorSearchPicker],
     templateUrl: './input-actions-editor.html',
     styleUrl: './input-actions-editor.scss',
 })
@@ -33,6 +34,11 @@ export class InputActionsEditor {
     private readonly editing = inject(SceneEditingService, {optional: true});
     protected readonly catalog = inject(InputActionsCatalog);
     protected readonly selectedId = signal('');
+    protected readonly assetOptions = computed(() => this.catalog.assets().map(asset => ({
+        id: asset.id,
+        label: asset.path
+    })));
+    protected readonly hasSelectedAsset = computed(() => this.assetOptions().some(asset => asset.id === this.selectedId()));
     protected readonly source = signal<InputActionsAsset | null>(null);
     protected readonly draft = signal<InputActionMap | null>(null);
     protected readonly path = signal(DEFAULT_PATH);
@@ -67,6 +73,11 @@ export class InputActionsEditor {
     private readonly saved = signal<InputActionMap | null>(null);
     protected readonly scenes = computed(() => this.editor.snapshot()?.project.scenes ?? []);
     protected readonly sceneIds = computed(() => new Set(this.scenes().map(scene => scene.id)));
+    protected readonly sceneOptions = computed(() => this.scenes().map(scene => ({
+        id: scene.id,
+        label: scene.asset_path
+    })));
+    protected readonly testSceneOptions = computed(() => [{id: '', label: 'Unavailable'}, ...this.sceneOptions()]);
     private generation = '';
     private autoOpened = false;
     private nextLayout = 1;
@@ -124,6 +135,14 @@ export class InputActionsEditor {
         const draft = starterInputActions();
         this.draft.set(draft);
         this.saved.set(draft);
+    }
+
+    protected chooseAsset(id: string): void {
+        if (this.available() && !this.dirty() && this.assetOptions().some(asset => asset.id === id)) this.selectedId.set(id);
+    }
+
+    protected chooseTestScene(id: string): void {
+        if (this.available() && (!id || this.sceneIds().has(id))) this.testScene.set(id);
     }
 
     protected async openSelected(): Promise<void> {

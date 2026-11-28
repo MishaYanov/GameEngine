@@ -10,11 +10,7 @@ impl Clone for ModelPart {
 	fn clone(&self) -> Self {
 		Self {
 			mesh: Arc::clone(&self.mesh),
-			material: VulkanMaterial::new(
-				Arc::clone(self.material.texture_arc()),
-				self.material.double_sided(),
-				self.material.base_color_factor(),
-			),
+			material: self.material.clone(),
 		}
 	}
 }

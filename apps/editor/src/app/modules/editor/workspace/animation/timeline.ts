@@ -5,7 +5,10 @@ import {
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import type {ClipAssetDocument, ClipKey, ClipKeyValue, ClipTimelineDraft, Quaternion, TimelineEdit} from '../../../../core/editor/authored-clip.models';
 import type {Vec3} from '../../../../core/editor/editor.models';
+import {EditorService} from '../../../../core/editor/editor.service';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {PropWorkspaceService} from '../prop-workspace/prop-workspace.service';
 import {AnimationWorkspaceService} from './animation-workspace.service';
 import {TimelineEditService} from './timeline-edit.service';
 
@@ -25,7 +28,7 @@ function adjacentMoments<T extends {readonly at: number}>(
 
 @Component({
     selector: 'editor-clip-timeline',
-    imports: [EditorDialog],
+    imports: [EditorDialog, EditorSearchPicker],
     providers: [TimelineEditService],
     templateUrl: './timeline.html',
     styleUrl: './timeline.scss',
@@ -38,6 +41,8 @@ export class ClipTimeline {
     readonly saved = output<ClipTimelineDraft>();
     protected readonly timeline = inject(TimelineEditService);
     private readonly injector = inject(Injector);
+    private readonly editor = inject(EditorService);
+    private readonly props = inject(PropWorkspaceService, {optional: true});
     private readonly scrollLane = viewChild<ElementRef<HTMLElement>>('scrollLane');
     private readonly rulerCursor = viewChild<ElementRef<HTMLElement>>('rulerCursor');
     protected readonly track = signal(0);
@@ -46,6 +51,47 @@ export class ClipTimeline {
     private revealedMarker = '';
     protected readonly axes = ['X', 'Y', 'Z', 'W'] as const;
     protected readonly tracks = computed(() => this.timeline.draft()?.clip.tracks ?? []);
+    protected readonly trackOptions = computed(() => {
+        const owner = this.timeline.draft()?.clip.owner;
+        const snapshot = this.editor.snapshot();
+        const scope = this.scope();
+        const sceneNames = owner?.kind === 'scene' && owner.scene_id === snapshot?.active_scene_id
+            ? new Map(snapshot.document?.entities?.map(entity => [entity.key, entity.name]))
+            : null;
+        const prop = this.props?.document();
+        const linked = scope?.kind === 'instance' && scope.scene_id === snapshot?.active_scene_id
+            ? snapshot.document?.entities?.find(entity => entity.key === scope.root_key)?.linked_prefab?.source
+            : null;
+        const source = owner?.kind === 'prop' && scope?.kind === 'source' && prop?.kind === 'source' &&
+        owner.asset_id === scope.asset_id && owner.asset_id === prop.draft.asset_id && prop.draft.draft_id === scope.draft_id
+            ? prop.draft.prefab
+            : owner?.kind === 'prop' && linked?.source_id === owner.asset_id ? linked.prefab : null;
+        const propNames = new Map(source?.entities.map(entity => [entity.key, entity.name]));
+        const placements = new Map(source?.composition?.placements.map(item => [item.id, item.name]));
+        const options = this.tracks().map(({target, track}, index) => {
+            let key: string;
+            let name: string | undefined;
+            if (target.kind === 'scene') {
+                key = target.entity_key;
+                name = sceneNames?.get(key);
+            } else {
+                const address = target.address;
+                if (address.kind === 'object') {
+                    key = [...address.placement_path, address.source_entity].join('/');
+                    if (!address.placement_path.length) name = propNames.get(address.source_entity);
+                } else {
+                    key = address.placement_path.join('/');
+                    if (address.placement_path.length === 1) name = placements.get(key);
+                }
+            }
+            const property = track.kind === 'local_position' ? 'Position' : 'Rotation';
+            return {id: String(index), label: `${property} · ${name ?? key}`, keywords: key};
+        });
+        const counts = new Map<string, number>();
+        for (const option of options) counts.set(option.label, (counts.get(option.label) ?? 0) + 1);
+        return options.map(option => counts.get(option.label) === 1
+            ? option : {...option, label: `${option.label} (${option.keywords})`});
+    });
     protected readonly keys = computed<readonly ClipKey<Vec3 | Quaternion>[]>(() => this.tracks()[this.track()]?.track.keys ?? []);
     protected readonly selected = computed(() => this.keys().find(key => key.id === this.key()) ?? this.keys().at(0) ?? null);
     protected readonly values = linkedSignal(() => this.selected()?.value.map(String) ?? []);
@@ -70,7 +116,7 @@ export class ClipTimeline {
     protected readonly rulerMidpoint = computed(() => Math.floor(this.timeline.duration() / 2));
 
     constructor() {
-        const release = inject(AnimationWorkspaceService).registerTimelineReview(() => this.reviewNavigation());
+        const release = inject(AnimationWorkspaceService).registerDraftReview(() => this.reviewNavigation());
         inject(DestroyRef).onDestroy(() => {
             release();
             this.navigationAnswer?.(false);

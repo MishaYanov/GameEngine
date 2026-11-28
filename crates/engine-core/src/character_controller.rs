@@ -9,6 +9,7 @@ use crate::{
 	components::ComponentId,
 	project::ProjectData,
 	scene_data::{ColliderData, EntityData},
+	simulation_session::RegionMovementGuard,
 	world::{RuntimeWorld, WorldChange},
 };
 use glam::Vec3;
@@ -179,6 +180,7 @@ pub(crate) struct CharacterStep<'a> {
 	pub tick: u64,
 	pub seconds: f32,
 	pub root_motion: &'a BTreeMap<EntityKey, RootMotionDelta>,
+	pub region_movement: &'a RegionMovementGuard,
 }
 
 impl CharacterRuntime {
@@ -404,6 +406,7 @@ impl CharacterRuntime {
 				step.tick,
 				step.seconds,
 				step.root_motion.get(key).copied(),
+				step.region_movement,
 				budget,
 			)?;
 			before

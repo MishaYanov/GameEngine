@@ -8,7 +8,15 @@ fn advertised_modules_resolve_through_the_editors_gameplay_resolver() {
 		.join("project.json");
 	let mut project = runtime::project::ProjectData::load(manifest).unwrap();
 	let capabilities = capabilities();
-	assert_eq!(capabilities.gameplay_modules.len(), 1);
+	assert_eq!(capabilities.gameplay_modules.len(), 2);
+	let maze_manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("../../../projects/the-hollow-maze/project.json");
+	let maze = runtime::project::ProjectData::load(maze_manifest).unwrap();
+	assert!(gameplay_catalog::resolve(&maze).is_ok());
+	assert!(capabilities
+		.gameplay_modules
+		.iter()
+		.any(|module| module.id == maze.gameplay_module.as_deref().unwrap()));
 	assert_eq!(
 		project.gameplay_module.as_deref(),
 		Some(gameplay_catalog::CINDER_OATH_ID)

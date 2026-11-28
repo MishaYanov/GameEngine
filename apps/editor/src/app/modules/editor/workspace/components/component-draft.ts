@@ -2,7 +2,8 @@ import type {AudioEventBinding, AudioGameplaySignal, AudioSourceBus, AudioSource
 import {
     validInteractionReach,
     type ComponentData,
-    type ComponentRecord
+    type ComponentRecord,
+    type NativeBehaviorSpec,
 } from '../../../../core/editor/editor-components';
 import {validGameActionId} from '../../../../core/game-input/game-input.models';
 import type { Collider, ModelAsset, Vec3, Vec4 } from '../../../../core/editor/editor.models';
@@ -52,7 +53,7 @@ export interface ComponentDraft {
 	mesh_id: string;
 	tint: boolean;
 	color: { r: string; g: string; b: string; a: string };
-	behavior_kind: 'key_door' | 'collectible' | 'timed_spawner' | 'state_machine';
+    behavior_kind: NativeBehaviorSpec['kind'];
 	machine: MachineDefinition;
 	controller: Record<ControllerNumberKey, string> & { jump_action: string };
 	playerController: {input: InputActionsRef; space: PlayerMovementSpace; control_graph?: string};
@@ -60,7 +61,7 @@ export interface ComponentDraft {
 	camera: CameraComponentDraft;
 	sky: SkyComponentDraft;
 	light: {kind: 'directional' | 'point'; color: Record<'red' | 'green' | 'blue', string>; intensity: string; range: string};
-    particle: Record<ParticleNumberKey | 'r' | 'g' | 'b', string>;
+    particle: Record<ParticleNumberKey | 'r' | 'g' | 'b' | 'sprite_asset_id', string> & { linger_on_despawn: boolean };
     audioSource: {
         clipId: string; gain: string; loop: boolean; playback: AudioSourcePlayback; bus: AudioSourceBus;
         spatial: 'two_d' | 'spatial'; near: string; far: string;
@@ -81,6 +82,17 @@ export interface ComponentDraft {
 	lifetime_ticks: string;
 	spawn_offset: { x: string; y: string; z: string };
 	bindings: { name: string; target: string }[];
+    projectile: {
+        speed: string;
+        collisionMask: string;
+        impact: boolean;
+        impactCount: string;
+        impactSprite: string;
+        impactLifetime: string;
+        impactSize: string;
+        launchAction: string;
+        launchOffset: { x: string; y: string; z: string };
+    };
 }
 
 export function componentDraft(
@@ -130,6 +142,11 @@ export function componentDraft(
 		lifetime_ticks: '300',
 		spawn_offset: { x: '2', y: '0', z: '0' },
 		bindings: [],
+        projectile: {
+            speed: '8', collisionMask: String(0xffff_ffff), impact: true, impactCount: '12',
+            impactSprite: '', impactLifetime: '0.6', impactSize: '0.14', launchAction: 'launch',
+            launchOffset: {x: '0', y: '0', z: '-0.5'}
+        },
 	};
 	if (!value) return draft;
 	if (value.data.kind === 'mesh_renderer') {
@@ -201,6 +218,25 @@ export function componentDraft(
 				name,
 				target,
 			}));
+        } else if (behavior.kind === 'projectile') {
+            const {speed, collision_mask, lifetime_ticks, impact} = behavior.settings;
+            draft.lifetime_ticks = String(lifetime_ticks);
+            draft.projectile = {
+                ...draft.projectile,
+                speed: String(speed),
+                collisionMask: String(collision_mask),
+                impact: !!impact,
+                impactCount: String(impact?.count ?? 12),
+                impactSprite: impact?.settings.sprite_asset_id ?? '',
+                impactLifetime: String(impact?.settings.lifetime_seconds ?? 0.6),
+                impactSize: String(impact?.settings.size ?? 0.14),
+            };
+        } else if (behavior.kind === 'projectile_launcher') {
+            const {prefab_path, max_alive, spawn_offset: [x, y, z], action} = behavior.settings;
+            draft.prefab_path = prefab_path;
+            draft.max_alive = String(max_alive);
+            draft.projectile.launchOffset = {x: String(x), y: String(y), z: String(z)};
+            draft.projectile.launchAction = action;
 		} else {
 			draft.actor = behavior.actor;
 			if (behavior.kind === 'key_door') {
@@ -229,6 +265,8 @@ function particleDraft(settings: ParticleEmitterSettings): ComponentDraft['parti
         r: String(settings.color[0]),
         g: String(settings.color[1]),
         b: String(settings.color[2]),
+        sprite_asset_id: settings.sprite_asset_id ?? '',
+        linger_on_despawn: settings.linger_on_despawn ?? false,
     };
 }
 
@@ -239,6 +277,8 @@ function particleSettings(draft: ComponentDraft['particle']): ParticleEmitterSet
             key === 'seed' ? uint(draft[key], label, min, max) : finite(draft[key], label, Math.fround(min), Math.fround(max)),
         ])),
         color: [finite(draft.r, 'Red', 0, 1), finite(draft.g, 'Green', 0, 1), finite(draft.b, 'Blue', 0, 1)],
+        ...(draft.sprite_asset_id ? {sprite_asset_id: draft.sprite_asset_id} : {}),
+        ...(draft.linger_on_despawn ? {linger_on_despawn: true} : {}),
     };
     if (!validParticleEmitterSettings(value)) throw new Error('Review the Particle Emitter settings.');
     return value;
@@ -459,6 +499,48 @@ export function componentFromDraft(
 				despawn_owner: draft.despawn_owner,
 			},
 		};
+    } else if (draft.behavior_kind === 'projectile') {
+        const previous = original?.data.kind === 'native_behavior' && original.data.behavior.kind === 'projectile'
+            ? original.data.behavior.settings.impact?.settings : undefined;
+        const {speed, collisionMask, impact, impactCount, impactSprite, impactLifetime, impactSize} = draft.projectile;
+        const burst = impact ? {
+            count: uint(impactCount, 'Impact particle count', 1, 192),
+            settings: {
+                ...DEFAULT_PARTICLE_EMITTER, ...previous,
+                lifetime_seconds: finite(impactLifetime, 'Impact lifetime', 0.05, 10),
+                size: finite(impactSize, 'Impact size', 0.01, 2),
+                sprite_asset_id: impactSprite || undefined,
+            },
+        } : undefined;
+        data = {
+            kind: 'native_behavior', behavior: {
+                kind: 'projectile', settings: {
+                    speed: finite(speed, 'Projectile speed', 0.01, 1000),
+                    collision_mask: uint(collisionMask, 'Collision layer mask', 0, 0xffff_ffff),
+                    lifetime_ticks: uint(draft.lifetime_ticks, 'Lifetime', 1, 1_000_000),
+                    ...(burst ? {impact: burst} : {}),
+                }
+            }
+        };
+    } else if (draft.behavior_kind === 'projectile_launcher') {
+        if (!relativeAssetPath(draft.prefab_path) || !/\.json$/i.test(draft.prefab_path))
+            throw new Error('Choose an asset-relative JSON Prop path.');
+        const action = draft.projectile.launchAction.trim();
+        const {x, y, z} = draft.projectile.launchOffset;
+        if (!validGameActionId(action)) throw new Error('Enter a valid Input Action ID.');
+        data = {
+            kind: 'native_behavior', behavior: {
+                kind: 'projectile_launcher', settings: {
+                    prefab_path: draft.prefab_path, action,
+                    max_alive: uint(draft.max_alive, 'Maximum alive', 1, 128),
+                    spawn_offset: [
+                        finite(x, 'Spawn offset X', -1000, 1000),
+                        finite(y, 'Spawn offset Y', -1000, 1000),
+                        finite(z, 'Spawn offset Z', -1000, 1000),
+                    ],
+                }
+            }
+        };
 	} else {
 		if (!relativeAssetPath(draft.prefab_path) || !/\.json$/i.test(draft.prefab_path))
 			throw new Error('Choose an asset-relative JSON prefab path.');

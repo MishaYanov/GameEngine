@@ -22,24 +22,25 @@ The expected revision is null when no workspace is open. A direct caller replaci
 
 ## Connected controls and current limits
 
-| Surface                   | Current behavior                                                                                                                                                 |
-|---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| File menu                 | Guarded New Project/setup/open-created flow and guarded native Open Project flow                                                                                 |
-| Save Scene                | Calls `EditorService.save()` for the active authored scene; requires Edit, no transaction and overall dirty state. It does not save the manifest or other drafts |
-| Save All                  | Saves dirty retained scenes and project settings without switching scenes; partial failures preserve accurate remaining dirty baselines                          |
-| Undo / Redo               | Sends typed commands; enabled from snapshot history availability and Edit/queue state                                                                            |
-| Play / Stop               | Sends typed commands through the existing queue. Successful Play chooses Game. Stop returns to the previous authoring pane if it is available, or to Scene |
-| Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                           |
-| Scene / Game tabs         | Select the native view through editor-only actions. Arrows, Home and End move tab focus. Enter, Space or click activate a tab |
-| Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                      |
+| Surface                   | Current behavior                                                                                                                                                                                   |
+|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| File menu                 | Guarded New Project/setup/open-created flow and guarded native Open Project flow                                                                                                                   |
+| Save Scene                | Calls `EditorService.save()` for the active authored scene; requires Edit, no transaction and overall dirty state. It does not save the manifest or other drafts                                   |
+| Save All                  | Saves dirty retained scenes and project settings without switching scenes; partial failures preserve accurate remaining dirty baselines                                                            |
+| Undo / Redo               | Sends typed commands; enabled from snapshot history availability and Edit/queue state                                                                                                              |
+| Play / Stop               | Sends typed commands through the existing queue. Successful Play chooses Game. Stop returns to the previous authoring pane if it is available, or to Scene                                         |
+| Game status / Restart Run | Shows the runtime scene and objective in Game and starts a fresh run from the configured startup scene                                                                                             |
+| Scene / Game tabs         | Select the native view through editor-only actions. Arrows, Home and End move tab focus. Enter, Space or click activate a tab                                                                      |
+| Hierarchy                 | Virtual parent/child tree, expand/collapse, stable-key selection, drag reparenting and Set Parent/Move to Root alternatives                                                                        |
 | Inspector                 | Edits name/transform and typed component cards with separate Animation, Animator, Controls Graph, Audio and Behavior workspaces; linked members expose overrides and explicit update/revert/unpack |
-| Runtime Inspector         | Game during Play exposes read-only handles, origins, component state and bounded entity pages through explicit Refresh |
-| Viewport tools            | Editor-only camera, grid/planes, selected collider outlines, projection/orientation, native picking and Move/Rotate/Scale handles                                 |
-| Assets                    | Search by project path or name, open scenes, place models, copy prefabs, and edit and link Prop sources |
-| Scene controls            | Switch retained scenes, choose startup/gameplay module, assign module-aware Gameplay Roles, register scene files and save the active scene at a new path           |
-| Export Game               | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output                                          |
-| Settings portal           | Placeholder component; not a completed settings editor                                                                                                           |
-| Reload                    | Service API exists; the workspace does not expose a destructive Reload action                                                                                    |
+| Runtime Inspector         | Game during Play exposes read-only handles, origins, component state and bounded entity pages through explicit Refresh                                                                             |
+| Viewport tools            | Editor-only camera, grid/planes, selected collider outlines, projection/orientation, native picking and Move/Rotate/Scale handles                                                                  |
+| Assets                    | Search by project path or name, open scenes, place models, copy prefabs, and edit and link Prop sources                                                                                            |
+| Scene controls            | Switch retained scenes, choose startup/gameplay module, assign module-aware Gameplay Roles, register scene files and save the active scene at a new path                                           |
+| Scene Flow                | Author project routes, reusable Timelines and streamed regions. During Play, inspect run status and test a manual route.                                                                           |
+| Export Game               | Stage saved inputs, compile outside the document queue, retry a staged failure and explicitly run the remembered output                                                                            |
+| Settings portal           | Placeholder component; not a completed settings editor                                                                                                                                             |
+| Reload                    | Service API exists; the workspace does not expose a destructive Reload action                                                                                                                      |
 
 The overall dirty flag can include project settings or inactive drafts. Therefore an enabled Save Scene button does not promise that the whole workspace will become clean. Use Save All before Export Game. [Project lifecycle](project-lifecycle.md) defines the separate saved baselines.
 
@@ -48,6 +49,51 @@ module uses configured behaviors with the authored behavior settings. Collider f
 share the existing edit reservation, history and Save/Play barriers. Colliders is a view-only toggle: continuous cyan
 outlines mark blocking shapes and dashed pink outlines mark sensors. Sensor overlaps provide fixed-step Enter/Stay/Exit
 events. See [Objects, components and Props](authoring-objects.md) for component editing, source review and runtime inspection.
+
+## Connect scenes with Scene Flow
+
+Use a **Route** when crossing a doorway, finishing a cinematic, or moving to a new level should replace the current
+scene. Use a **World Region** when the player should cross a boundary while staying in the same world.
+
+### Author and test a route
+
+1. Register two full scenes in **Game → Scene Information…**. In the destination scene, create an object where
+   the player should arrive and note its object key.
+2. In Edit mode, open **Game → Scene Flow… → Routes** and choose **Add Route**. Enter a unique **Route ID**,
+   then choose the **From scene**, **To scene**, and **Arrival marker**. Leave **Arrival actor** empty to use
+   the local player. Object suggestions come from the currently open scene. Enter object keys for another scene.
+3. For a first test, set **Activation** to **Requested by gameplay**. Select **Apply Scene Flow**, then use
+   **Save All** in the workspace toolbar. To abandon an unapplied draft, use **Discard draft**.
+4. Open the source scene, select **Play**, then reopen **Game → Scene Flow…**. Select the route and click
+   **Test Route**. This button requires the route's source to be the active runtime scene and no transition
+   pending. Check the runtime scene in Scene Flow, then close the dialog and check the arrival in Game.
+   If loading fails, Scene Flow offers **Retry Transition**. Use **Stop** to return to editing.
+
+To connect a doorway, add a source collider configured as a sensor. Use **Enter sensor**, or choose **Interact
+while inside sensor** and bind the action in the game's input layout. **Near the source sensor** preloads the
+destination as the actor approaches. Set **Release distance** higher than **Preload distance** to avoid repeatedly
+discarding and restarting preparation at the threshold. The activation still controls when the replacement occurs.
+
+### Reuse a Timeline
+
+1. Open **Timelines → Add Timeline**. Set its duration and add timed cues for camera cuts, imported actor clips,
+   Audio Sources, and subtitles. Camera, actor, and audio cues refer to named roles.
+2. Use **Add Scene Instance** to choose a scene and Timeline. For each role, bind the corresponding object in
+   that scene. Reuse the same Timeline by creating another instance with that scene's own object keys.
+3. To start it in-scene, provide an **Entry sensor** and **Triggering actor**. To start it after a route, select
+   the instance under **Timeline on arrival**. A route can use **Timeline finishes or is skipped** and name a
+   source-scene instance. Use **When a Timeline starts** to start preparing that route's destination during the
+   cinematic.
+4. Choose **Apply Scene Flow** and **Save All**. In Play, trigger the instance and check that its cameras, clips,
+   audio, and subtitles resolve to the intended scene objects.
+
+### Add a streamed region
+
+Under **World Regions**, choose **Add Region** and select the **Persistent world** and a separate **Region scene**.
+Give the region its minimum and maximum world coordinates and its preload and release distances. Use static props
+and colliders in the region scene. Keep the player, camera, and active gameplay and presentation components in
+the world. After applying and saving, Play the persistent world and watch the map for loaded regions as you move.
+See [catalog validation](compiler/README.md#multi-scene-preparation-and-installation) for export requirements.
 
 ## Inspector and Agent
 

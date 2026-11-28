@@ -1,14 +1,10 @@
 <form (submit)="place($event)" aria-label="Add Nested Prop">
     <fieldset [disabled]="pending()">
         <legend>Add Nested Prop to {{ parent().name }}</legend>
-        <label>Source asset
-            <select #asset [value]="selected()" (change)="chooseAsset(asset.value)">
-                <option value="">Choose a Prop</option>
-                @for (item of available(); track item.asset_id) {
-                    <option [value]="item.asset_id">{{ item.path }}</option>
-                }
-            </select>
-        </label>
+        <editor-search-picker label="Source asset" placeholder="Find a Prop by name or path…"
+                              [options]="assetOptions()" [value]="selected() || null" [resultLimit]="60"
+                              [revealResults]="true"
+                              [disabled]="pending()" [clearable]="true" (picked)="chooseAsset($event)"/>
         @if (currentReview(); as source) {
             <label>Placement name <input #label [value]="name()" (input)="name.set(label.value)"/></label>
             <fieldset>
@@ -19,14 +15,10 @@
                 }
             </fieldset>
             @for (slot of source.slots; track slot) {
-                <label>{{ slot }}
-                    <select #binding [value]="bindings().get(slot) ?? ''" (change)="assign(slot, binding.value)">
-                        <option value="">Choose a binding</option>
-                        @for (choice of choices(); track choice.value) {
-                            <option [value]="choice.value">{{ choice.label }}</option>
-                        }
-                    </select>
-                </label>
+                <editor-search-picker [label]="slot" placeholder="Find an object or external slot…"
+                                      [options]="choices()" [value]="bindings().get(slot) || null" [resultLimit]="60"
+                                      [revealResults]="true"
+                                      [disabled]="pending()" [clearable]="true" (picked)="assign(slot, $event)"/>
             }
         }
     </fieldset>

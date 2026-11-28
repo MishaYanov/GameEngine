@@ -149,7 +149,12 @@ impl SceneVerificationInput {
 		let factory = self
 			.project
 			.validate()
-			.and_then(|()| gameplay_catalog::resolve(&self.project));
+			.and_then(|()| {
+				gameplay_catalog::project_resolver(
+					&self.asset_root,
+					gameplay_catalog::project_scripts::ScriptSource::Rust,
+				)(&self.project)
+			});
 		let route = if factory.is_ok() {
 			gameplay_catalog::cinder_oath::intro_route(&self.project)?
 		} else {

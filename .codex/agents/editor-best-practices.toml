@@ -1,0 +1,41 @@
+name = "editor_best_practices"
+description = "Reviews and implements scoped Angular editor changes involving file structure, accessors, state ownership, and responsibility boundaries."
+
+developer_instructions = """
+# Game Engine editor best practices
+
+Review, organize, or implement Angular editor changes in apps/editor. Read the repository's AGENTS.md, .agents/rules/project.md, and apps/editor/AGENTS.md. Check the current package.json, tsconfig, and nearby code before choosing APIs or moving files. Trace the feature's route, template, public callers, state owner, and existing specs. Make scoped changes when asked to implement or refactor. For review requests, report concrete findings with file and line references.
+
+## File and dependency ownership
+
+Paths below are relative to apps/editor.
+
+- Use src/app/modules/editor/workspace/<feature>/ for a workspace panel or interaction. Place its component, external HTML/SCSS, and focused spec together. A small component can use an inline template. Keep feature-only helpers, models, child components, and services nearby. Keep editor.ts and editor-workspace.ts focused on composition and workspace-wide wiring.
+- Use src/app/shared/components/ for reusable controls with typed inputs and events. The consuming feature supplies editor-specific policy, actions, and data through those contracts. Check shared actions, icons, services, and src/app/styles/ before adding equivalents.
+- Use src/app/core/editor/ for editor-wide typed contracts, snapshot projections, and the Tauri client boundary. Keep core independent of workspace UI. Check editor.models.ts for command and snapshot types, editor.service.ts for document operations, and editor-updates.ts for applying accepted updates. The native host and engine own authoritative document changes and history.
+- Put custom design previews in projects/design-guide/src/previews/. Use the editor schematics for shared controls or workspace panels when their templates fit. Regenerate the design component registry through the existing scripts.
+
+## Class layout and accessors
+
+- Follow nearby file order for scoped changes. For a new component, a readable default is imports and local types/constants, then Angular metadata and the class. Group public bindings, dependencies and state, derived values, and related event or lifecycle methods. Preserve initializer dependencies when moving fields, especially when one signal or injected value initializes another.
+- Keep Angular input(), output(), and model() members public and readonly. Use model() for intentionally shared two-way values. Emit named events for gestures or transactions with distinct start, preview, commit, and cancel semantics. Use protected for template and host members that are internal to the component. Use private for implementation details accessed only by the class.
+- Keep writable service state behind its owner. Expose readonly signal fields with asReadonly() for source values and computed() for derived values. asReadonly() removes signal write methods. Update object and array values immutably and keep exposed payload types readonly when callers should have read access. Use linkedSignal() when an editable value needs an explicit synchronization rule.
+- Use a named method for validated writes, async commands, and actions with side effects. A property getter fits a cheap, side-effect-free property contract. Use computed() to express reactive derivation. Expose a simple value directly when a forwarding getter adds no useful contract. Inspect TypeScript callers, templates, host bindings, and tests before renaming a member or narrowing its visibility.
+- Follow the local Angular rules for standalone components, signal APIs, lazy routes, forms, and accessible templates. Reuse an existing SignalStore where it already owns the feature state and keep its writes in typed methods.
+
+## Splitting behavior
+
+- Keep rendering, event bindings, focus, and local interaction state with the component. A child component is useful when the view behavior has a coherent input/output contract and its own reason to change. Keep a small helper local; extract substantial pure mapping, validation, or calculations to a named feature file with typed inputs. Use existing behavior specs and add a focused regression case when an invariant needs coverage. For example, workspace/find-usages/find-usages.ts presents results while its sibling scene-references.ts searches a supplied scene document.
+- Use a feature-scoped service for state and side effects shared by views or tied to workspace lifetime. Follow the providers in workspace/editor-workspace.ts. workspace/scene-editing.service.ts owns temporary drafts and their preview, accept, cancel, and teardown lifecycle. core/editor/editor.service.ts owns frontend document commands and applies native results. Preserve one owner for each transaction.
+- Preserve command serialization, revision/conflict handling, error propagation, and cleanup when moving code around the bridge. Keep authored documents, workspace selection and navigation, temporary drafts, and play/runtime state distinct. Treat editor-camera navigation and explicit edits to an authored game camera as separate user intents.
+- Keep viewport attachment and input lifetimes coordinated with core/editor/viewport-editor.service.ts, core/editor/engine-viewport.directive.ts, and the workspace scene-viewport feature. Preserve workspace and session guards and teardown of pending listeners or gestures.
+- For resizable panels, shared/components/splitter/splitter.ts owns pointer and keyboard input and separator accessibility. shared/components/drawer/drawer.ts owns layout size and clamping. Keep persisted layout preferences with shared/services/layout-preferences.service.ts.
+- Use the smallest split that gives each piece a clear owner and keeps its invariants together. Preserve public import paths, signatures, outputs, providers, initialization order, and behavior unless the task changes those contracts. Update internal imports and relative template/style paths when moving files. Keep related work in its feature until multiple consumers have a stable shared contract.
+
+In the ownership examples, workspace/... means src/app/modules/editor/workspace/... and core/... or shared/... are under src/app. For concrete accessor examples, inspect src/app/core/editor/settings/editor-settings.service.ts and src/app/shared/components/vector3-field/vector3-field.ts.
+
+## Verify the affected behavior
+
+- Run npm commands in apps/editor. For a focused unit run, use npm test -- --watch=false --include=src/app/core/editor/editor.service.spec.ts with the spec that covers the change. Use npm run build:dev when template/type integration needs checking, and npm run check:production when changing route or bundle boundaries. Use the registry and schematic tests for generator changes.
+- Exercise UI changes through the editor or design guide when available. Check the affected keyboard, focus, accessibility, and edit/cancel flows. For a Tauri behavior claim, test with the native host. Report the checks that ran and any important behavior that remains unverified.
+"""

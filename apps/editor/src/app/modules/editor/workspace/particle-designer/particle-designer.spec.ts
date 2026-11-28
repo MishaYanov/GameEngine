@@ -22,6 +22,7 @@ import {PARTICLE_PRESETS, particlePresetLabel} from './particle-designer.models'
 import {ParticlePreview} from './particle-preview';
 
 const emitter: ParticleEmitterComponent = {id: 'fixture-emitter', enabled: true, settings: DEFAULT_PARTICLE_EMITTER};
+const spriteAsset = 'f7f0837e-3fe5-4679-94ab-707cdf7323d2';
 const entity: SceneEntity = {
     key: 'mist', name: 'Mist', model_path: '', renderable: false,
     transform: {position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1]},
@@ -69,6 +70,8 @@ describe('Particle Designer', () => {
         });
         const workspaceGeneration = signal(2);
         const inspectLinkedPropAddress = vi.fn(async (): Promise<LinkedPropAddress | null> => null);
+        const particleSprite = vi.fn(async () => new Blob());
+        const catalogueFiles = signal([{asset_id: spriteAsset, kind: 'texture', path: 'textures/mist.png'}]);
         const execute = vi.fn(async (command: EditorCommand) => {
             if (command.type !== 'replace_component' || command.component.data.kind !== 'particle_emitter') {
                 throw new Error('Unexpected command');
@@ -83,7 +86,12 @@ describe('Particle Designer', () => {
         TestBed.configureTestingModule({
             providers: [
                 {provide: LAYOUT_PREFERENCES_STORAGE, useValue: {load: vi.fn(async () => ({})), save: vi.fn()}},
-                {provide: EditorService, useValue: {snapshot, workspaceGeneration, execute, inspectLinkedPropAddress}},
+                {
+                    provide: EditorService, useValue: {
+                        snapshot, workspaceGeneration, execute, inspectLinkedPropAddress,
+                        particleSprite, catalogueFiles
+                    }
+                },
                 {provide: ViewportEditorService, useValue: {state: signal({workspace_generation: 17})}},
                 ScopedPaneRequests, WorkspaceDraftReview,
                 {
@@ -119,7 +127,18 @@ describe('Particle Designer', () => {
             select.dispatchEvent(new Event('change', {bubbles: true}));
             await fixture.whenStable();
         };
-        return {fixture, root, session, snapshot, workspaceGeneration, execute, button, click, changePreset, opener,
+        return {
+            fixture,
+            root,
+            session,
+            snapshot,
+            workspaceGeneration,
+            execute,
+            button,
+            click,
+            changePreset,
+            opener,
+            particleSprite,
             inspectLinkedPropAddress, reviews: TestBed.inject(WorkspaceDraftReview)};
     }
 
@@ -180,6 +199,23 @@ describe('Particle Designer', () => {
         }, 2, 8);
         expect(snapshot().revision).toBe(9);
         expect(button('Apply').disabled).toBe(true);
+    });
+
+    it('reviews a catalogued PNG and saves its identity with trail retirement', async () => {
+        const p = await setup();
+        const sprite = p.root.querySelector<HTMLSelectElement>('editor-particle-sprite-picker select')!;
+        sprite.value = spriteAsset;
+        sprite.dispatchEvent(new Event('change', {bubbles: true}));
+        await p.fixture.whenStable();
+        expect(p.particleSprite).toHaveBeenCalledWith(spriteAsset, 2, 8);
+        expect(p.session.spritePreview()).toBeInstanceOf(Blob);
+        const retire = [...p.root.querySelectorAll('label')].find(label => label.textContent.includes('Keep trail after despawn'))!;
+        retire.querySelector('input')!.click();
+        await p.fixture.whenStable();
+        await p.click('Apply');
+        expect(p.snapshot().document.entities[0].particle_emitter?.settings).toEqual({
+            ...DEFAULT_PARTICLE_EMITTER, sprite_asset_id: spriteAsset, linger_on_despawn: true,
+        });
     });
 
     it('protects an unsaved draft on project departure and restores focus when discarded', async () => {

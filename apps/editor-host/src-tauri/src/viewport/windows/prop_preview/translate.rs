@@ -115,7 +115,12 @@ pub(super) fn move_handles(
 		[0.35, 0.58, 1.0, 1.0],
 	];
 	move_gizmo(world, camera, extent, dpi)
-		.segments(ViewportTool::Move)
+		.visible_segments(
+			camera,
+			extent,
+			ViewportProjection::Perspective,
+			ViewportTool::Move,
+		)
 		.into_iter()
 		.map(|segment| {
 			EditorLine::new(

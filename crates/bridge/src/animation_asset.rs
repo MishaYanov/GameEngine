@@ -13,6 +13,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 mod clips;
 mod decode;
+mod identity;
 mod mesh;
 mod rig;
 
@@ -24,12 +25,24 @@ pub struct AnimationClipMetadata {
 	pub name: String,
 	pub duration_seconds: f32,
 }
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AnimationJointMetadata {
+	pub source_node: u32,
+	pub name: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub stable_id: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub parent_source_node: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct AnimationMetadata {
 	pub source: AnimationSourceRef,
 	pub mesh_index: u32,
 	pub nodes: usize,
 	pub joints: usize,
+	pub joint_metadata: Vec<AnimationJointMetadata>,
 	pub clips: Vec<AnimationClipMetadata>,
 }
 fn root_and_catalog(root: &Path) -> Result<(std::path::PathBuf, AssetCatalog), String> {
@@ -51,17 +64,39 @@ pub fn inspect(root: &Path, id: &AssetId) -> Result<AnimationMetadata, String> {
 		return Err("Animation requires a model asset".into());
 	}
 	let asset = load_path(&root, &entry.path)?;
+	if asset.character.is_some() && asset.source_sha256 != entry.fingerprint {
+		return Err(
+			"Character source changed outside its catalog; reimport the asset first".into(),
+		);
+	}
 	Ok(AnimationMetadata {
-		source: AnimationSourceRef {
-			asset_id: id.clone(),
-			expected_sha256: asset.source_sha256.clone(),
-			scene_index: asset.source_scene,
-			mesh_node: asset.skin.source_mesh_node,
-			skin_index: asset.skin.source_skin,
-		},
+		source: asset.source_ref(id.clone()),
 		mesh_index: asset.skin.mesh_index,
 		nodes: asset.nodes.len(),
 		joints: asset.skin.joints.len(),
+		joint_metadata: asset
+			.skin
+			.joints
+			.iter()
+			.map(|&index| {
+				let node = &asset.nodes[usize::from(index)];
+				AnimationJointMetadata {
+					source_node: node.source_node,
+					name: node
+						.name
+						.clone()
+						.unwrap_or_else(|| format!("Joint {}", node.source_node)),
+					stable_id: asset
+						.character
+						.as_ref()
+						.and_then(|character| character.joints.get(&node.source_node))
+						.cloned(),
+					parent_source_node: node
+						.parent
+						.map(|parent| asset.nodes[usize::from(parent)].source_node),
+				}
+			})
+			.collect(),
 		clips: asset
 			.clips
 			.iter()
@@ -82,13 +117,12 @@ pub fn load(root: &Path, source: &AnimationSourceRef) -> Result<Arc<AnimationAss
 		return Err("Animation requires a model asset".into());
 	}
 	let asset = load_path(&root, &entry.path)?;
-	if asset.source_sha256 != source.expected_sha256
-		|| asset.source_scene != source.scene_index
-		|| asset.skin.source_mesh_node != source.mesh_node
-		|| asset.skin.source_skin != source.skin_index
+	if (source.character.is_some() || asset.source_sha256 != source.expected_sha256)
+		&& asset.source_sha256 != entry.fingerprint
 	{
-		return Err("Animation source changed; review and adopt its current version".into());
+		return Err("Animation source changed outside its catalog; reimport it before adopting the new version".into());
 	}
+	asset.validate_source(source)?;
 	Ok(asset)
 }
 pub fn load_path(root: &Path, relative: &str) -> Result<Arc<AnimationAsset>, String> {
@@ -181,13 +215,20 @@ pub fn prepare_scene_with_pins(
 				"Mesh renderer and animation source have different asset identities".into(),
 			);
 		}
-		let key = (s.source.asset_id.clone(), s.source.expected_sha256.clone());
+		let follows_character =
+			s.source.character.is_some() && entry.fingerprint != s.source.expected_sha256;
+		let revision = if follows_character {
+			&entry.fingerprint
+		} else {
+			&s.source.expected_sha256
+		};
+		let key = (s.source.asset_id.clone(), revision.clone());
 		let asset = match shared.get(&key) {
 			Some(asset) => Arc::clone(asset),
 			None => {
 				let asset = match pins
 					.get(&entity.key)
-					.filter(|asset| asset.validate_settings(s).is_ok())
+					.filter(|asset| &asset.source_sha256 == revision)
 				{
 					Some(asset) => asset.clone(),
 					None => load(root, &s.source)?,

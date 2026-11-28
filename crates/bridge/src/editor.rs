@@ -96,6 +96,17 @@ pub struct ViewportSceneLoadDto {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub total: Option<usize>,
 }
+/// Scoped Scene context request in WebView client coordinates.
+#[derive(Debug, Clone, Serialize)]
+pub struct ViewportContextMenuDto {
+	pub workspace_generation: u64,
+	pub revision: u64,
+	pub scene_id: engine_core::scene_catalog::SceneId,
+	pub client_x: f64,
+	pub client_y: f64,
+	pub position: Option<[f32; 3]>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ViewportModifiersDto {
 	pub shift: bool,

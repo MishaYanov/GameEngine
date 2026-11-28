@@ -96,6 +96,9 @@ pub fn instantiate_with_warming(
 	let animations = bridge::animation_asset::prepare_scene_with_pins(assets.root(), data, &pins)?;
 	let authored_camera = data.authored_game_camera()?;
 	scene.synchronize_camera_settings(&authored_camera, &data.default_game_camera);
+	// Resolve static models against one catalog per assembly. Load it only
+	// when a static model needs it so model-free scenes do not require one.
+	let mut model_catalog = None;
 	let mut models: HashMap<engine_core::asset_registry::AssetRef, Arc<Model>> = HashMap::new();
 	let group_model = Arc::new(Model::new(Vec::new()));
 	let mut render_objects = 0usize;
@@ -115,7 +118,7 @@ pub fn instantiate_with_warming(
 		} else if !entity.has_mesh_component()
 			|| (!entity.renderable
 				&& !assets
-					.asset_exists(cache_key.as_ref())
+			.asset_exists_with_catalog(cache_key.as_ref(), &mut model_catalog)
 					.map_err(|error| error.to_string())?)
 		{
 			Arc::clone(&group_model)
@@ -127,7 +130,12 @@ pub fn instantiate_with_warming(
 			} else {
 				None
 			};
-			let loaded = assets.load_asset_prepared(renderer, cache_key.as_ref(), warm_model);
+			let loaded = assets.load_asset_prepared(
+				renderer,
+				cache_key.as_ref(),
+				&mut model_catalog,
+				warm_model,
+			);
 			let model = loaded.map_err(|error| {
 				format!(
 					"Scene entity {index} ({:?}), model '{}': {error}",
@@ -165,12 +173,16 @@ pub fn instantiate_with_warming(
 						Some(engine_core::animation::AnimatorBinding::Visual { .. })
 					)
 			});
-			let clip_index = match component.map(|component| &component.settings.playback) {
-				Some(engine_core::animation::AnimationPlayback::SingleClip {
-					clip_index, ..
-				}) => *clip_index,
-				Some(engine_core::animation::AnimationPlayback::Locomotion3 { idle, .. }) => *idle,
-				None => 0,
+			let clip_index = if let Some(component) = component {
+				let authored_index = match component.settings.playback {
+					engine_core::animation::AnimationPlayback::SingleClip {
+						clip_index, ..
+					} => clip_index,
+					engine_core::animation::AnimationPlayback::Locomotion3 { idle, .. } => idle,
+				};
+				asset.resolve_clip_index(&component.settings.source, authored_index)?
+			} else {
+				0
 			};
 			let mut pose = engine_core::animation::sample_pose(
 				asset.clone(),

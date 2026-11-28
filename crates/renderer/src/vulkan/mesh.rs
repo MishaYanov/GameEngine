@@ -1,17 +1,28 @@
 use std::{
 	error::Error,
 	fmt::{Display, Formatter},
+	sync::Arc,
 };
 
 use ash::{Instance, vk};
 
 use super::{Vertex, VulkanBuffer, VulkanBufferError, VulkanDevice};
 
+mod editor_geometry;
+mod editor_picking;
+
+pub(crate) use editor_geometry::EditorTopologyBudget;
+use editor_geometry::MeshTopology;
+pub use editor_picking::EditorPickGeometry;
+
 pub struct VulkanMesh {
 	vertex_buffer: VulkanBuffer,
 	index_buffer: VulkanBuffer,
 	index_count: u32,
 	skin: Option<VulkanBuffer>,
+	editor_topology: Option<MeshTopology>,
+	editor_pick_geometry: Option<Arc<EditorPickGeometry>>,
+	editor_vertex_count: u32,
 }
 
 #[repr(C)]
@@ -90,6 +101,9 @@ impl VulkanMesh {
 			index_buffer,
 			index_count: 0,
 			skin: None,
+			editor_topology: None,
+			editor_pick_geometry: None,
+			editor_vertex_count: 0,
 		})
 	}
 
@@ -134,6 +148,7 @@ impl VulkanMesh {
 	) -> Result<(Self, [VulkanBuffer; 2]), VulkanMeshError> {
 		let index_count =
 			u32::try_from(indices.len()).map_err(|_| VulkanMeshError::TooManyIndices)?;
+		let editor_vertex_count = u32::try_from(vertices.len()).unwrap_or(0);
 
 		let (vertices, vertex_buffer) = VulkanBuffer::prepare_static(
 			instance,
@@ -155,6 +170,9 @@ impl VulkanMesh {
 				index_buffer,
 				index_count,
 				skin: None,
+				editor_topology: None,
+				editor_pick_geometry: None,
+				editor_vertex_count,
 			},
 			[vertices, indices],
 		))
@@ -188,5 +206,41 @@ impl VulkanMesh {
 
 	pub fn index_count(&self) -> u32 {
 		self.index_count
+	}
+
+	pub(crate) fn editor_vertex_count(&self) -> u32 {
+		self.editor_vertex_count
+	}
+
+	pub(crate) fn retain_editor_topology(
+		&mut self,
+		budget: &EditorTopologyBudget,
+		indices: &[u32],
+	) {
+		self.editor_topology = MeshTopology::retain(budget, indices);
+	}
+
+	/// CPU pick data exists only for static meshes uploaded by an editor renderer.
+	pub fn editor_pick_geometry(&self) -> Option<&Arc<EditorPickGeometry>> {
+		self.editor_pick_geometry.as_ref()
+	}
+
+	pub(crate) fn retain_editor_pick_geometry(
+		&mut self,
+		budget: &EditorTopologyBudget,
+		vertices: &[Vertex],
+		indices: &[u32],
+	) {
+		self.editor_pick_geometry = EditorPickGeometry::retain(budget, vertices, indices);
+	}
+
+	pub(crate) fn prepare_editor_edges(&self, instance: &Instance, device: &VulkanDevice) {
+		if let Some(topology) = &self.editor_topology {
+			topology.prepare(instance, device);
+		}
+	}
+
+	pub(crate) fn editor_edges(&self) -> Option<(&VulkanBuffer, u32)> {
+		self.editor_topology.as_ref()?.edges()
 	}
 }

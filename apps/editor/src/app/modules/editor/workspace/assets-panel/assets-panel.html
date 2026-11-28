@@ -7,151 +7,205 @@
         type="bottom"
 >
     <editor-pane icon="folder" title="Assets">
-        <editor-asset-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
-        <editor-prefab-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
-        <button (click)="loadModels()" [disabled]="!canLoadModels()" pane-actions type="button">
-            {{ loading() ? 'Loading assets…' : models() === null ? 'Load Assets' : 'Refresh Assets' }}
-        </button>
+        <div pane-actions class="asset-pane-actions" role="group" aria-label="Asset drawer actions">
+            <button (click)="newSceneRequested.emit()" [disabled]="!canCreateScene()" aria-label="New Scene…"
+                    title="New Scene…" class="asset-icon-button" aria-haspopup="dialog" type="button">
+                <editor-icon name="plus"/>
+            </button>
+            <button (click)="loadModels()" [disabled]="!canLoadModels()" [class.refreshing]="loading()"
+                    [attr.aria-label]="refreshLabel()" [title]="refreshLabel()" class="asset-icon-button" type="button">
+                <editor-icon name="refresh"/>
+            </button>
+        </div>
         <div class="asset-browser">
             @if (!projectOpen()) {
                 <p>Open a project to browse its assets.</p>
             } @else {
-                <div class="asset-controls">
-                    <input #search aria-label="Search Assets" placeholder="Search Assets" type="search"
-                           [value]="searchQuery()" (input)="searchQuery.set(search.value)"
-                           (keydown.escape)="searchQuery.set('')"/>
-                    <label class="asset-filter">
-                        Asset kind
-                        <select #kind [value]="assetFilter()" (change)="filterAssets(kind.value)">
-                            @for (filter of assetFilters(); track filter.value) {
-                                <option [value]="filter.value">{{ filter.label }}</option>
-                            }
-                        </select>
+                <div class="asset-toolbar">
+                    <label class="asset-search">
+                        <editor-icon name="search"/>
+                        <input #search aria-label="Search Assets" placeholder="Search project assets…" type="search"
+                               [value]="searchQuery()" (input)="searchQuery.set(search.value)"
+                               (keydown.escape)="searchQuery.set('')"/>
                     </label>
+                    <div class="asset-authoring-tools">
+                        <editor-asset-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"
+                                                [selectedScript]="selectedRustScript()"/>
+                        <editor-prefab-authoring [opening]="opening()" [selected]="selectedCatalogAsset()"/>
+                    </div>
                 </div>
-                <nav aria-label="Asset folders" class="folder-location" [hidden]="searching()">
-                    <button (click)="upOneFolder()" [disabled]="!folder()" type="button">Up</button>
-                    <ol>
-                        @for (crumb of folderCrumbs(); track crumb.path; let first = $first; let current = $last) {
-                            <li>
-                                @if (!first) {
-                                    <span aria-hidden="true">/</span>
-                                }
-                                @if (current) {
-                                    <span #location aria-current="location" tabindex="-1">{{ crumb.label }}</span>
-                                } @else {
-                                    <button (click)="openFolder(crumb.path)" type="button">{{ crumb.label }}</button>
-                                }
-                            </li>
+                <div class="asset-navigation">
+                    <nav aria-label="Asset folders" class="folder-location">
+                        <div class="folder-actions">
+                            <button #back (click)="moveFolderHistory(-1, back)" [disabled]="!canGoBack()"
+                                    aria-label="Back" title="Back to the previously visited Assets folder"
+                                    class="asset-icon-button" type="button">
+                                <editor-icon name="arrowLeft"/>
+                            </button>
+                            <button #forward (click)="moveFolderHistory(1, forward)" [disabled]="!canGoForward()"
+                                    aria-label="Forward" title="Forward to the next visited Assets folder"
+                                    class="asset-icon-button" type="button">
+                                <editor-icon name="arrowRight"/>
+                            </button>
+                            <button (click)="upOneFolder()" [disabled]="!folder() || opening()" aria-label="Up"
+                                    title="Up one folder"
+                                    class="asset-icon-button" type="button">
+                                <editor-icon name="arrowUp"/>
+                            </button>
+                        </div>
+                        <ol>
+                            @for (crumb of folderCrumbs(); track crumb.path; let first = $first; let current = $last) {
+                                <li>
+                                    @if (!first) {
+                                        <span aria-hidden="true">/</span>
+                                    }
+                                    @if (current) {
+                                        <span #location aria-current="location" tabindex="-1">{{ crumb.label }}</span>
+                                    } @else {
+                                        <button (click)="openFolder(crumb.path)" type="button">{{ crumb.label }}
+                                        </button>
+                                    }
+                                </li>
+                            }
+                        </ol>
+                    </nav>
+                    <div class="asset-scopes" role="group" aria-label="Browse scope">
+                        <button type="button" [attr.aria-pressed]="browseScope() === 'folder'"
+                                (click)="setBrowseScope('folder')">Current folder
+                        </button>
+                        <button type="button" [attr.aria-pressed]="browseScope() === 'project'"
+                                (click)="setBrowseScope('project')">Entire project
+                        </button>
+                    </div>
+                    <ng-template #filters let-items let-disclosure="disclosure">
+                        @for (filter of items; track filter.value) {
+                            <button type="button" [attr.data-asset-kind]="filter.value"
+                                    [attr.aria-pressed]="assetFilter() === filter.value"
+                                    (click)="chooseFilter(filter.value, disclosure)">{{ filter.label }}
+                            </button>
                         }
-                    </ol>
-                </nav>
+                    </ng-template>
+                    <div class="asset-filters" role="group" aria-label="Asset kind">
+                        <ng-container [ngTemplateOutlet]="filters"
+                                      [ngTemplateOutletContext]="{$implicit: primaryFilters()}"/>
+                        @if (additionalFilters().length) {
+                            <details #moreTypes class="more-filters">
+                                <summary [class.selected-filter]="activeAdditionalFilter()"
+                                         [attr.aria-label]="activeAdditionalFilter() ? activeAdditionalFilter() + ', selected asset type' : null">
+                                    {{ activeAdditionalFilter() ?? 'More types' }}
+                                </summary>
+                                <div class="extra-types" role="group" aria-label="Additional asset types">
+                                    <ng-container [ngTemplateOutlet]="filters"
+                                                  [ngTemplateOutletContext]="{$implicit: additionalFilters(), disclosure: moreTypes}"/>
+                                </div>
+                            </details>
+                        }
+                    </div>
+                </div>
                 @if (error(); as message) {
                     <p role="alert">{{ message }}</p>
                 }
                 @if (status(); as message) {
                     <p role="status">{{ message }}</p>
                 }
-                @if (animators().length) {
-                    <details [open]="searching() || assetFilter() === 'animator_graph'">
-                        <summary>Animators</summary>
-                        <ul aria-label="Animator assets">
-                            @for (asset of animators(); track asset.id) {
-                                <li><button type="button" (click)="animatorWorkspace?.open(asset.id)"
-                                    [disabled]="!canRunAction() || !animatorWorkspace"
-                                    [attr.aria-label]="'Open Animator ' + asset.path">{{ asset.path }}</button></li>
+                <div class="asset-workspace" [attr.aria-busy]="loading()">
+                    <div class="asset-list">
+
+                        <ul [attr.aria-label]="searching() ? 'Asset file results' : 'Folder contents'"
+                            class="asset-grid" role="list">
+                            @for (folder of folderContents().folders; track folder[1]) {
+                                <li>
+                                    <button (click)="openFolder(folder[1])" type="button">
+                                        <editor-icon name="folder"/>
+                                        <span class="asset-name">{{ folder[0] }}</span>
+                                    </button>
+                                </li>
+                            }
+                            @for (file of folderContents().files; track assetRowKey(file)) {
+                                <li [title]="file.path" class="asset-file">
+                                    <button
+                                        #assetRow
+                                        [editorContextMenuLabel]="file.name + ' actions'"
+                                        [editorContextMenu]="assetMenu(file)"
+                                        (click)="selectFile(file)"
+                                        (dblclick)="openFile(file)"
+                                        (pointerdown)="beginAssetDrag(file, $event)"
+                                        (dragstart)="dragAudioClip(file, $event)"
+                                        [draggable]="file.kind === 'audio_clip' && !!file.asset_id && canRunAction()"
+                                        [attr.aria-pressed]="isSelected(file)"
+                                        [attr.data-asset-id]="file.kind === 'scene' ? null : file.asset_id"
+                                        [class.drag-source]="canDrag(file)"
+                                        [class.selected]="isSelected(file)"
+                                        [title]="canDrag(file) ? 'Drag into the Scene viewport' : file.path"
+                                        type="button"
+                                    >
+                                        <editor-icon [name]="assetIcons[file.kind]"/>
+                                        <span class="asset-entry">
+                                            <span class="asset-name">{{ file.name }}</span>
+                                            @if (searching() || browseScope() === 'project') {
+                                                <span class="asset-path">{{ file.path }}</span>
+                                            }
+                                        </span>
+                                        <span class="asset-kind">{{ assetLabels[file.kind] }}</span>
+                                        @if (isActiveScene(file)) {
+                                            <span class="active-scene">Active</span>
+                                        }
+                                    </button>
+                                </li>
                             }
                         </ul>
-                    </details>
-                }
-                @if (controlGraphs().length) {
-                    <details [open]="searching() || assetFilter() === 'controls_graph'">
-                        <summary>Controls Graphs</summary>
-                        <ul aria-label="Controls Graphs">
-                            @for (asset of controlGraphs(); track asset.id) {
-                                <li><button type="button" (click)="controlsWorkspace?.open(asset.id)"
-                                    [disabled]="!canRunAction()"
-                                    [attr.aria-label]="'Open Controls Graph ' + asset.path">{{ asset.path }}</button></li>
-                            }
-                        </ul>
-                    </details>
-                }
-                <ul [attr.aria-label]="searching() ? 'Asset file results' : 'Folder contents'">
-                    @for (folder of folderContents().folders; track folder[1]) {
-                        <li>
-                            <button (click)="openFolder(folder[1])" type="button">
-                                <editor-icon name="folder"/>
-                                {{ folder[0] }}
-                            </button>
-                        </li>
-                    }
-                    @for (file of folderContents().files; track assetRowKey(file)) {
-                        <li [title]="file.path" class="asset-file">
-                            <button
-                                    #assetRow
-                                    [editorContextMenuLabel]="file.name + ' actions'"
-                                    [editorContextMenu]="assetMenu(file)"
-                                    (click)="selectFile(file)"
-                                    (dblclick)="openProp(file)"
-                                    (pointerdown)="beginAssetDrag(file, $event)"
-                                    (dragstart)="dragAudioClip(file, $event)"
-                                    [draggable]="file.kind === 'audio_clip' && !!file.asset_id"
-                                    [attr.aria-pressed]="isSelected(file)"
-                                    [attr.data-asset-id]="file.kind === 'scene' ? null : file.asset_id"
-                                    [class.drag-source]="canDrag(file)"
-                                    [class.selected]="isSelected(file)"
-                                    [title]="canDrag(file) ? 'Drag into the Scene viewport' : file.path"
-                                    type="button"
-                            >
-                                <editor-icon [name]="file.kind === 'scene' ? 'cube' : 'object'"/>
-                                <span>{{ file.name }}</span>
-                                <span class="asset-kind">
-                                    @switch (file.kind) {
-                                        @case ('scene') { Scene }
-                                        @case ('prefab') { Prop }
-                                        @case ('audio_clip') { Audio Clip }
-                                        @case ('model') { Model }
-                                    }
-                                </span>
-                                @if (isActiveScene(file)) {
-                                    <span class="active-scene">Active</span>
-                                }
+                        @if (noMatches()) {
+                            <p class="search-feedback" role="status">
+                                No matching assets.
                                 @if (searching()) {
-                                    <span class="asset-kind">{{ file.path }}</span>
+                                    Try another search or asset kind.
+                                } @else if (browseScope() === 'folder') {
+                                    Choose Entire project or search across project folders.
                                 }
-                            </button>
-                        </li>
-                    }
-                </ul>
-                @if (noMatches()) {
-                    <p class="search-feedback" role="status">No matching assets.</p>
-                } @else if (assetFilter() === 'all' && !searching() && folderContents().folders.length === 0 && folderContents().files.length === 0) {
-                    <p>No catalogued assets in this folder.</p>
-                }
-                @if (selected(); as file) {
-                    <section aria-label="Selected asset" class="asset-details">
-                        <div>
-                            <strong>{{ file.name }}</strong>
-                            <span class="asset-path">{{ file.path }}</span>
-                        </div>
-                        @if (searching()) {
-                            <button (click)="showInFolder(file)" type="button">Show in Folder</button>
+                            </p>
+                        } @else if (assetFilter() === 'all' && !searching() && folderContents().folders.length === 0 && folderContents().files.length === 0) {
+                            <p>No catalogued assets in this folder.</p>
                         }
-                        @if (file.kind === 'scene') {
-                            <button (click)="openScene()" [disabled]="!canOpenScene() || isActiveScene(file)"
-                                    type="button">
-                                Open Scene
-                            </button>
-                        } @else if (file.kind === 'audio_clip') {
-                            <editor-audio-clip-details [asset]="file"/>
-                        } @else {
-                            @if (file.kind === 'prefab' && propWorkspace) {
-                                <button (click)="openProp(file)" [disabled]="!canOpenProp()" type="button">Open Prop Workspace</button>
+                    </div>
+                    @if (selected(); as file) {
+                        <section aria-label="Selected asset" class="asset-details">
+                            <div class="asset-details-header">
+                                <div class="asset-details-identity">
+                                    <strong>{{ file.name }}</strong>
+                                    <span class="asset-path">{{ file.path }}</span>
+                                </div>
+                                <div class="asset-detail-actions" role="group" aria-label="Selected asset actions">
+                                    @if (canShowInFolder()) {
+                                        <button (click)="showInFolder(file)" aria-label="Show in Folder"
+                                                title="Show in Folder" class="asset-icon-button" type="button">
+                                            <editor-icon name="locate"/>
+                                        </button>
+                                    }
+                                    @if (fileOpenLabel(file); as label) {
+                                        <button (click)="openFile(file)" [disabled]="!canOpenFile(file)"
+                                                [attr.aria-label]="label" [title]="label"
+                                                class="asset-icon-button" type="button">
+                                            <editor-icon name="openFolder"/>
+                                        </button>
+                                    }
+                                    @if (file.kind === 'prefab' || file.kind === 'model') {
+                                        @let actionLabel = file.kind === 'prefab' ? 'Place as Copy' : 'Add to Scene';
+                                        <button (click)="addModel()" [disabled]="!canRunAction()"
+                                                [attr.aria-label]="actionLabel" [title]="actionLabel"
+                                                class="asset-icon-button" type="button">
+                                            <editor-icon [name]="file.kind === 'prefab' ? 'copy' : 'plus'"/>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                            @if (file.kind === 'audio_clip') {
+                                <editor-audio-clip-details [asset]="file"/>
+                            } @else if (fileGuidance[file.kind]; as guidance) {
+                                <p class="asset-file-guidance">{{ guidance }}</p>
                             }
-                            <button (click)="addModel()" [disabled]="!canRunAction()" type="button">{{ file.kind === 'prefab' ? 'Place as Copy' : 'Add to Scene' }}</button>
-                        }
-                    </section>
-                }
+                        </section>
+                    }
+                </div>
             }
         </div>
     </editor-pane>

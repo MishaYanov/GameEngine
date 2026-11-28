@@ -1,4 +1,15 @@
-import {Component, computed, effect, inject, input, signal} from '@angular/core';
+import {
+    afterNextRender,
+    Component,
+    computed,
+    effect,
+    ElementRef,
+    inject,
+    Injector,
+    input,
+    signal,
+    viewChild
+} from '@angular/core';
 import {invoke} from '@tauri-apps/api/core';
 import {CommandBuilder, type MaterialOverride, type SceneEntity} from '../../../../core/editor/editor.models';
 import {EditorService} from '../../../../core/editor/editor.service';
@@ -25,7 +36,12 @@ const NODE_KINDS: readonly GraphNodeKind[] = ['shader.color', 'value', 'shader.m
     selector: 'editor-material-graph',
     imports: [EditorDialog, EditorGraph],
     templateUrl: './material-graph-dialog.html',
-    styles: 'editor-graph {display: block; height: min(29rem, 58dvh)}',
+    styles: [
+        'editor-graph {display: block; height: min(29rem, 58dvh)}',
+        '.discard-review {padding: var(--space-3); border: var(--border-width) solid var(--color-pane-edge); border-radius: var(--radius-sm)}',
+        '.discard-review p {margin: 0 0 var(--space-3)}',
+        '.discard-actions {display: flex; flex-wrap: wrap; gap: var(--space-2)}',
+    ],
 })
 export class MaterialGraphDialog {
     readonly entity = input.required<SceneEntity | null>();
@@ -34,6 +50,9 @@ export class MaterialGraphDialog {
     private readonly editor = inject(EditorService);
     private readonly editing = inject(SceneEditingService);
     private readonly drafts = inject(WorkspaceDraftReview, {optional: true});
+    private readonly injector = inject(Injector);
+    private readonly keepEditingButton = viewChild<ElementRef<HTMLButtonElement>>('keepEditingButton');
+    private readonly graphWorkspace = viewChild<ElementRef<HTMLElement>>('graphWorkspace');
     protected readonly target = signal<MaterialGraphTarget | null>(null);
     protected readonly graph = signal<GraphDocument>(emptyGraph());
     protected readonly opening = signal(false);
@@ -62,6 +81,7 @@ export class MaterialGraphDialog {
     protected async show(): Promise<void> {
         if (!this.canShow() || !this.editable() || this.opening()) return;
         const key = this.entity()?.key;
+        const reviewedScope = this.drafts?.capture();
         const capture = () => {
             const entity = this.entity();
             const snapshot = this.editor.snapshot();
@@ -80,8 +100,12 @@ export class MaterialGraphDialog {
         this.opening.set(true);
         this.error.set(null);
         try {
-            if (this.drafts) await this.drafts.run(this.drafts.capture(), async () => capture());
-            else capture();
+            if (this.drafts && reviewedScope) {
+                const approved = await this.drafts.run(reviewedScope, async () => capture());
+                if (!approved && this.drafts.current(reviewedScope) && this.entity()?.key === key) {
+                    this.error.set('Finish or discard the current edit before opening Material Graph.');
+                }
+            } else capture();
         } catch (error) {
             this.error.set(diagnostic(error));
         } finally {
@@ -95,7 +119,14 @@ export class MaterialGraphDialog {
     }
 
     protected reviewClose(): void {
-        if (!this.pending() && this.dirty()) this.confirmDiscard.set(true);
+        if (this.pending() || !this.dirty()) return;
+        this.confirmDiscard.set(true);
+        afterNextRender(() => this.keepEditingButton()?.nativeElement.focus(), {injector: this.injector});
+    }
+
+    protected keepEditing(): void {
+        this.confirmDiscard.set(false);
+        afterNextRender(() => this.graphWorkspace()?.nativeElement.focus(), {injector: this.injector});
     }
 
     protected close(): void {

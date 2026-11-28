@@ -1,5 +1,20 @@
-import {afterNextRender, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, signal, untracked, viewChild} from '@angular/core';
+import {
+    afterNextRender,
+    Component,
+    computed,
+    DestroyRef,
+    effect,
+    ElementRef,
+    inject,
+    Injector,
+    linkedSignal,
+    signal,
+    untracked,
+    viewChild
+} from '@angular/core';
 import {listen} from '@tauri-apps/api/event';
+import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
 import type {AnimationPreviewDocument} from '../../../../core/editor/animation-workspace.models';
 import {reserveAnimationPreviewRequest} from '../../../../core/editor/animation-workspace.models';
 import type {
@@ -14,6 +29,7 @@ import {ClipTimeline} from './timeline';
 import {AnimationWorkspaceService} from './animation-workspace.service';
 
 interface DraftTarget {
+    readonly key: string;
     readonly owner: ClipOwner;
     readonly target: VisualClipTarget;
     readonly name: string;
@@ -37,7 +53,7 @@ type KeyField = 'fromPosition' | 'toPosition' | 'fromRotation' | 'toRotation';
 
 @Component({
     selector: 'editor-authored-clip-editor',
-    imports: [ClipTimeline],
+    imports: [ClipTimeline, EditorDialog, EditorSearchPicker],
     templateUrl: './authored-clip-editor.html',
     styleUrl: './animation-workspace.scss',
 })
@@ -46,13 +62,15 @@ export class AuthoredClipEditor {
     private readonly viewport = inject(ViewportEditorService);
     private readonly scene = inject(SceneEditingService);
     private readonly props = inject(PropWorkspaceService);
-    private readonly animation = inject(AnimationWorkspaceService);
+    protected readonly animation = inject(AnimationWorkspaceService);
     protected readonly assets = signal<readonly ClipAssetIndex[]>([]);
     protected readonly selected = signal<ClipAssetDocument | null>(null);
     protected readonly draft = signal<ClipDraft | null>(null);
+    private readonly draftBaseline = signal<ClipDraft | null>(null);
+    protected readonly reviewingDraft = signal(false);
     protected readonly preview = signal<VisualClipPreview | null>(null);
     protected readonly busy = signal(false);
-    protected readonly timelineOpen = signal(false);
+    protected readonly timelineOpen = this.animation.authoredTimelineOpen;
     protected readonly timelineMarker = signal('');
     private readonly timelineTrigger = viewChild<ElementRef<HTMLButtonElement>>('timelineTrigger');
     private readonly injector = inject(Injector);
@@ -65,28 +83,53 @@ export class AuthoredClipEditor {
     ];
     private destroyed = false;
     private lastGeneration: number | null = null;
+    private answerDraft: ((allow: boolean) => void) | null = null;
 
-    private readonly target = computed<DraftTarget | null>(() => {
-        const snapshot = this.editor.snapshot();
-        if (!snapshot || snapshot.mode !== 'edit') return null;
-        if (this.animation.scope() === 'prop') {
-            const source = this.props.draft(), object = this.props.selectedObject();
-            if (!source || !object?.parent || source.dirty ||
-                !object.components.some(component => component.enabled && component.data.kind === 'mesh_renderer')) return null;
-            return {
-                owner: {kind: 'prop', asset_id: source.asset_id},
-                target: {kind: 'prop', address: {kind: 'object', placement_path: [], source_entity: object.key}},
-                name: object.name, transform: object.transform,
-            };
-        }
-        const entity = this.scene.entity();
-        if (!entity?.renderable || !entity.parent) return null;
-        return {
-            owner: {kind: 'scene', scene_id: snapshot.active_scene_id},
-            target: {kind: 'scene', entity_key: entity.key},
-            name: entity.name, transform: entity.transform,
-        };
+    private readonly targetKey = linkedSignal({
+        source: () => JSON.stringify([
+            this.editor.workspaceGeneration(), this.editor.snapshot()?.active_scene_id, this.animation.scope(),
+        ]),
+        computation: () => '',
     });
+    private readonly targets = computed<readonly DraftTarget[]>(() => {
+        const snapshot = this.editor.snapshot();
+        if (!snapshot || snapshot.mode !== 'edit') return [];
+        if (this.animation.scope() === 'prop') {
+            const source = this.props.document();
+            if (source?.kind !== 'source' || source.draft.dirty) return [];
+            return source.objects.filter(object => object.parent &&
+                object.components.some(component => component.enabled && component.data.kind === 'mesh_renderer'))
+                .map(object => ({
+                    key: object.key, owner: {kind: 'prop', asset_id: source.draft.asset_id},
+                    target: {kind: 'prop', address: {kind: 'object', placement_path: [], source_entity: object.key}},
+                    name: object.name, transform: object.transform,
+                }));
+        }
+        return snapshot.document.entities
+            .filter(entity => entity.renderable && entity.parent && entity.model_path !== '__no_mesh__')
+            .map(entity => ({
+                key: entity.key, owner: {kind: 'scene', scene_id: snapshot.active_scene_id},
+                target: {kind: 'scene', entity_key: entity.key}, name: entity.name, transform: entity.transform,
+            }));
+    });
+    protected readonly target = computed(() => {
+        const options = this.targets();
+        const selected = this.animation.scope() === 'scene' ? this.scene.entity()?.key : this.props.selectedObject()?.key;
+        return options.find(option => option.key === this.targetKey()) ??
+            options.find(option => option.key === selected) ?? options[0] ?? null;
+    });
+    protected readonly targetOptions = computed(() =>
+        this.targets().map(option => ({id: option.key, label: option.name})));
+    protected readonly clipOptions = computed(() =>
+        this.assets().map(asset => ({id: asset.asset_id, label: asset.path})));
+    protected readonly canEditSettings = computed(() => {
+        const clip = this.selected();
+        return clip !== null && openForm(clip) !== null;
+    });
+
+    protected chooseTarget(key: string): void {
+        if (this.available() && this.targets().some(option => option.key === key)) this.targetKey.set(key);
+    }
 
     protected readonly available = computed(() => this.editor.nativeAvailable && !this.busy() &&
         this.editor.snapshot()?.mode === 'edit' && this.editor.snapshot()?.transaction === null);
@@ -113,7 +156,10 @@ export class AuthoredClipEditor {
             this.lastGeneration = generation;
             untracked(() => {
                 this.selected.set(null);
-                this.draft.set(null);
+                this.timelineOpen.set(false);
+                this.assets.set([]);
+                this.setDraft(null);
+                this.resolveDraftReview(false);
                 void this.loadLibrary(generation);
             });
         });
@@ -131,7 +177,7 @@ export class AuthoredClipEditor {
                 }
                 this.accept(request.document);
                 this.timelineMarker.set(request.markerId);
-                this.timelineOpen.set(request.openTimeline);
+                this.timelineOpen.set(true);
                 this.animation.finishClipReveal(request);
             });
         });
@@ -151,8 +197,11 @@ export class AuthoredClipEditor {
                 else unsubscribe = release;
             }).catch(() => undefined);
         }
+        const unregisterReview = this.animation.registerDraftReview(() => this.reviewDraft());
         inject(DestroyRef).onDestroy(() => {
             this.destroyed = true;
+            unregisterReview();
+            this.resolveDraftReview(false);
             this.closePreview();
             unsubscribe?.();
         });
@@ -172,37 +221,59 @@ export class AuthoredClipEditor {
 
     protected timelineSaved(draft: ClipTimelineDraft): void {
         this.selected.set(draft);
-        this.draft.set(openForm(draft));
         void this.loadLibrary(this.editor.workspaceGeneration());
+    }
+
+    protected async startNewClip(): Promise<void> {
+        const generation = this.editor.workspaceGeneration();
+        if (!this.available() || this.animation.authoredOpening() || !await this.animation.reviewNavigation() ||
+            !this.current(generation)) return;
+        this.closePreview();
+        this.timelineOpen.set(false);
+        this.selected.set(null);
+        this.setDraft(null);
+        this.error.set(null);
+        this.message.set(null);
+    }
+
+    protected async editSettings(): Promise<void> {
+        const generation = this.editor.workspaceGeneration();
+        if (!this.available() || this.animation.authoredOpening() || !await this.animation.reviewNavigation() ||
+            !this.current(generation)) return;
+        const clip = this.selected();
+        if (clip) {
+            this.closePreview();
+            this.setDraft(openForm(clip));
+        }
     }
 
     protected begin(): void {
         const target = this.target();
-        if (!target || !this.canCreate()) return;
+        if (!target || !this.canCreate() || this.animation.authoredOpening()) return;
         this.closePreview();
         this.selected.set(null);
         this.error.set(null);
         this.message.set(null);
         const position = target.transform.position.map(String);
         const rotation = fromEuler(target.transform.rotation).map(String);
-        this.draft.set({
+        this.setDraft({
             name: '', path: '', duration: '1000', owner: target.owner, target: target.target, targetName: target.name,
             fromPosition: position, toPosition: position, fromRotation: rotation, toRotation: rotation,
         });
     }
 
     protected async open(assetId: string): Promise<void> {
-        if (!assetId || !this.available()) return;
-        const generation = this.editor.workspaceGeneration();
-        await this.run(async () => {
-            const clip = await this.editor.openAuthoredClip(assetId, generation);
-            if (this.current(generation)) this.accept(clip);
-        });
+        if (this.available() && (!this.timelineOpen() || this.selected()?.asset.asset_id !== assetId))
+            await this.animation.openAuthoredAsset(assetId);
+    }
+
+    protected async closeClipForm(): Promise<void> {
+        if (await this.reviewDraft()) this.setDraft(null);
     }
 
     protected update(field: 'name' | 'path' | 'duration', value: string): void {
         this.draft.update(draft => {
-            if (!draft) return null;
+            if (!draft || field === 'path' && this.selected()) return draft;
             if (field === 'name' && !this.selected() && (!draft.path || draft.path === pathFromName(draft.name))) {
                 return {...draft, name: value, path: pathFromName(value)};
             }
@@ -216,15 +287,16 @@ export class AuthoredClipEditor {
         });
     }
 
-    protected async save(): Promise<void> {
+    protected async save(): Promise<boolean> {
         const form = this.draft(), snapshot = this.editor.snapshot(), selected = this.selected();
         const nativeGeneration = this.viewport.state()?.workspace_generation;
-        if (!form || !snapshot || nativeGeneration == null || !this.canSave()) return;
+        if (!form || !snapshot || nativeGeneration == null || !this.canSave()) return false;
         if (selected && selected.workspace_generation !== nativeGeneration) {
             this.error.set('The workspace changed. Reopen the authored clip before saving.');
-            return;
+            return false;
         }
         const generation = this.editor.workspaceGeneration();
+        let accepted = false;
         await this.run(async () => {
             const clip = buildClip(form);
             const replacement = selected && {asset_id: selected.asset.asset_id, fingerprint: selected.asset.fingerprint};
@@ -233,9 +305,20 @@ export class AuthoredClipEditor {
             });
             if (!this.current(generation)) return;
             this.accept(saved);
+            accepted = true;
             this.message.set(`Saved ${saved.clip.name}.`);
             await this.loadLibrary(generation);
         });
+        return accepted;
+    }
+
+    protected async settleDraftReview(choice: 'save' | 'discard' | 'keep'): Promise<void> {
+        const answer = this.answerDraft;
+        if (!answer || this.busy()) return;
+        if (choice === 'save' && !await this.save()) return;
+        if (this.answerDraft !== answer) return;
+        if (choice === 'discard') this.setDraft(null);
+        this.resolveDraftReview(choice !== 'keep');
     }
 
     protected async openPreview(): Promise<void> {
@@ -283,10 +366,32 @@ export class AuthoredClipEditor {
 
     private accept(clip: ClipAssetDocument): void {
         this.closePreview();
-        this.selected.set(clip);
-        this.draft.set(openForm(clip));
+        // A rapid close/reopen can reuse the Timeline component. Give the opened
+        // asset a new input reference so it reconnects the released draft.
+        this.selected.set({...clip});
+        this.setDraft(null);
         this.error.set(null);
         this.message.set(null);
+    }
+
+    private setDraft(form: ClipDraft | null): void {
+        this.draftBaseline.set(form);
+        this.draft.set(form);
+    }
+
+    private reviewDraft(): Promise<boolean> {
+        if (this.busy() || this.answerDraft) return Promise.resolve(false);
+        const form = this.draft();
+        if (!form || JSON.stringify(form) === JSON.stringify(this.draftBaseline())) return Promise.resolve(true);
+        this.reviewingDraft.set(true);
+        return new Promise(resolve => this.answerDraft = resolve);
+    }
+
+    private resolveDraftReview(allow: boolean): void {
+        const answer = this.answerDraft;
+        this.answerDraft = null;
+        this.reviewingDraft.set(false);
+        answer?.(allow);
     }
 
     private async loadLibrary(generation: number): Promise<void> {

@@ -38,10 +38,13 @@ describe('AssetAuthoring', () => {
         const nativeGeneration = signal(17);
         const chooseExternalGlb = vi.fn(async (): Promise<string | null> => 'C:/Models/new.glb');
         const chooseExternalWav = vi.fn(async (): Promise<string | null> => 'C:/Audio/bell.wav');
+        const chooseParticlePng = vi.fn(async (): Promise<string | null> => 'C:/Sprites/star.png');
         const assets = vi.fn(async () => [model]);
         const operation = () => ({operation_id: 'operation', asset: model, snapshot: current()});
         const importExternalGlb = vi.fn(async (_source: string, _path: string, _scope: WorkspaceAssetScope) => operation());
         const importExternalWav = vi.fn(async (_source: string, _path: string, _scope: WorkspaceAssetScope) => ({...operation(), asset: bell}));
+        const importParticleSprite = vi.fn(async (_source: string, _path: string, _scope: WorkspaceAssetScope) => operation());
+        const saveRustScript = vi.fn(async (_path: string, _source: string, _replacement: unknown, _scope: WorkspaceAssetScope) => operation());
         const reimportAsset = vi.fn(async (_id: string, _fingerprint: string, _source: string, _scope: WorkspaceAssetScope) => operation());
         const moveAsset = vi.fn(async (_id: string, _path: string, _scope: WorkspaceAssetScope) => operation());
         const savePrefab = vi.fn(async (_path: string, _generation?: number, _revision?: number) => ({path: 'gameplay.json'}));
@@ -52,6 +55,9 @@ describe('AssetAuthoring', () => {
                 nativeAvailable: true, snapshot: current, workspaceGeneration: generation, busy: () => false,
                 playing: computed(() => current().mode === 'play'),
                 chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets,
+                    chooseParticlePng,
+                    importParticleSprite,
+                    saveRustScript,
             }},
             {provide: ViewportEditorService, useValue: {state: () => ({workspace_generation: nativeGeneration()})}},
             {provide: SceneEditingService, useValue: {ready: () => true, error: () => null, withCommittedEdit: committed}},
@@ -60,14 +66,62 @@ describe('AssetAuthoring', () => {
         fixture.componentRef.setInput('selected', model);
         await fixture.whenStable();
         const root: HTMLElement = fixture.nativeElement;
-        const button = (text: string) => [...root.querySelectorAll('button')].find(button => button.textContent.trim() === text)!;
+        const button = (text: string) => [...root.querySelectorAll('button')].find(button => (button.getAttribute('aria-label') ?? button.textContent.trim()) === text)!;
         const path = async (value: string) => {
             const field = root.querySelector<HTMLInputElement>('input')!;
             field.value = value; field.dispatchEvent(new Event('input'));
             await fixture.whenStable();
         };
-        return {fixture, root, button, path, current, generation, nativeGeneration, chooseExternalGlb, chooseExternalWav, importExternalGlb, importExternalWav, reimportAsset, moveAsset, savePrefab, assets, committed};
+        return {
+            fixture,
+            root,
+            button,
+            path,
+            current,
+            generation,
+            nativeGeneration,
+            chooseExternalGlb,
+            chooseExternalWav,
+            importExternalGlb,
+            importExternalWav,
+            reimportAsset,
+            moveAsset,
+            savePrefab,
+            assets,
+            committed,
+            importParticleSprite,
+            saveRustScript
+        };
     }
+
+    it('imports a PNG particle sprite through the catalog publication path', async () => {
+        const panel = await setup();
+        panel.button('Import Particle Sprite…').click();
+        await panel.fixture.whenStable();
+        expect(panel.root.querySelector<HTMLInputElement>('input')?.value).toBe('star.png');
+        panel.button('Apply Asset Operation').click();
+        await panel.fixture.whenStable();
+        expect(panel.importParticleSprite).toHaveBeenCalledExactlyOnceWith('C:/Sprites/star.png', 'star.png', {
+            workspaceGeneration: 1, nativeGeneration: 17, revision: 7,
+        });
+    });
+
+    it('creates an attachable Rust source asset from the edited text', async () => {
+        const panel = await setup();
+        panel.button('New Rust Script…').click();
+        await panel.fixture.whenStable();
+        const editor = panel.root.querySelector('textarea')!;
+        expect(editor.value).toContain('impl Script for Behavior');
+        editor.value += '\n// project behavior';
+        editor.dispatchEvent(new Event('input'));
+        await panel.fixture.whenStable();
+        panel.button('Apply Asset Operation').click();
+        await panel.fixture.whenStable();
+        expect(panel.saveRustScript).toHaveBeenCalledExactlyOnceWith('behavior.rs', editor.value, null, {
+            workspaceGeneration: 1, nativeGeneration: 17, revision: 7,
+        });
+        expect(panel.assets).toHaveBeenCalledWith(true);
+    });
 
     it('imports a PCM WAV, surfaces invalid content and moves the imported clip by ID', async () => {
         const panel = await setup();

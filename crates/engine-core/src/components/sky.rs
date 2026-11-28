@@ -1,4 +1,4 @@
-use super::ComponentId;
+use super::{ComponentId, SceneFog};
 use crate::{EntityKey, SceneData, asset_catalog::AssetId};
 use serde::{Deserialize, Serialize};
 
@@ -86,6 +86,8 @@ pub struct SceneEnvironment {
 	pub ambient_linear: [f32; 3],
 	#[serde(default, skip_serializing_if = "is_zero")]
 	pub sky_exposure_ev: f32,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub fog: Option<SceneFog>,
 }
 
 pub const DEFAULT_AMBIENT_LINEAR: [f32; 3] = [0.25; 3];
@@ -107,6 +109,7 @@ impl Default for SceneEnvironment {
 			active_sky: None,
 			ambient_linear: DEFAULT_AMBIENT_LINEAR,
 			sky_exposure_ev: 0.0,
+			fog: None,
 		}
 	}
 }
@@ -155,6 +158,9 @@ impl SceneData {
 			self.environment.ambient_linear,
 			self.environment.sky_exposure_ev,
 		)?;
+		if let Some(fog) = &self.environment.fog {
+			fog.validate()?;
+		}
 		if self.environment.active_sky.is_some() && self.active_sky().is_none() {
 			return Err("Scene Sky requires an enabled Sky on a scene-root object".into());
 		}

@@ -9,12 +9,13 @@
         (keydown)="navigate($event)"
         [attr.aria-activedescendant]="visible() && active() !== null ? optionId(active()!) : null"
         [attr.aria-controls]="visible() ? id + '-results' : null"
-        [attr.aria-describedby]="missing() ? id + '-missing' : null"
+        [attr.aria-describedby]="descriptionIds()"
         [attr.aria-expanded]="visible()"
         [attr.aria-invalid]="missing() || null"
         [attr.autofocus]="autofocus() ? '' : null"
         [disabled]="disabled()"
         [id]="id"
+        [attr.title]="displayTitle()"
         [placeholder]="placeholder()"
         [value]="display()"
         aria-autocomplete="list"
@@ -54,5 +55,7 @@
     </ul>
     @if (!matches().length) {
         <p class="empty" role="status">No matching results.</p>
+    } @else if (limited()) {
+        <p class="empty" role="status">Refine your search to see more matches.</p>
     }
 }

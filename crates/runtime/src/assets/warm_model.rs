@@ -128,12 +128,17 @@ impl WarmModel {
 			+ 256;
 		for primitive in &self.primitives {
 			bytes += primitive.mesh.retained_bytes();
-			if let Some((_, image)) = primitive
+			let color = primitive
 				.base_color_image_index
-				.zip(primitive.material.base_color_image.as_ref())
-				.filter(|(index, _)| images.insert(*index))
-			{
-				bytes += image.retained_bytes() + 128;
+				.zip(primitive.material.base_color_image.as_ref());
+			let normal = primitive
+				.normal_map
+				.as_ref()
+				.map(|map| (map.image_index, &map.image));
+			for (index, image) in color.into_iter().chain(normal) {
+				if images.insert(index) {
+					bytes += image.retained_bytes() + 128;
+				}
 			}
 		}
 		bytes
@@ -292,7 +297,11 @@ impl PreparedModelBatch {
 	}
 }
 
-fn matches_current_bytes(path: &Path, expected_bytes: u64, expected_sha256: &str) -> bool {
+pub(super) fn matches_current_bytes(
+	path: &Path,
+	expected_bytes: u64,
+	expected_sha256: &str,
+) -> bool {
 	let check = || -> Option<bool> {
 		let mut file = open_warm_file(path).ok()?;
 		let metadata = file.metadata().ok()?;

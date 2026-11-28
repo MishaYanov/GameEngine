@@ -112,6 +112,7 @@ fn aliases_share_exact_mesh_identity_and_cancelled_batches_discard_partial_model
 		let (resolved, current) = crate::assets::project_assets::resolve_asset_with_model(
 			&scratch.0,
 			reference,
+			&mut None,
 			|asset| CurrentModel::from(asset.unwrap()),
 		)
 		.unwrap();

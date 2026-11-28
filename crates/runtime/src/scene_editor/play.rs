@@ -118,6 +118,58 @@ impl SceneEditor {
 			.and_then(EditorSession::pending_play_scene)
 	}
 
+	pub fn skip_play_sequence(&mut self) -> bool {
+		self.session.as_mut().is_some_and(EditorSession::skip_play_sequence)
+	}
+
+	pub fn pending_scene_transition(
+		&self,
+	) -> Option<&engine_core::game_session::SceneTransitionAttempt> {
+		self.session.as_ref()?.pending_scene_transition()
+	}
+
+	pub fn prepare_scene_transition(
+		&self,
+		attempt: &engine_core::game_session::SceneTransitionAttempt,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.session
+			.as_ref()
+			.ok_or("Native authoring session is not initialized")?
+			.prepare_scene_transition(attempt, document)
+	}
+
+	pub fn finish_unsuccessful_scene_transition(
+		&mut self,
+		attempt: &engine_core::game_session::SceneTransitionAttempt,
+		failed: bool,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?
+			.finish_unsuccessful_scene_transition(attempt, failed)
+	}
+
+	pub fn retry_scene_transition(
+		&mut self,
+		attempt: &engine_core::game_session::SceneTransitionAttempt,
+	) -> Result<(), String> {
+		self.session
+			.as_mut()
+			.ok_or("Native authoring session is not initialized")?
+			.retry_scene_transition(attempt)
+	}
+
+	pub fn approach_scene_route(&self) -> Option<&engine_core::project::SceneRoute> {
+		self.session.as_ref()?.approach_scene_route()
+	}
+
+	pub fn should_retain_scene_preload(&self, route: &engine_core::project::SceneRouteId) -> bool {
+		self.session
+			.as_ref()
+			.is_some_and(|session| session.should_retain_scene_preload(route))
+	}
+
 	pub fn prepare_play_scene(
 		&self,
 		scene_id: SceneId,
@@ -264,10 +316,23 @@ impl SceneEditor {
 		&mut self,
 		scene: &mut Scene,
 		input: &InputState,
-		mut gamepad: GamepadSample,
-		mut physical: PhysicalGamepadSample,
+		gamepad: GamepadSample,
+		physical: PhysicalGamepadSample,
 		elapsed: f32,
 	) -> Result<TickOutcome, String> {
+		self.update_play_with_draw(scene, input, (gamepad, physical), elapsed, None)
+	}
+
+	/// Tick a drawn scene, waiting for its submitted draw before retiring GPU owners.
+	pub fn update_play_with_draw(
+		&mut self,
+		scene: &mut Scene,
+		input: &InputState,
+		controls: (GamepadSample, PhysicalGamepadSample),
+		elapsed: f32,
+		renderer: Option<&renderer::WindowRenderer>,
+	) -> Result<TickOutcome, String> {
+		let (mut gamepad, mut physical) = controls;
 		self.initialize(scene)?;
 		if input.just_pressed(Key::Space) && !self.play_input_binds_key(Key::Space) {
 			self.execute_core(Command::SetPaused {
@@ -282,19 +347,28 @@ impl SceneEditor {
 			session.set_play_visibility_capabilities(scene.visibility_capabilities())?;
 		}
 		let outcome = session.tick(elapsed as f64)?;
-		Self::synchronize_play_tick(scene, session, &outcome)?;
+		Self::synchronize_play_tick(scene, session, &outcome, renderer)?;
 		Ok(outcome)
 	}
 
 	/// Drain accepted fixed steps after the host fulfills prefab requests. Input
 	/// edges were consumed by update_play and must not be applied a second time.
 	pub fn drain_play(&mut self, scene: &mut Scene) -> Result<TickOutcome, String> {
+		self.drain_play_with_draw(scene, None)
+	}
+
+	/// Drain pending fixed steps while protecting GPU owners in the drawn scene.
+	pub fn drain_play_with_draw(
+		&mut self,
+		scene: &mut Scene,
+		renderer: Option<&renderer::WindowRenderer>,
+	) -> Result<TickOutcome, String> {
 		let session = self
 			.session
 			.as_mut()
 			.ok_or("Native session is unavailable")?;
 		let outcome = session.tick(0.0)?;
-		Self::synchronize_play_tick(scene, session, &outcome)?;
+		Self::synchronize_play_tick(scene, session, &outcome, renderer)?;
 		Ok(outcome)
 	}
 
@@ -302,15 +376,24 @@ impl SceneEditor {
 		scene: &mut Scene,
 		session: &EditorSession,
 		outcome: &TickOutcome,
+		renderer: Option<&renderer::WindowRenderer>,
 	) -> Result<(), String> {
 		if !outcome.changes.is_empty()
 			&& let Some(world) = session.render_world()
-			&& !scene.synchronize_world(world, &outcome.changes)?
 		{
-			return Err(
-				"Configured simulation changed GPU topology; reload through the asset factory"
-					.into(),
-			);
+			// The dirty-key budget can omit individual removals during a full resync.
+			if (outcome.changes.topology_changed
+				|| scene.entity_ids().len() != world.data().entities.len())
+				&& let Some(renderer) = renderer
+			{
+				renderer.wait_for_scene_draw()?;
+			}
+			if !scene.synchronize_world(world, &outcome.changes)? {
+				return Err(
+					"Configured simulation changed GPU topology; reload through the asset factory"
+						.into(),
+				);
+			}
 		}
 		if let Some(bank) = session.animations() {
 			scene.synchronize_animation(bank)?;

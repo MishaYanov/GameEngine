@@ -143,7 +143,9 @@ fn required_contacts<'a>(
 						(Some((actor, trigger)), &[])
 					}
 					NativeBehaviorSpec::StateMachine { definition } => (None, &definition.inputs),
-					NativeBehaviorSpec::TimedSpawner { .. } => (None, &[]),
+					NativeBehaviorSpec::TimedSpawner { .. }
+					| NativeBehaviorSpec::Projectile { .. }
+					| NativeBehaviorSpec::ProjectileLauncher { .. } => (None, &[]),
 				};
 				direct
 					.into_iter()

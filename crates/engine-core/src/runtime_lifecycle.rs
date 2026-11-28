@@ -46,12 +46,14 @@ pub struct RuntimeSpawnRequest {
 	pub bindings: BTreeMap<String, EntityKey>,
 	pub position: [f32; 3],
 	pub lifetime_ticks: u32,
+	pub projectile_direction: Option<[f32; 3]>,
 }
 #[derive(Clone)]
 struct RuntimeInstance {
 	keys: Vec<EntityKey>,
 	owner: Option<RuntimeEntityHandle>,
 	component_id: Option<ComponentId>,
+	projectile: Option<crate::projectile::ProjectileInstance>,
 }
 /// Ownership changes only at structural commits. Share the topology across tick
 /// transactions, and detach all of its indexes together before a mutation.
@@ -170,6 +172,7 @@ impl RuntimeLifecycle {
 	}
 	pub fn needs_tick(&self) -> bool {
 		!self.timers.is_empty()
+			|| self.projectiles().next().is_some()
 			|| self.events.len() > 0
 			|| self.machines.iter().any(|(address, definition)| {
 				self.machine_states.get(address).is_none_or(|state| {
@@ -241,6 +244,7 @@ impl RuntimeLifecycle {
 		bindings: &BTreeMap<String, EntityKey>,
 		position: [f32; 3],
 		lifetime_ticks: u32,
+		projectile_direction: Option<[f32; 3]>,
 	) -> Result<(), String> {
 		if self.requests.len() >= MAX_PENDING_SPAWNS {
 			return Err("Runtime pending spawn budget exceeded".into());
@@ -261,12 +265,14 @@ impl RuntimeLifecycle {
 				bindings: bindings.clone(),
 				position,
 				lifetime_ticks,
+				projectile_direction,
 			},
 		);
 		Ok(())
 	}
 	pub fn admit(&mut self, prepared: &PreparedRuntimeSpawn, tick: u64) -> Result<(), String> {
 		let machines = Self::compile_machines(&prepared.entities)?;
+		let projectile = crate::projectile::ProjectileInstance::new(prepared, tick)?;
 		let next_revision = self
 			.topology_revision
 			.checked_add(1)
@@ -331,6 +337,7 @@ impl RuntimeLifecycle {
 					.request
 					.as_ref()
 					.map(|request| request.component_id.clone()),
+				projectile,
 			},
 		);
 		if let Some(timer) = timer {
@@ -348,6 +355,15 @@ impl RuntimeLifecycle {
 			.filter(|timer| timer.due <= tick)
 			.map(|timer| timer.target.clone())
 			.collect()
+	}
+
+	pub(crate) fn projectiles(
+		&self,
+	) -> impl Iterator<Item=&crate::projectile::ProjectileInstance> {
+		self.instances
+			.by_id
+			.values()
+			.filter_map(|instance| instance.projectile.as_ref())
 	}
 	pub(crate) fn validate_reparent(
 		&self,

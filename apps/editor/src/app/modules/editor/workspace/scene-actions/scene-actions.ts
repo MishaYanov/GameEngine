@@ -8,6 +8,7 @@ import {EditorSettingsService} from '../../../../core/editor/settings/editor-set
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {EditorWarmingMode} from '../../../../core/editor/viewport-editor.models';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
 import {SceneEditingService} from '../scene-editing.service';
 import {SceneSwitchService} from './scene-switch.service';
 import {SceneVerification} from './scene-verification';
@@ -25,7 +26,7 @@ interface WarmingContext {
 
 @Component({
     selector: 'editor-scene-actions',
-    imports: [EditorDialog, FormField, SceneVerification, SceneEnvironmentInspector],
+    imports: [EditorDialog, EditorSearchPicker, FormField, SceneVerification, SceneEnvironmentInspector],
     templateUrl: './scene-actions.html',
     styleUrl: './scene-actions.scss',
 })
@@ -80,16 +81,42 @@ export class SceneActions {
         computation: (): string | null => null,
     });
     protected readonly expanded = signal(false);
+    protected readonly newSceneOpen = linkedSignal({
+        source: this.editor.workspaceGeneration,
+        computation: () => false,
+    });
+    protected readonly newSceneName = signal('');
+    protected readonly newScenePath = computed(() => {
+        const name = this.newSceneName().trim();
+        if (!/^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u.test(name)) return '';
+        const snapshot = this.editor.snapshot();
+        const active = snapshot?.scenes.find(scene => scene.id === snapshot.active_scene_id)?.asset_path ?? '';
+        const folder = active.slice(0, active.lastIndexOf('/') + 1);
+        return folder + name.toLowerCase().replace(/ +/g, '-') + '.json';
+    });
+    protected readonly newSceneExists = computed(() => {
+        const path = this.newScenePath();
+        return path !== '' && (this.editor.snapshot()?.scenes.some(scene =>
+            scene.asset_path.toLowerCase() === path.toLowerCase()) ?? false);
+    });
     protected readonly message = signal<string | null>(null);
     protected readonly error = signal<string | null>(null);
     protected readonly confirmationConfig = {draggable: false, resizable: false, expandable: false};
     protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         !this.opening() && !this.pending() && !this.sceneSwitch.pending() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
-    protected readonly cameras = computed(() => (this.editor.document()?.entities ?? [])
-        .filter(entity => entity.camera?.enabled));
-    protected readonly skies = computed(() => (this.editor.document()?.entities ?? [])
-        .filter(entity => entity.sky?.enabled && !entity.parent && !entity.linked_prefab));
+    protected readonly sceneOptions = computed(() => (this.editor.snapshot()?.scenes ?? []).map(scene => ({
+        id: scene.id, label: scene.asset_path, description: scene.dirty ? 'Unsaved changes' : undefined,
+    })));
+    private readonly entities = computed(() => this.editor.snapshot()?.document.entities ?? []);
+    protected readonly cameraOptions = computed(() => this.entities()
+        .filter(entity => entity.camera?.enabled)
+        .map(entity => ({id: entity.key, label: entity.name, description: entity.key})));
+    protected readonly skyOptions = computed(() => this.entities()
+        .filter(entity => entity.sky?.enabled && !entity.parent && !entity.linked_prefab)
+        .map(entity => ({id: entity.key, label: entity.name, description: entity.key})));
+    protected readonly bindingOptions = computed(() => this.entities()
+        .map(entity => ({id: entity.key, label: entity.name, description: entity.key})));
     protected readonly cameraRoleSupported = computed(() =>
         this.editor.capabilities()?.commands?.some(command => command.name === 'set_default_game_camera') === true);
     protected readonly skyRoleSupported = computed(() =>
@@ -145,6 +172,41 @@ export class SceneActions {
         });
     }
 
+    canCreateScene(): boolean {
+        return this.available();
+    }
+
+    showNewScene(): boolean {
+        if (!this.canCreateScene() || this.newSceneOpen()) return false;
+        this.error.set(null);
+        this.newSceneName.set('');
+        this.newSceneOpen.set(true);
+        return true;
+    }
+
+    protected async createNewScene(): Promise<void> {
+        const path = this.newScenePath();
+        if (!this.newSceneOpen() || !this.available() || !path || this.newSceneExists()) return;
+        const generation = this.editor.workspaceGeneration();
+        const fromScene = this.editor.snapshot()?.active_scene_id;
+        this.pending.set(true);
+        this.error.set(null);
+        this.message.set(null);
+        this.newSceneOpen.set(false);
+        try {
+            const result = await this.sceneSwitch.createAndOpen(path);
+            if (result === 'stayed' && generation === this.editor.workspaceGeneration() &&
+                fromScene === this.editor.snapshot()?.active_scene_id) {
+                const failure = this.sceneSwitch.error();
+                this.sceneSwitch.clearFeedback();
+                this.error.set(failure);
+                this.newSceneOpen.set(true);
+            }
+        } finally {
+            this.pending.set(false);
+        }
+    }
+
     show(): boolean {
         if (this.opening() || !this.editor.snapshot()) return false;
         this.informationOpen.set(true);
@@ -168,7 +230,8 @@ export class SceneActions {
                 const body = this.informationBody()?.nativeElement;
                 if (!body?.closest('dialog[open]')) return;
                 const control = [...body.querySelectorAll<HTMLElement>('[data-scene-binding]')]
-                        .find(element => element.dataset['sceneBinding'] === name) ??
+                        .find(element => element.dataset['sceneBinding'] === name)
+                        ?.querySelector<HTMLInputElement>('[role="combobox"]') ??
                     body.querySelector<HTMLElement>('[data-gameplay-settings]');
                 control?.scrollIntoView?.({block: 'nearest'});
                 control?.focus({preventScroll: true});
@@ -176,13 +239,9 @@ export class SceneActions {
         }, {injector: this.injector});
     }
 
-    protected switchScene(select: HTMLSelectElement): void {
-        const id = select.value;
-        const active = this.editor.snapshot()?.active_scene_id ?? '';
-        if (!this.available()) {
-            select.value = this.warmTarget() ?? active;
-            return;
-        }
+    protected switchScene(id: SceneId): void {
+        const active = this.editor.snapshot()?.active_scene_id;
+        if (!this.available() || !this.sceneOptions().some(scene => scene.id === id)) return;
         if (this.warming()) {
             this.error.set(null);
             this.message.set(null);
@@ -190,7 +249,7 @@ export class SceneActions {
             this.queueWarmScene(this.warmTarget());
             return;
         }
-        select.value = active;
+        if (id === active) return;
         this.error.set(null);
         this.message.set(null);
         void this.sceneSwitch.request(id);
@@ -276,12 +335,12 @@ export class SceneActions {
         });
     }
 
-    protected async assignSceneRole(role: 'camera' | 'sky', select: HTMLSelectElement): Promise<void> {
-        const key: EntityKey = select.value;
-        const scene = this.editor.document();
-        select.value = role === 'camera' ? scene?.default_game_camera ?? '' : scene?.environment?.active_sky ?? '';
-        if (!this.available() || (role === 'camera' ? !this.cameras().some(camera => camera.key === key) :
-            key !== '' && !this.skies().some(sky => sky.key === key))) return;
+    protected async assignSceneRole(role: 'camera' | 'sky', key: EntityKey): Promise<void> {
+        const scene = this.editor.snapshot()?.document;
+        const options = role === 'camera' ? this.cameraOptions() : this.skyOptions();
+        const current = role === 'camera' ? scene?.default_game_camera : scene?.environment?.active_sky;
+        if (!this.available() || key === (current ?? '') ||
+            ((key !== '' || role === 'camera') && !options.some(option => option.id === key))) return;
         const command: EditorCommand = role === 'camera' ? {type: 'set_default_game_camera', key} :
             {type: 'set_active_sky', key: key || null};
         await this.run(async () => {
@@ -328,21 +387,13 @@ export class SceneActions {
         });
     }
 
-    protected async setRole(
-        role: string,
-        select: HTMLSelectElement,
-    ): Promise<void> {
+    protected async setRole(role: string, key: EntityKey): Promise<void> {
         const snapshot = this.editor.snapshot();
-        if (!snapshot) return;
-
-        // Capture the user's choice before resetting the control.
-        const key = select.value;
+        if (!snapshot || key === (this.roleBinding(role) ?? '') ||
+            !this.gameplayRoles().some(descriptor => descriptor.name === role) ||
+            (key !== '' && !this.bindingOptions().some(option => option.id === key))) return;
         const generation = this.editor.workspaceGeneration();
         const sceneId = snapshot.active_scene_id;
-
-        // Keep displaying the confirmed value until Rust accepts the edit.
-        select.value = this.roleBinding(role) ?? '';
-        if (!this.gameplayRoles().some(descriptor => descriptor.name === role)) return;
 
         const command: EditorCommand = {
             type: 'set_scene_binding',

@@ -4,10 +4,11 @@ import {EditorDialog} from '../../../../shared/components/dialog/dialog';
 import {draftFieldError, PARTICLE_FIELDS, PARTICLE_PRESETS} from './particle-designer.models';
 import {ParticleDesignerSession} from './particle-designer-session';
 import {ParticlePreviewCanvas} from './particle-preview-canvas';
+import {EditorParticleSpritePicker} from './particle-sprite-picker';
 
 @Component({
     selector: 'editor-particle-designer',
-    imports: [EditorDialog, FormField, ParticlePreviewCanvas],
+    imports: [EditorDialog, FormField, ParticlePreviewCanvas, EditorParticleSpritePicker],
     templateUrl: './particle-designer.html',
     styleUrl: './particle-designer.scss',
 })

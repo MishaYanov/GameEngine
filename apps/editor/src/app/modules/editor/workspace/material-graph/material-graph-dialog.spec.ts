@@ -96,6 +96,33 @@ describe('Material Graph dialog', () => {
         expect(root.querySelector('dialog[open]')).toBeNull();
     });
 
+    it('replaces the canvas with a focused discard decision and restores the edited graph', async () => {
+        const {click, root, execute} = await setup();
+        const workspace = root.querySelector<HTMLElement>('.graph-workspace')!;
+        await click('Add node');
+        const canvas = workspace.querySelector('editor-graph');
+        expect(canvas?.querySelectorAll('editor-graph-node')).toHaveLength(3);
+
+        await click('Close');
+
+        expect(root.querySelector('dialog[open]')).not.toBeNull();
+        expect(workspace.hidden).toBe(true);
+        expect(root.querySelector('.discard-review [role=status]')?.textContent).toContain('Discard the changes');
+        expect(root.ownerDocument.activeElement?.textContent?.trim()).toBe('Keep editing');
+
+        await click('Keep editing');
+
+        expect(root.querySelector('.discard-review')).toBeNull();
+        expect(workspace.hidden).toBe(false);
+        expect(root.ownerDocument.activeElement).toBe(workspace);
+        expect(canvas?.querySelectorAll('editor-graph-node')).toHaveLength(3);
+
+        await click('Close');
+        await click('Discard changes');
+        expect(root.querySelector('dialog[open]')).toBeNull();
+        expect(execute).not.toHaveBeenCalled();
+    });
+
     it('leaves the graph open for native diagnostics and rejects a stale apply', async () => {
         const {click, execute, root, snapshot} = await setup();
         vi.mocked(invoke).mockRejectedValueOnce({code: 'missing_input', node: 'material', port: 'color', message: 'Connect a color.'});

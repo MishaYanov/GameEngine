@@ -1,5 +1,5 @@
 import {computed, signal} from '@angular/core';
-import {TestBed} from '@angular/core/testing';
+import {type ComponentFixture, TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
 import axe from 'axe-core';
 import type {EditorSnapshot, GameplayModuleDescriptor, SceneEntity} from '../../../../core/editor/editor.models';
@@ -41,6 +41,29 @@ function choose(select: HTMLSelectElement, value: string): void {
     select.dispatchEvent(new Event('change'));
 }
 
+function scenePicker(root: ParentNode): HTMLInputElement {
+    return root.querySelector<HTMLInputElement>('.scene-picker [role="combobox"]')!;
+}
+
+function bindingPicker(root: ParentNode): HTMLInputElement {
+    return root.querySelector<HTMLInputElement>('[data-scene-binding] [role="combobox"]')!;
+}
+
+function pickerOptions(fixture: ComponentFixture<SceneActions>, control: HTMLInputElement): HTMLElement[] {
+    control.click();
+    fixture.detectChanges();
+    return Array.from(control.closest('editor-search-picker')!.querySelectorAll<HTMLElement>('[role="option"]'));
+}
+
+function pick(fixture: ComponentFixture<SceneActions>, control: HTMLInputElement, key: string): void {
+    if (key === '') {
+        control.closest('editor-search-picker')!.querySelector<HTMLButtonElement>('button')!.click();
+        return;
+    }
+    const options = pickerOptions(fixture, control);
+    options.find(option => option.id.endsWith('-option-' + encodeURIComponent(key)))!.click();
+}
+
 function snapshot(): EditorSnapshot {
     return {
         active_scene_id: 'main', revision: 1, scene_revision: 1,
@@ -73,12 +96,14 @@ async function createActions(
     const busy = signal(false);
     const generation = signal(1);
     const nativeGeneration = signal<number | null>(17);
+    const authoringGeneration = signal(17);
     const result = signal<SceneWarmingResult | null>(null);
     const mode = signal<EditorWarmingMode>('references');
     const capabilities = signal<{
         gameplay_modules: readonly GameplayModuleDescriptor[] | undefined;
         scene_warming_supported?: boolean;
         scene_verification_supported?: boolean;
+        commands?: readonly { readonly name: string }[];
     }>({
         gameplay_modules: modules, scene_warming_supported: true,
     });
@@ -99,6 +124,16 @@ async function createActions(
         selected === 'models' ? 2 : selected === 'references' ? 1 : 0);
     const exportWarmingReport = vi.fn<EditorService['exportWarmingReport']>(async () => 3);
     const checkScenes = vi.fn<EditorService['checkScenes']>();
+    const authoringScope = vi.fn<EditorService['authoringScope']>(async workspaceGeneration => ({
+        workspaceGeneration, nativeGeneration: authoringGeneration(), revision: current().revision,
+    }));
+    const createScene = vi.fn<EditorService['createScene']>(async path => {
+        current.update(value => ({
+            ...value, revision: value.revision + 1, project_dirty: true,
+            scenes: [...value.scenes, {id: 'new-scene', asset_path: path, dirty: false, loaded: false}],
+        }));
+        return current();
+    });
     const registerScene = vi.fn(async (_path: string) => current());
     const saveSceneAs = vi.fn(async (_path: string) => current());
     const execute = vi.fn<EditorService['execute']>(async () => current());
@@ -129,6 +164,8 @@ async function createActions(
                 exportWarmingReport,
                 checkScenes,
                 save,
+                createScene,
+                authoringScope,
                 registerScene,
                 saveSceneAs,
                 execute,
@@ -156,6 +193,17 @@ async function createActions(
         await fixture.whenStable();
         return root.querySelector<HTMLInputElement>('.scene-files input')!;
     };
+    const nameNewScene = async (name: string) => {
+        if (!openDialog('New Scene')) {
+            expect(fixture.componentInstance.showNewScene()).toBe(true);
+            await fixture.whenStable();
+        }
+        const input = openDialog('New Scene')!.querySelector<HTMLInputElement>('input')!;
+        input.value = name;
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        await fixture.whenStable();
+        return input;
+    };
     const sceneSwitch = TestBed.inject(SceneSwitchService);
     return {
         fixture,
@@ -164,6 +212,7 @@ async function createActions(
         busy,
         generation,
         nativeGeneration,
+        authoringGeneration,
         result,
         mode,
         capabilities,
@@ -175,12 +224,15 @@ async function createActions(
         exportWarmingReport,
         checkScenes,
         save,
+        createScene,
+        authoringScope,
         registerScene,
         saveSceneAs,
         execute,
         withCommittedEdit,
         button,
         openDialog,
+        nameNewScene,
         expand
     };
 }
@@ -213,13 +265,175 @@ afterAll(() => {
 });
 
 describe('SceneActions', () => {
+    it('names, creates, and opens a new scene using the existing folder and scene switch flow', async () => {
+        const panel = await createActions(snapshot(), [sampleModule], false);
+        expect(panel.fixture.componentInstance.showNewScene()).toBe(true);
+        await panel.fixture.whenStable();
+        const dialog = panel.openDialog('New Scene')!;
+        const input = dialog.querySelector<HTMLInputElement>('input')!;
+        const fill = async (name: string) => {
+            input.value = name;
+            input.dispatchEvent(new Event('input', {bubbles: true}));
+            await panel.fixture.whenStable();
+        };
+        expect(panel.button('Create Scene').disabled).toBe(true);
+        await fill('Second');
+        expect(panel.button('Create Scene').disabled).toBe(true);
+        expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('already uses this file name');
+        await fill('Boss Room');
+        expect(dialog.querySelector('#new-scene-path')?.textContent).toContain('scenes/boss-room.json');
+        panel.button('Create Scene').click();
+        await vi.waitFor(() => expect(panel.switchScene).toHaveBeenCalledWith('new-scene', 1, 2));
+        expect(panel.createScene).toHaveBeenCalledExactlyOnceWith('scenes/boss-room.json', {
+            workspaceGeneration: 1, nativeGeneration: 17, revision: 1,
+        });
+        await panel.fixture.whenStable();
+        expect(panel.openDialog('New Scene')).toBeUndefined();
+        expect(panel.current().active_scene_id).toBe('new-scene');
+    });
+
+    it('opens the new scene while a background change receipt occupies the editor queue', async () => {
+        const panel = await createActions(snapshot(), [sampleModule], false);
+        await panel.nameNewScene('Boss Room');
+        const register = panel.createScene.getMockImplementation()!;
+        panel.createScene.mockImplementationOnce(async (...args) => {
+            const registered = await register(...args);
+            panel.busy.set(true);
+            return registered;
+        });
+        const open = panel.switchScene.getMockImplementation()!;
+        panel.switchScene.mockImplementationOnce(async sceneId => {
+            expect(panel.busy()).toBe(true);
+            expect(panel.sceneSwitch.pending()).toBe(true);
+            panel.busy.set(false);
+            return open(sceneId);
+        });
+
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+        expect(panel.withCommittedEdit).toHaveBeenCalledTimes(1);
+        expect(panel.createScene).toHaveBeenCalledExactlyOnceWith('scenes/boss-room.json', {
+            workspaceGeneration: 1, nativeGeneration: 17, revision: 1,
+        });
+        expect(panel.switchScene).toHaveBeenCalledExactlyOnceWith('new-scene', 1, 2);
+        expect(panel.current().active_scene_id).toBe('new-scene');
+    });
+
+    it('confirms dirty changes before creating a file and restores the name on cancellation', async () => {
+        const initial = snapshot();
+        const panel = await createActions({
+            ...initial, dirty: true,
+            scenes: initial.scenes.map(scene => ({...scene, dirty: scene.id === 'main'})),
+        }, [sampleModule], false);
+        await panel.nameNewScene('Boss Room');
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+        const confirm = panel.openDialog('Save changes before opening scene?');
+        expect(confirm?.textContent).toContain('scenes/boss-room.json');
+        expect(panel.openDialog('New Scene')).toBeUndefined();
+        expect(panel.createScene).not.toHaveBeenCalled();
+        expect(panel.switchScene).not.toHaveBeenCalled();
+
+        panel.button('Cancel').click();
+        await panel.fixture.whenStable();
+        expect(panel.openDialog('Save changes before opening scene?')).toBeUndefined();
+        expect(panel.openDialog('New Scene')?.querySelector('input')?.value).toBe('Boss Room');
+        expect(panel.createScene).not.toHaveBeenCalled();
+        expect(panel.save).not.toHaveBeenCalled();
+
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+        panel.button('Keep Edits and Open').click();
+        await panel.fixture.whenStable();
+        expect(panel.createScene).toHaveBeenCalledExactlyOnceWith('scenes/boss-room.json', {
+            workspaceGeneration: 1, nativeGeneration: 17, revision: 1,
+        });
+        expect(panel.switchScene).toHaveBeenCalledExactlyOnceWith('new-scene', 1, 2);
+        expect(panel.save).not.toHaveBeenCalled();
+        expect(panel.current().scenes[0].dirty).toBe(true);
+    });
+
+    it('creates and opens a scene while the dialog keeps the viewport unattached', async () => {
+        const panel = await createActions(snapshot(), [sampleModule], false);
+        panel.nativeGeneration.set(null);
+        await panel.nameNewScene('Boss Room');
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+
+        expect(panel.nativeGeneration()).toBeNull();
+        expect(panel.authoringScope).toHaveBeenCalledWith(1);
+        expect(panel.createScene).toHaveBeenCalledExactlyOnceWith('scenes/boss-room.json', {
+            workspaceGeneration: 1, nativeGeneration: 17, revision: 1,
+        });
+        expect(panel.current().active_scene_id).toBe('new-scene');
+        expect(panel.openDialog('New Scene')).toBeUndefined();
+    });
+
+    it('keeps the typed name and reports a native scope error without writing', async () => {
+        const panel = await createActions(snapshot(), [sampleModule], false);
+        await panel.nameNewScene('Boss Room');
+        panel.authoringScope.mockRejectedValueOnce(new Error('This editor host could not identify the project.'));
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+        const form = panel.openDialog('New Scene');
+        expect(form?.querySelector('input')?.value).toBe('Boss Room');
+        expect(form?.querySelector('[role="alert"]')?.textContent).toContain('could not identify the project');
+        expect(panel.createScene).not.toHaveBeenCalled();
+    });
+
+    it('rejects a native scene revision that differs from the frontend before writing', async () => {
+        const panel = await createActions(snapshot(), [sampleModule], false);
+        await panel.nameNewScene('Boss Room');
+        panel.authoringScope.mockResolvedValueOnce({workspaceGeneration: 1, nativeGeneration: 17, revision: 2});
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+        expect(panel.openDialog('New Scene')?.querySelector('[role="alert"]')?.textContent)
+            .toContain('The project changed while preparing the new scene');
+        expect(panel.createScene).not.toHaveBeenCalled();
+    });
+
+    it('cancels a pending new-scene write if the native workspace changes during confirmation', async () => {
+        const initial = snapshot();
+        const panel = await createActions({
+            ...initial, dirty: true,
+            scenes: initial.scenes.map(scene => ({...scene, dirty: scene.id === 'main'})),
+        }, [sampleModule], false);
+        await panel.nameNewScene('Boss Room');
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+        panel.authoringGeneration.set(18);
+        panel.button('Save and Open').click();
+        await panel.fixture.whenStable();
+        expect(panel.openDialog('New Scene')?.querySelector('[role="alert"]')?.textContent)
+            .toContain('The native project changed. Choose Create Scene again.');
+        expect(panel.save).not.toHaveBeenCalled();
+        expect(panel.createScene).not.toHaveBeenCalled();
+        expect(panel.switchScene).not.toHaveBeenCalled();
+    });
+
+    it('reports how to recover an already registered scene after opening fails', async () => {
+        const panel = await createActions(snapshot(), [sampleModule], false);
+        await panel.nameNewScene('Boss Room');
+        panel.switchScene.mockRejectedValueOnce(new Error('Could not open the new scene.'));
+        panel.button('Create Scene').click();
+        await panel.fixture.whenStable();
+
+        expect(panel.current().active_scene_id).toBe('main');
+        expect(panel.current().scenes.some(scene => scene.asset_path === 'scenes/boss-room.json')).toBe(true);
+        expect(panel.openDialog('New Scene')).toBeUndefined();
+        expect(panel.root.querySelector('[role="alert"]:not(dialog *)')?.textContent)
+            .toContain('Could not open the new scene. Created scenes/boss-room.json. Open it from Assets');
+        expect(panel.createScene).toHaveBeenCalledTimes(1);
+        expect(panel.switchScene).toHaveBeenCalledTimes(1);
+    });
+
     it('opens Scene Information on demand and closes it when the workspace changes', async () => {
         const {fixture, root, generation, openDialog} = await createActions(snapshot(), [sampleModule], false);
         expect(root.querySelector('dialog[open]')).toBeNull();
         expect(fixture.componentInstance.show()).toBe(true);
         await fixture.whenStable();
         const information = openDialog('Scene Information');
-        expect(information?.querySelector<HTMLSelectElement>('.scene-actions select')?.value).toBe('main');
+        expect(scenePicker(information!).value).toBe('scenes/main.json');
 
         generation.update(value => value + 1);
         await fixture.whenStable();
@@ -230,8 +444,8 @@ describe('SceneActions', () => {
         const {fixture, root, button, warmScene, switchScene, current} = await createActions();
         button('Prepare scene').click();
         await fixture.whenStable();
-        const scene = root.querySelector<HTMLSelectElement>('.scene-actions select')!;
-        choose(scene, 'second');
+        const scene = scenePicker(root);
+        pick(fixture, scene, 'second');
         await fixture.whenStable();
         expect(warmScene).toHaveBeenLastCalledWith('second', 1, 17, 1);
         expect(switchScene).not.toHaveBeenCalled();
@@ -243,7 +457,7 @@ describe('SceneActions', () => {
 
         button('Prepare scene').click();
         await fixture.whenStable();
-        choose(scene, 'second');
+        pick(fixture, scene, 'second');
         await fixture.whenStable();
         button('Open selected scene').click();
         await fixture.whenStable();
@@ -257,7 +471,7 @@ describe('SceneActions', () => {
         warmScene.mockImplementationOnce(() => new Promise<void>(resolve => finishWarm = resolve));
         button('Prepare scene').click();
         await fixture.whenStable();
-        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        pick(fixture, scenePicker(root), 'second');
         await vi.waitFor(() => expect(warmScene).toHaveBeenCalledExactlyOnceWith('second', 1, 17, 1));
 
         try {
@@ -276,7 +490,7 @@ describe('SceneActions', () => {
         await fixture.whenStable();
 
         expect(button('Prepare scene').disabled).toBe(true);
-        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        pick(fixture, scenePicker(root), 'second');
         await fixture.whenStable();
         expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
         expect(warmScene).not.toHaveBeenCalled();
@@ -288,13 +502,13 @@ describe('SceneActions', () => {
         warmScene.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => rejectWarm = reject));
         button('Prepare scene').click();
         await fixture.whenStable();
-        const scene = root.querySelector<HTMLSelectElement>('.scene-actions select')!;
-        choose(scene, 'second');
+        const scene = scenePicker(root);
+        pick(fixture, scene, 'second');
         await vi.waitFor(() => expect(warmScene).toHaveBeenCalledExactlyOnceWith('second', 1, 17, 1));
 
         nativeGeneration.set(18);
         await fixture.whenStable();
-        expect(scene.value).toBe('main');
+        expect(scene.value).toBe('scenes/main.json');
         expect(button('Open selected scene')).toBeUndefined();
         rejectWarm(new Error('Retired workspace'));
         await fixture.whenStable();
@@ -303,7 +517,7 @@ describe('SceneActions', () => {
         await vi.waitFor(() => expect(button('Prepare scene').disabled).toBe(false));
         button('Prepare scene').click();
         await fixture.whenStable();
-        choose(scene, 'second');
+        pick(fixture, scene, 'second');
         await vi.waitFor(() => expect(warmScene).toHaveBeenLastCalledWith('second', current().revision, 18, 1));
         expect(warmScene).toHaveBeenCalledTimes(2);
     });
@@ -314,7 +528,7 @@ describe('SceneActions', () => {
         warmScene.mockImplementationOnce(() => new Promise<void>(resolve => release = resolve));
         button('Prepare scene').click();
         await fixture.whenStable();
-        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        pick(fixture, scenePicker(root), 'second');
         await vi.waitFor(() => expect(warmScene).toHaveBeenCalledExactlyOnceWith('second', 1, 17, 1));
         try {
             mode.set('models');
@@ -327,7 +541,7 @@ describe('SceneActions', () => {
         await vi.waitFor(() => expect(button('Prepare scene').disabled).toBe(false));
         button('Prepare scene').click();
         await fixture.whenStable();
-        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        pick(fixture, scenePicker(root), 'second');
         await fixture.whenStable();
         expect(warmScene).toHaveBeenLastCalledWith('second', 1, 17, 2);
     });
@@ -426,18 +640,53 @@ describe('SceneActions', () => {
         expect(exportButton.disabled).toBe(false);
     });
 
+    it('matches the end of a long scene path and opens it with the keyboard', async () => {
+        const initial = snapshot();
+        const longPath = 'scenes/river-district/scenes-for-the-northern-expedition/final-approach-observation-tower.json';
+        const {fixture, root, current, switchScene} = await createActions({
+            ...initial,
+            scenes: [initial.scenes[0], {...initial.scenes[1], asset_path: longPath}],
+            project: {
+                ...initial.project, scenes: [
+                    initial.project.scenes[0], {...initial.project.scenes[1], asset_path: longPath},
+                ]
+            },
+        });
+        const control = scenePicker(root);
+        control.click();
+        control.value = 'observation tower';
+        control.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        const matches = root.querySelectorAll('.scene-picker [role="option"]');
+        expect(Array.from(matches, option => option.textContent?.trim())).toEqual([longPath]);
+        expect(control.getAttribute('aria-activedescendant')).toBe(matches[0].id);
+        control.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
+        expect(control.value).toBe('scenes/main.json');
+        expect(switchScene).not.toHaveBeenCalled();
+
+        control.click();
+        control.value = 'observation tower';
+        control.dispatchEvent(new Event('input'));
+        await fixture.whenStable();
+        control.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+        await fixture.whenStable();
+        expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
+        expect(current().active_scene_id).toBe('second');
+        expect(control.value).toBe(longPath);
+    });
+
     it('keeps the authoritative selected scene while a switch is pending or fails', async () => {
         const {fixture, root, switchScene} = await createActions();
         let fail!: (error: Error) => void;
         switchScene.mockImplementationOnce(() => new Promise<EditorSnapshot>((_resolve, reject) => fail = reject));
-        const select = root.querySelector('select')!;
-        select.value = 'second';
-        select.dispatchEvent(new Event('change'));
-        expect(select.value).toBe('main');
+        const control = scenePicker(root);
+        pick(fixture, control, 'second');
+        expect(control.value).toBe('scenes/main.json');
         fail(new Error('The second scene could not be loaded.'));
         await fixture.whenStable();
-        expect(select.value).toBe('main');
-        expect(select.disabled).toBe(false);
+        expect(control.value).toBe('scenes/main.json');
+        expect(control.disabled).toBe(false);
         expect(root.querySelector('[role="alert"]')?.textContent).toContain('second scene could not be loaded');
     });
 
@@ -452,15 +701,16 @@ describe('SceneActions', () => {
                 scenes: [{id: first.id, asset_path: first.asset_path}, ...initial.project.scenes],
             },
         });
-        const select = root.querySelector<HTMLSelectElement>('.scene-actions select')!;
-        expect([...select.options].map(option => option.value)).toEqual(['first', 'main', 'second']);
-        expect(select.value).toBe('main');
-        choose(select, 'second');
+        const control = scenePicker(root);
+        expect(control.value).toBe('scenes/main.json');
+        expect(pickerOptions(fixture, control).map(option => option.textContent?.trim()))
+            .toEqual(['scenes/first.json', 'scenes/main.json', 'scenes/second.json']);
+        pick(fixture, control, 'second');
         await fixture.whenStable();
         expect(withCommittedEdit).toHaveBeenCalledOnce();
         expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
         expect(current().active_scene_id).toBe('second');
-        expect(select.value).toBe('second');
+        expect(control.value).toBe('scenes/second.json');
         expect(root.querySelector('.status[role="status"]')?.textContent).toContain('Opened scenes/second.json.');
         expect(sceneSwitch.lastSwitch()).toEqual({
             sceneId: 'second', path: 'scenes/second.json', sceneRevision: 2, generation: 1,
@@ -565,7 +815,7 @@ describe('SceneActions', () => {
         generation.update(value => value + 1);
         button('Save and Open').click();
         expect(await stale).toBe(false);
-        expect(sceneSwitch.error()).toContain('editor state changed');
+        expect(sceneSwitch.error()).toBeNull();
         expect(save).toHaveBeenCalledOnce();
         expect(switchScene).not.toHaveBeenCalled();
     });
@@ -628,13 +878,77 @@ describe('SceneActions', () => {
         expect(execute).toHaveBeenCalledExactlyOnceWith({type: 'set_startup_scene', scene_id: 'second'});
     });
 
+    it('offers eligible scene role targets, assigns a long camera name, and clears the sky explicitly', async () => {
+        const initial = snapshot();
+        const camera: SceneEntity = {
+            ...entity('camera-key'),
+            name: 'Observation Camera Facing the Northern Expedition Landing and Cliffside Entrance',
+            camera: {
+                id: 'camera-component', enabled: true, settings: {
+                    lens: {vertical_fov: 1, near: 0.1, far: 100}, rig: {mode: 'fixed'},
+                }
+            },
+        };
+        const sky: SceneEntity = {
+            ...entity('sky-key'), name: 'Cliffside Sky',
+            sky: {
+                id: 'sky-component', enabled: true, settings: {
+                    zenith: [0.1, 0.3, 0.5], horizon: [0.2, 0.4, 0.6], yaw_degrees: 0,
+                }
+            },
+        };
+        const {capabilities, current, execute, fixture, root} = await createActions({
+            ...initial,
+            document: {
+                ...initial.document, environment: {active_sky: sky.key}, entities: [
+                    camera, {...camera, key: 'off-camera', camera: {...camera.camera!, enabled: false}},
+                    sky, {...sky, key: 'child-sky', parent: camera.key},
+                ]
+            },
+        });
+        capabilities.update(value => ({
+            ...value, commands: [{name: 'set_default_game_camera'}, {name: 'set_active_sky'}],
+        }));
+        execute.mockImplementation(async command => {
+            current.update(value => ({
+                ...value, revision: value.revision + 1,
+                document: {
+                    ...value.document,
+                    default_game_camera: command.type === 'set_default_game_camera'
+                        ? command.key : value.document.default_game_camera,
+                    environment: command.type === 'set_active_sky'
+                        ? {active_sky: command.key} : value.document.environment,
+                },
+            }));
+            return current();
+        });
+        await fixture.whenStable();
+
+        const field = (name: string) => [...root.querySelectorAll('label')]
+            .find(label => label.textContent?.trim() === name)?.control as HTMLInputElement;
+        const cameraPicker = field('Game Camera');
+        const skyPicker = field('Scene Sky');
+        const cameraOptions = pickerOptions(fixture, cameraPicker);
+        expect(cameraOptions.map(option => option.querySelector('span')?.textContent?.trim())).toEqual([camera.name]);
+        expect(cameraPicker.closest('editor-search-picker')?.querySelector('button')).toBeNull();
+        cameraOptions[0].click();
+        await fixture.whenStable();
+        expect(execute).toHaveBeenNthCalledWith(1, {type: 'set_default_game_camera', key: camera.key}, 1, 1);
+        expect(cameraPicker.value).toBe(camera.name);
+        expect(pickerOptions(fixture, skyPicker).map(option => option.querySelector('span')?.textContent?.trim())).toEqual([sky.name]);
+        pick(fixture, skyPicker, '');
+        await fixture.whenStable();
+        expect(execute).toHaveBeenNthCalledWith(2, {type: 'set_active_sky', key: null}, 1, 2);
+        expect(skyPicker.value).toBe('');
+    });
+
     it('shows the saved role on open and switches to the new scene binding', async () => {
         const initial = snapshot();
         const {fixture, root, current, switchScene} = await createActions({
             ...initial,
             document: {...initial.document, entities: [entity('robot')], bindings: {player: 'robot'}},
         });
-        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        const player = bindingPicker(root);
         expect(player.value).toBe('robot');
 
         switchScene.mockImplementationOnce(async () => {
@@ -645,10 +959,11 @@ describe('SceneActions', () => {
             }));
             return current();
         });
-        choose(root.querySelector<HTMLSelectElement>('.scene-actions select')!, 'second');
+        pick(fixture, scenePicker(root), 'second');
         await fixture.whenStable();
         expect(switchScene).toHaveBeenCalledExactlyOnceWith('second', 1, 1);
-        expect([...player.options].map(option => option.value)).toEqual(['', 'scout']);
+        const options = pickerOptions(fixture, player);
+        expect(options.map(option => option.querySelector('span')?.textContent?.trim())).toEqual(['scout']);
         expect(player.value).toBe('scout');
     });
 
@@ -666,8 +981,8 @@ describe('SceneActions', () => {
         const selector = root.querySelector<HTMLSelectElement>('.gameplay-settings select')!;
         expect(selector.value).toBe('race');
         expect(root.querySelector('.gameplay-settings')?.textContent).toContain('Cross the checkpoint.');
-        const role = root.querySelector<HTMLSelectElement>('.gameplay-roles select')!;
-        expect(role.closest('label')?.textContent).toContain('Checkpoint flag');
+        const role = bindingPicker(root);
+        expect(role.closest('editor-search-picker')?.querySelector('label')?.textContent).toContain('Checkpoint flag');
         expect(root.querySelector('#' + role.getAttribute('aria-describedby'))?.textContent).toContain('Choose the lap marker.');
         expect(root.querySelector('.gameplay-roles')?.textContent).not.toContain('Player');
 
@@ -701,10 +1016,10 @@ describe('SceneActions', () => {
             ...sampleModule,
             default_roles: [{name: 'constructor', label: 'Builder', requirement_hint: 'Choose the builder.'}],
         }]);
-        const role = root.querySelector<HTMLSelectElement>('.gameplay-roles select')!;
+        const role = bindingPicker(root);
         expect(role.value).toBe('');
         execute.mockRejectedValueOnce(new Error('Role update rejected.'));
-        choose(role, 'actor');
+        pick(fixture, role, 'actor');
         expect(role.value).toBe('');
         await fixture.whenStable();
         expect(role.value).toBe('');
@@ -834,7 +1149,7 @@ describe('SceneActions', () => {
             ...initial,
             document: {...initial.document, entities: [entity('robot'), entity('scout')]},
         });
-        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        const player = bindingPicker(root);
         for (const [before, after] of [['', 'robot'], ['robot', 'scout'], ['scout', '']] as const) {
             const bindings: EditorSnapshot['document']['bindings'] = after ? {player: after} : {};
             let accept!: () => void;
@@ -848,7 +1163,7 @@ describe('SceneActions', () => {
                 };
             }));
 
-            choose(player, after);
+            pick(fixture, player, after);
             await vi.waitFor(() => expect(accept).toBeDefined());
             expect(execute).toHaveBeenLastCalledWith({
                 type: 'set_scene_binding', scene_id: 'main', name: 'player',
@@ -869,11 +1184,11 @@ describe('SceneActions', () => {
             document: {...initial.document, entities: [entity('robot')], bindings: {player: 'robot'}},
         };
         const {fixture, root, current, execute} = await createActions(authored);
-        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        const player = bindingPicker(root);
 
         current.set({...initial, revision: 2, can_undo: true});
         await fixture.whenStable();
-        expect([...player.options].map(option => option.value)).toEqual(['']);
+        expect(pickerOptions(fixture, player)).toEqual([]);
         expect(player.value).toBe('');
 
         current.set({...authored, revision: 3, can_redo: true});
@@ -888,7 +1203,7 @@ describe('SceneActions', () => {
             ...initial,
             document: {...initial.document, entities: [entity('robot'), entity('scout')], bindings: {player: 'robot'}},
         });
-        const player = root.querySelector<HTMLSelectElement>('fieldset select')!;
+        const player = bindingPicker(root);
         let finishEdit!: () => void;
         withCommittedEdit.mockImplementationOnce(async action => {
             await new Promise<void>(resolve => finishEdit = resolve);
@@ -897,7 +1212,7 @@ describe('SceneActions', () => {
         });
         execute.mockRejectedValueOnce(new Error('Binding target disappeared.'));
 
-        choose(player, 'scout');
+        pick(fixture, player, 'scout');
         expect(player.value).toBe('robot');
         expect(execute).not.toHaveBeenCalled();
         finishEdit();
@@ -917,7 +1232,7 @@ describe('SceneActions', () => {
         path.dispatchEvent(new Event('input'));
         current.update(value => ({...value, active_scene_id: 'second', mode: 'play'}));
         await fixture.whenStable();
-        expect(root.querySelector('select')!.disabled).toBe(true);
+        expect(scenePicker(root).disabled).toBe(true);
         expect(root.querySelector<HTMLSelectElement>('.gameplay-settings select')!.disabled).toBe(true);
         expect(root.querySelector('fieldset')!.disabled).toBe(true);
         expect(path.disabled).toBe(true);
@@ -1127,13 +1442,13 @@ describe('Scene Information verification', () => {
         await check();
         button('Inspect player in main').click();
         await fixture.whenStable();
-        const role = root.querySelector<HTMLSelectElement>('[data-scene-binding="player"]');
+        const role = bindingPicker(root);
         expect(role).toBeDefined();
         expect(document.activeElement).toBe(role);
 
         current.update(value => ({...value, project: structuredClone(value.project), revision: 2}));
         await fixture.whenStable();
-        expect(root.querySelector('[data-scene-binding="player"]')).toBe(role);
+        expect(bindingPicker(root)).toBe(role);
     });
 
     it('checks a scene only after navigation accepts the dirty-scene confirmation', async () => {

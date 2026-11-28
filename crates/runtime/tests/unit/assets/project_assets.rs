@@ -494,6 +494,42 @@ fn stale_candidate_conflicts_and_invalid_source_leave_authored_assets_untouched(
 	assert!(root.join("two.glb").exists());
 }
 #[test]
+fn migration_ignores_registered_scenes_and_camera_component_scene_files() {
+	use engine_core::scene_catalog::{SceneCatalog, SceneDescriptor, SceneId};
+
+	let f = Fixture::new();
+	let root = f.root();
+	let component_scene = r#"{"schema_version":8,"bindings":{},"entities":[],"default_game_camera":"camera","lights":[]}"#;
+	fs::write(root.join("component-camera.json"), component_scene).unwrap();
+	fs::write(
+		root.join("registered-scene.json"),
+		r#"{"schema_version":8,"bindings":{},"entities":[]}"#,
+	)
+		.unwrap();
+	let mut scenes = SceneCatalog::default();
+	scenes
+		.insert(
+			SceneDescriptor::new(SceneId::new("main").unwrap(), "registered-scene.json").unwrap(),
+		)
+		.unwrap();
+
+	let catalog = migrate_project_catalog(&root, &scenes).unwrap();
+	assert!(catalog.assets.is_empty());
+	assert!(!root.join(CATALOG_FILE).exists());
+
+	fs::write(
+		root.join("malformed-prefab.json"),
+		r#"{"schema_version":3,"entities":[],"unexpected":true}"#,
+	)
+		.unwrap();
+	assert!(
+		migrate_project_catalog(&root, &scenes)
+			.unwrap_err()
+			.contains("unknown field")
+	);
+}
+
+#[test]
 fn migration_is_repeatable_and_prefab_catalog_retains_dependencies() {
 	let f = Fixture::new();
 	let root = f.root();
@@ -594,12 +630,12 @@ fn migration_charges_unrecognized_and_malformed_json_before_skipping_it() {
 	] {
 		fs::write(root.join(name), bytes).unwrap();
 	}
-	let error = migrate_catalog_with_budget(&root, 5).unwrap_err();
+	let error = migrate_catalog_with_budget(&root, 5, None).unwrap_err();
 	assert!(error.contains("source budget"));
 	assert!(!root.join(CATALOG_FILE).exists());
 	assert_eq!(fs::read_dir(&root).unwrap().count(), 3);
 	assert_eq!(
-		migrate_catalog_with_budget(&root, 6).unwrap(),
+		migrate_catalog_with_budget(&root, 6, None).unwrap(),
 		AssetCatalog::default()
 	);
 }

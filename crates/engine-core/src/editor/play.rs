@@ -277,6 +277,96 @@ impl EditorSession {
 		self.play.as_ref()?.pending_scene()
 	}
 
+	pub(super) fn test_manual_scene_route(&mut self, route: &crate::project::SceneRouteId) -> Result<(), String> {
+		self.require_no_transaction()?;
+		if !self.project.scene_routes.iter().any(|candidate| &candidate.id == route
+			&& matches!(candidate.activate, crate::project::SceneRouteActivation::Manual))
+		{
+			return Err("Select a manual route to test in Play".into());
+		}
+		self.play.as_mut().ok_or("Start Play before testing a scene route")?.request_route(route)?;
+		self.bump();
+		Ok(())
+	}
+
+	pub(super) fn retry_failed_scene_route(
+		&mut self,
+		run_id: &str,
+		scene_generation: u64,
+		attempt_id: u64,
+	) -> Result<(), String> {
+		let play = self.play.as_ref().ok_or("Play mode is not active")?;
+		if play.run_id() != run_id || play.scene_generation() != scene_generation {
+			return Err("Play changed. Select the failed transition again.".into());
+		}
+		let attempt = play
+			.failed_transition()
+			.filter(|attempt| attempt.id() == attempt_id && attempt.route_id().is_some())
+			.cloned()
+			.ok_or("That scene transition is no longer available to retry")?;
+		self.retry_scene_transition(&attempt)
+	}
+
+	pub fn skip_play_sequence(&mut self) -> bool {
+		self.play.as_mut().is_some_and(|play| play.active_mut().skip_sequence())
+	}
+
+	pub fn pending_scene_transition(&self) -> Option<&crate::game_session::SceneTransitionAttempt> {
+		self.play.as_ref()?.pending_transition()
+	}
+
+	pub fn prepare_scene_transition(
+		&self,
+		attempt: &crate::game_session::SceneTransitionAttempt,
+		document: Arc<SceneData>,
+	) -> Result<PreparedScene, String> {
+		self.require_no_transaction()?;
+		self.ensure_revision_capacity()?;
+		self.play
+			.as_ref()
+			.ok_or("Play mode is not active")?
+			.prepare_transition(attempt, document)
+	}
+
+	pub fn finish_unsuccessful_scene_transition(
+		&mut self,
+		attempt: &crate::game_session::SceneTransitionAttempt,
+		failed: bool,
+	) -> Result<(), String> {
+		self.require_no_transaction()?;
+		let play = self.play.as_mut().ok_or("Play mode is not active")?;
+		if failed {
+			play.fail_transition(attempt)?;
+		} else {
+			play.cancel_transition(attempt)?;
+		}
+		self.bump();
+		Ok(())
+	}
+
+	pub fn retry_scene_transition(
+		&mut self,
+		attempt: &crate::game_session::SceneTransitionAttempt,
+	) -> Result<(), String> {
+		self.require_no_transaction()?;
+		self.play
+			.as_mut()
+			.ok_or("Play mode is not active")?
+			.retry_transition(attempt)?;
+		self.bump();
+		Ok(())
+	}
+
+	pub fn approach_scene_route(&self) -> Option<&crate::project::SceneRoute> {
+		self.play.as_ref()?.approach_route()
+	}
+
+	pub fn should_retain_scene_preload(&self, route: &crate::project::SceneRouteId) -> bool {
+		self.play
+			.as_ref()
+			.is_some_and(|play| play.should_retain_preload(route))
+	}
+
 	pub fn prepare_pending_play_scene(&self) -> Result<(PreparedScene, Arc<SceneData>), String> {
 		self.require_no_transaction()?;
 		self.ensure_revision_capacity()?;
@@ -286,6 +376,14 @@ impl EditorSession {
 			.ok_or("No runtime scene request is pending")?;
 		let document = self.scene_document(scene_id)?;
 		let prepared = play.prepare_pending_scene(Arc::clone(&document))?;
+		let document = if play
+			.pending_transition()
+			.is_some_and(|attempt| attempt.route_id().is_some())
+		{
+			prepared.world_data()
+		} else {
+			document
+		};
 		Ok((prepared, document))
 	}
 

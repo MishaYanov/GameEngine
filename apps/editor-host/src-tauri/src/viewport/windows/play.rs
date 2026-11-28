@@ -106,7 +106,8 @@ impl Worker {
 	}
 
 	pub(super) fn tick_play(&mut self, elapsed: f64) -> Result<(), String> {
-		let (transition, pending_steps, audio) = {
+		self.update_world_streaming()?;
+		let (transition, pending_steps, audio, sequence_events) = {
 			let mut workspace = self
 				.shared
 				.lock()
@@ -135,7 +136,14 @@ impl Worker {
 				.sync_game_status_after_tick(workspace, &outcome);
 			let outcome = outcome.map_err(|error| error.to_string())?;
 			self.dirty |= !outcome.changes.is_empty() || outcome.particles_changed;
-			let transition = outcome.requested_scene.and_then(|target| {
+			let target = outcome.requested_scene.or_else(|| {
+				workspace
+					.backend
+					.pending_scene_transition()
+					.filter(|attempt| attempt.route_id().is_some())
+					.map(|attempt| attempt.scene_id().clone())
+			});
+			let transition = target.and_then(|target| {
 				let status = workspace.backend.play_status()?;
 				let timing = SceneLoadTiming::new("editor", LoadScope::Play, Instant::now());
 				Some((
@@ -143,6 +151,7 @@ impl Worker {
 					target,
 					status.run_id,
 					status.scene_generation,
+					workspace.backend.pending_scene_transition().cloned(),
 					workspace.backend.prepare_pending_play_scene(),
 					timing,
 				))
@@ -156,18 +165,28 @@ impl Worker {
 						outcome.audio_onsets,
 					)
 				});
-			(transition, outcome.pending_steps, audio)
+			(
+				transition,
+				outcome.pending_steps,
+				audio,
+				outcome.sequence_events,
+			)
 		};
 		if let Some((owner, onsets)) = audio {
 			self.scene_audio.queue_onsets(owner, onsets);
 		}
 
-		if let Some((generation, target, run_id, scene_generation, prepared, timing)) = transition {
+		self.scene_audio.settle_sequences(&sequence_events);
+
+		if let Some((generation, target, run_id, scene_generation, attempt, prepared, timing)) =
+			transition
+		{
 			self.last_tick = None;
 			let result = self.install_timed_play_scene(
 				PlayInstall::Transition {
 					generation,
 					target: &target,
+					attempt_id: attempt.as_ref().map(|attempt| attempt.id()),
 					run_id: &run_id,
 					scene_generation,
 				},
@@ -182,6 +201,22 @@ impl Worker {
 					})
 				});
 				if current {
+					if let (Some(attempt), Ok(mut shared)) = (
+						attempt
+							.as_ref()
+							.filter(|attempt| attempt.route_id().is_some()),
+						self.shared.lock(),
+					) {
+						if let Some(workspace) = shared
+							.as_mut()
+							.filter(|workspace| workspace.generation == generation)
+						{
+							let _ = workspace
+								.backend
+								.finish_unsuccessful_scene_transition(attempt, true);
+							self.interaction.sync_game_status(workspace);
+						}
+					}
 					engine_logger::error!(target: "editor_viewport", "Play scene transition failed: operation=install_play_scene");
 					self.interaction.report(format!(
 						"Could not switch to game scene {:?}: {error}",

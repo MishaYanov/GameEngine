@@ -16,10 +16,19 @@ export interface SkyAttachment {
     readonly settings: SkySettings;
 }
 
+export interface SceneFog {
+    readonly color_linear: Vec3;
+    readonly density: number;
+    readonly base_height: number;
+    readonly height_falloff: number;
+    readonly start_distance?: number;
+}
+
 export interface SceneEnvironment {
     readonly active_sky?: EntityKey | null;
     readonly ambient_linear?: Vec3;
     readonly sky_exposure_ev?: number;
+    readonly fog?: SceneFog | null;
 }
 
 export const DEFAULT_AMBIENT: Vec3 = [0.25, 0.25, 0.25];
@@ -68,12 +77,25 @@ export function validSkyAttachment(value: unknown): value is SkyAttachment {
 
 export function validSceneEnvironment(value: unknown): value is SceneEnvironment {
     return record(value) && Object.keys(value).every(key =>
-        key === 'active_sky' || key === 'ambient_linear' || key === 'sky_exposure_ev') &&
+            key === 'active_sky' || key === 'ambient_linear' || key === 'sky_exposure_ev' || key === 'fog') &&
         (value['active_sky'] == null ||
             typeof value['active_sky'] === 'string' && value['active_sky'].length > 0 && !/\s/.test(value['active_sky'])) &&
         (value['ambient_linear'] === undefined || validSkyColor(value['ambient_linear'])) &&
         (value['sky_exposure_ev'] === undefined ||
-            typeof value['sky_exposure_ev'] === 'number' && Math.abs(value['sky_exposure_ev']) <= SKY_EXPOSURE_LIMIT);
+            typeof value['sky_exposure_ev'] === 'number' && Math.abs(value['sky_exposure_ev']) <= SKY_EXPOSURE_LIMIT) &&
+        (value['fog'] == null || validSceneFog(value['fog']));
+}
+
+function validSceneFog(value: unknown): value is SceneFog {
+    return record(value) && Object.keys(value).every(key => key === 'color_linear' || key === 'density' ||
+            key === 'base_height' || key === 'height_falloff' || key === 'start_distance') &&
+        validSkyColor(value['color_linear']) && inFogRange(value['density'], 0, 1) &&
+        inFogRange(value['height_falloff'], 0, 1) && inFogRange(value['base_height'], -Infinity, Infinity) &&
+        (value['start_distance'] === undefined || inFogRange(value['start_distance'], 0, Infinity));
+}
+
+function inFogRange(value: unknown, min: number, max: number): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 }
 
 export function validPanoramaPath(path: string): boolean {

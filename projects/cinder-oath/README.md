@@ -20,7 +20,8 @@ Run `.\dev.ps1 game` from the engine checkout. In an exported Windows build, lau
 
 Open [project.json](project.json) in the engine editor. [The Oath](assets/scenes/oath.json) contains the knight and the
 opening camera move. [The Vault](assets/scenes/vault.json) contains the duelist, the Warden, and the room. Starting Play
-runs the project from the opening scene. In editor Play, use F to strike.
+runs the project from the opening scene. In the arena, click inside the Game view to capture the mouse and swing.
+You can also strike with F. Escape releases the captured mouse in the Editor.
 
 The knight, Warden, and first-person sword each have mesh and animation data in
 the [actor assets](assets/actors). [The soundtrack manifest](assets/audio/soundtrack.json) lists the looping chiptune

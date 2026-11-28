@@ -86,7 +86,17 @@ fn validate_catalog_snapshot(
 ) -> Result<(), String> {
 	// Keep one validated project and target index for this immutable catalog pass.
 	project.validate()?;
-	let factory = gameplay_catalog::resolve(project)?;
+	let source = if let Some(files) = generated {
+		let modules = files
+			.iter()
+			.filter(|(path, _)| path.starts_with("script-compiled"))
+			.map(|(path, bytes)| (path.clone(), bytes.clone()))
+			.collect();
+		gameplay_catalog::project_scripts::ScriptSource::Prepared(Arc::new(modules))
+	} else {
+		gameplay_catalog::project_scripts::ScriptSource::Packaged
+	};
+	let factory = gameplay_catalog::project_resolver(root, source)(project)?;
 	let project = Arc::new(project.clone());
 	let mut targets: HashMap<&SceneId, Vec<&engine_core::EntityKey>> = HashMap::new();
 	for behavior in &project.behaviors {
@@ -100,10 +110,50 @@ fn validate_catalog_snapshot(
 	let mut report = String::new();
 	let mut truncated = false;
 
+	let region_worlds: HashMap<_, _> = project
+		.world_regions
+		.iter()
+		.map(|region| (&region.scene, &region.world))
+		.collect();
+	let region_roots: HashSet<_> = region_worlds.values().copied().collect();
+	let mut entity_owners = HashMap::<_, HashMap<engine_core::EntityKey, &SceneId>>::new();
 	for entry in ordered_scenes(&project) {
 		let scene_targets = targets.get(entry.id()).map_or(&[][..], Vec::as_slice);
 		let result = validate_catalog_scene(scene_targets, root, entry, &packaged, generated)
 			.and_then(|scene| {
+				project
+					.validate_scene_routes_for(entry.id(), &scene)
+					.map_err(|cause| scene_error(entry, cause))?;
+				project
+					.sequences
+					.validate_scene(entry.id(), &scene)
+					.map_err(|cause| scene_error(entry, cause))?;
+				project
+					.validate_region_document(entry.id(), &scene)
+					.map_err(|cause| scene_error(entry, cause))?;
+				project.validate_world_lod_proxies(entry.id(), &scene).map_err(|cause| scene_error(entry, cause))?;
+				let region = region_worlds.get(entry.id()).copied();
+				if let Some(world) =
+					region.or_else(|| region_roots.contains(entry.id()).then_some(entry.id()))
+				{
+					let owners = entity_owners.entry(world).or_default();
+					for entity in &scene.entities {
+						if let Some(prior) = owners.insert(entity.key.clone(), entry.id()) {
+							return Err(scene_error(
+								entry,
+								format!(
+									"World {} entity {} is also declared in scene {}",
+									world.as_str(),
+									entity.key.as_str(),
+									prior.as_str()
+								),
+							));
+						}
+					}
+				}
+				if region.is_some() {
+					return Ok(());
+				}
 				for actor in &scene.entities {
 					if let Some(component) = &actor.animator {
 						bridge::animator_graph::prepare_actor(
@@ -158,6 +208,12 @@ fn validate_catalog_snapshot(
 			});
 		if let Err(error) = result {
 			append_scene_error(&mut report, &error, &mut truncated);
+		}
+	}
+
+	for lod in &project.world_lods {
+		if entity_owners.get(&lod.world).is_none_or(|owners| !owners.contains_key(&lod.detail)) {
+			append_scene_error(&mut report, &format!("World {} has no detail entity {}", lod.world.as_str(), lod.detail.as_str()), &mut truncated);
 		}
 	}
 

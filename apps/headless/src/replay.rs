@@ -185,14 +185,16 @@ fn deserialize_keyboard_keys<'de, D: de::Deserializer<'de>>(
 		type Value = HashSet<String>;
 
 		fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-			f.write_str("a list of held physical key codes")
+			f.write_str("a list of held physical key and mouse codes")
 		}
 
 		fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
 			let mut keys = HashSet::new();
 			while let Some(key) = sequence.next_element::<String>()? {
 				if keys.len() == MAX_REPLAY_KEYS {
-					return Err(de::Error::custom("keyboard_input accepts at most 16 keys"));
+					return Err(de::Error::custom(
+						"keyboard_input accepts at most 16 controls",
+					));
 				}
 				let mut bytes = key.bytes();
 				if key.len() > 32
@@ -201,7 +203,7 @@ fn deserialize_keyboard_keys<'de, D: de::Deserializer<'de>>(
 					|| !keys.insert(key)
 				{
 					return Err(de::Error::custom(
-						"keyboard_input requires distinct physical key codes such as KeyE",
+						"keyboard_input requires distinct physical codes such as KeyE or MouseLeft",
 					));
 				}
 			}
@@ -298,7 +300,7 @@ pub(super) fn run(options: Options) -> Result<Summary, String> {
 	let animator_root = asset_root.clone();
 	let mut engine = EngineBuilder::new(parsed.data, project)
 		.with_scenes(documents)
-		.module_resolver(Arc::new(gameplay_catalog::resolve))
+		.module_resolver(gameplay_catalog::project_resolver(&asset_root, gameplay_catalog::project_scripts::ScriptSource::Auto))
 		.animation_resolver(Arc::new(move |scene| {
 			bridge::animation_asset::prepare_scene(&animation_root, scene)
 		}))
@@ -562,7 +564,13 @@ fn advance(
 							}),
 					);
 			}
-			if let Some(destination) = &outcome.requested_scene {
+			let destination = outcome.requested_scene.or_else(|| {
+				engine
+					.pending_scene_transition()
+					.filter(|attempt| attempt.route_id().is_some())
+					.map(|attempt| attempt.scene_id().clone())
+			});
+			if let Some(destination) = destination {
 				check_budget(started, budget)?;
 				let (prepared, _) = engine.prepare_pending_play_scene().map_err(|error| {
 					format!("Cannot prepare requested scene {destination:?}: {error}")

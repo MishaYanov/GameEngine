@@ -1,9 +1,10 @@
 //! Verified visual snapshots for the single embedded viewport's Prop pane.
 use super::EditorWorkspace;
-use bridge::viewport::{PropPreviewStateDto, PropPreviewTargetDto};
+use bridge::viewport::{PropPreviewStateDto, PropPreviewTargetDto, ViewportShading};
 use renderer::vulkan::Light;
 use runtime::{
 	animation::{AnimationPose, VisualPose},
+	asset_registry::AssetRef,
 	components::SkySettings,
 	editor::PrefabData,
 	scene::Scene,
@@ -33,6 +34,7 @@ pub(crate) struct PropPreview {
 	owner: PreviewOwner,
 	frame: PropPreviewFrame,
 	environment: Option<Arc<PropSceneEnvironment>>,
+	display: PropPreviewDisplay,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -40,6 +42,23 @@ pub(crate) struct PropPreview {
 pub enum PropPreviewEnvironment {
 	Neutral,
 	Scene,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PropPreviewDisplay {
+	pub shading: ViewportShading,
+	pub show_vertices: bool,
+	pub show_normal_detail: bool,
+}
+
+impl Default for PropPreviewDisplay {
+	fn default() -> Self {
+		Self {
+			shading: ViewportShading::Lit,
+			show_vertices: false,
+			show_normal_detail: true,
+		}
+	}
 }
 
 pub(crate) struct PropSceneEnvironment {
@@ -162,6 +181,7 @@ impl EditorWorkspace {
 		self.prop_preview = Some(PropPreview {
 			owner,
 			environment: None,
+			display: PropPreviewDisplay::default(),
 			frame: PropPreviewFrame {
 				state: state.clone(),
 				document: Arc::new(document),
@@ -290,6 +310,60 @@ impl EditorWorkspace {
 			.as_ref()
 			.filter(|preview| preview.frame.state.token == token)
 			.and_then(|preview| preview.environment.clone())
+	}
+
+	pub(crate) fn set_prop_preview_display(
+		&mut self,
+		token: &str,
+		shading: ViewportShading,
+		show_vertices: bool,
+		show_normal_detail: bool,
+	) -> Result<(), String> {
+		if !self.prop_preview_is_current(token) {
+			return Err("Prop preview display belongs to a closed or replaced Prop".into());
+		}
+		self.prop_preview
+			.as_mut()
+			.expect("current Prop preview")
+			.display = PropPreviewDisplay {
+			shading,
+			show_vertices,
+			show_normal_detail,
+		};
+		Ok(())
+	}
+
+	pub(crate) fn prop_preview_material_ref(
+		&self,
+		token: &str,
+		key: &EntityKey,
+	) -> Result<(u64, Option<AssetRef>), String> {
+		let preview = self
+			.prop_preview
+			.as_ref()
+			.filter(|preview| preview.frame.state.token == token && preview.belongs_to(self))
+			.ok_or("Prop preview has expired")?;
+		let entity = preview
+			.frame
+			.document
+			.entities
+			.iter()
+			.find(|entity| &entity.key == key)
+			.ok_or("Object does not belong to this Prop preview")?;
+		let reference = if entity.has_mesh_component() && !entity.model_path.starts_with("builtin:")
+		{
+			Some(entity.model_reference()?)
+		} else {
+			None
+		};
+		Ok((preview.frame.content_revision, reference))
+	}
+
+	pub(crate) fn prop_preview_display(&self, token: &str) -> Option<PropPreviewDisplay> {
+		self.prop_preview
+			.as_ref()
+			.filter(|preview| preview.frame.state.token == token)
+			.map(|preview| preview.display)
 	}
 
 	pub(crate) fn discard_stale_prop_preview(&mut self) -> bool {

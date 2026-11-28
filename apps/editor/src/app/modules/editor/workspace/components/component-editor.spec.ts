@@ -10,6 +10,10 @@ const interactable: ComponentTypeDescriptor = {
     type_id: 'engine.interactable', kind: 'interactable', label: 'Interactable',
     description: 'Game action and reach.', max_per_object: 1,
 };
+const nativeBehavior: ComponentTypeDescriptor = {
+    type_id: 'engine.native_behavior', kind: 'native_behavior', label: 'Native Behavior',
+    description: 'Built-in behavior.', max_per_object: 8,
+};
 
 describe('Interactable Inspector', () => {
     async function setup() {
@@ -55,6 +59,124 @@ describe('Interactable Inspector', () => {
         panel.button('Add Component').click();
         expect(chosen).toEqual(['animator']);
         expect(panel.intents).toEqual([]);
+    });
+
+    it('authors projectile movement and impact settings from the Inspector', async () => {
+        const panel = await setup();
+        await openNativeBehavior(panel, 'projectile');
+        await panel.set('Speed', '6');
+        await panel.set('Lifetime (ticks)', '18');
+        await panel.set('Particle count', '5');
+        panel.button('Apply Component').click();
+        expect(panel.intents).toMatchObject([{
+            kind: 'add', component: {
+                data: {
+                    kind: 'native_behavior', behavior: {
+                        kind: 'projectile', settings: {
+                            speed: 6, lifetime_ticks: 18, collision_mask: 0xffff_ffff, impact: {count: 5},
+                        }
+                    },
+                }
+            }
+        }]);
+    });
+
+    it('binds a projectile Prop to a semantic input in the Inspector', async () => {
+        const panel = await setup();
+        await openNativeBehavior(panel, 'projectile_launcher');
+        await panel.set('Launch Input Action', 'throw');
+        await panel.set('Projectile Prop path', 'props/orb.json');
+        await panel.set('Maximum alive', '2');
+        panel.button('Apply Component').click();
+        expect(panel.intents).toMatchObject([{
+            kind: 'add', component: {
+                data: {
+                    kind: 'native_behavior', behavior: {
+                        kind: 'projectile_launcher', settings: {
+                            action: 'throw', prefab_path: 'props/orb.json', max_alive: 2, spawn_offset: [0, 0, -0.5],
+                        }
+                    },
+                }
+            }
+        }]);
+    });
+
+    async function openNativeBehavior(panel: Awaited<ReturnType<typeof setup>>, kind: string): Promise<void> {
+        panel.fixture.componentRef.setInput('types', [nativeBehavior]);
+        await panel.fixture.whenStable();
+        panel.button('Add Component').click();
+        await panel.fixture.whenStable();
+        const select = panel.host.querySelector<HTMLSelectElement>('.component-form select')!;
+        select.value = kind;
+        select.dispatchEvent(new Event('input', {bubbles: true}));
+        select.dispatchEvent(new Event('change', {bubbles: true}));
+        await panel.fixture.whenStable();
+    }
+
+    it('focuses the named draft and returns to Add Component on discard', async () => {
+        const panel = await setup();
+        const add = panel.button('Add Component');
+        add.click();
+        await panel.fixture.whenStable();
+
+        const form = panel.host.querySelector<HTMLElement>('fieldset.component-form')!;
+        expect(form.querySelector('legend')?.textContent).toBe('Add Interactable');
+        expect(panel.host.querySelector<HTMLElement>('.component-list')?.hidden).toBe(true);
+        expect(document.activeElement).toBe(form);
+
+        panel.button('Discard Component Draft').click();
+        await panel.fixture.whenStable();
+        expect(panel.host.querySelector('fieldset.component-form')).toBeNull();
+        expect(panel.host.querySelector<HTMLElement>('.component-list')?.hidden).toBe(false);
+        expect(document.activeElement).toBe(add);
+        expect(panel.intents).toEqual([]);
+    });
+
+    it('waits for the applied edit to settle before restoring focus to the opener', async () => {
+        const panel = await setup();
+        const add = panel.button('Add Component');
+        add.click();
+        await panel.fixture.whenStable();
+        panel.button('Apply Component').click();
+
+        panel.fixture.componentRef.setInput('pending', true);
+        panel.fixture.componentRef.setInput('acknowledged', 1);
+        await panel.fixture.whenStable();
+        expect(add.disabled).toBe(true);
+        expect(panel.host.querySelector('fieldset.component-form')).not.toBeNull();
+
+        panel.fixture.componentRef.setInput('editable', false);
+        panel.fixture.componentRef.setInput('pending', false);
+        await panel.fixture.whenStable();
+        expect(add.disabled).toBe(true);
+        expect(panel.host.querySelector('fieldset.component-form')).not.toBeNull();
+
+        panel.fixture.componentRef.setInput('editable', true);
+        await panel.fixture.whenStable();
+        expect(panel.host.querySelector('fieldset.component-form')).toBeNull();
+        expect(document.activeElement).toBe(add);
+    });
+
+    it('returns to the Components heading after an edit if its opener was removed', async () => {
+        const panel = await setup();
+        const component: ComponentRecord = {
+            id: 'interact', schema_version: 1, enabled: true,
+            data: {kind: 'interactable', settings: {action: 'interact', reach: 1}}
+        };
+        panel.fixture.componentRef.setInput('components', [component]);
+        await panel.fixture.whenStable();
+
+        panel.host.querySelector<HTMLButtonElement>('button[aria-label="Edit Interactable"]')!.click();
+        await panel.fixture.whenStable();
+        expect(panel.host.querySelector('fieldset.component-form legend')?.textContent).toBe('Edit Interactable');
+        panel.button('Apply Component').click();
+        panel.fixture.componentRef.setInput('components', []);
+        panel.fixture.componentRef.setInput('acknowledged', 1);
+        await panel.fixture.whenStable();
+
+        expect(panel.host.querySelector('fieldset.component-form')).toBeNull();
+        expect(document.activeElement).toBe(panel.host.querySelector('.components h3'));
+        expect(panel.intents).toHaveLength(1);
     });
 
     it('submits one typed record with the authored action and reach', async () => {
@@ -124,12 +246,15 @@ describe('Interactable Inspector', () => {
         const legacy = legacyEdit?.kind === 'replace' ? legacyEdit.component : undefined;
         expect(legacy?.data).toEqual({...existing.data, material: null});
 
-        const picker = panel.host.querySelector<HTMLSelectElement>('.component-form select')!;
-        expect(picker.value).toBe('');
-        picker.value = meshId;
-        picker.dispatchEvent(new Event('change', {bubbles: true}));
+        const picker = panel.host.querySelector<HTMLInputElement>('input[placeholder="Find a mesh…"]')!;
+        expect(picker.value).toBe('Use mesh index');
+        picker.click();
         await panel.fixture.whenStable();
-        expect(picker.value).toBe(meshId);
+        const roof = [...panel.host.querySelectorAll<HTMLElement>('[aria-label="Mesh results"] [role="option"]')]
+            .find(option => option.textContent.trim() === 'Roof (8)')!;
+        roof.click();
+        await panel.fixture.whenStable();
+        expect(picker.value).toBe('Roof (8)');
         panel.button('Apply Component').click();
         const stableEdit = panel.intents[1];
         const stable = stableEdit?.kind === 'replace' ? stableEdit.component : undefined;

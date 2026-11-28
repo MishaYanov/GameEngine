@@ -39,6 +39,10 @@ pub enum AudioOnsetCause {
 	GameplaySignal {
 		signal: Signal,
 	},
+	Sequence {
+		instance: EntityKey,
+		cue: u32,
+	},
 	AnimationMarker {
 		clip: AssetId,
 		marker: MarkerId,

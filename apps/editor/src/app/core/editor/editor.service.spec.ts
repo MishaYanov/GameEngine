@@ -304,6 +304,51 @@ describe('EditorService native command and viewport queues', () => {
         expect(service.authoredClipCatalogVersion()).toBe(2);
     });
 
+    it('reads native scene creation scope and passes its exact generation and revision to the write', async () => {
+        vi.mocked(invoke)
+            .mockResolvedValueOnce({workspace_generation: 17, revision: 4})
+            .mockResolvedValueOnce(snapshot(5));
+        const service = TestBed.inject(EditorService);
+        const workspaceGeneration = service.workspaceGeneration();
+        const scope = await service.authoringScope(workspaceGeneration);
+        expect(scope).toEqual({workspaceGeneration, nativeGeneration: 17, revision: 4});
+        await service.createScene('scenes/study.json', scope);
+
+        expect(invoke).toHaveBeenNthCalledWith(1, 'editor_authoring_scope', undefined);
+        expect(invoke).toHaveBeenNthCalledWith(2, 'editor_create_scene', {
+            path: 'scenes/study.json', expectedGeneration: 17, expectedRevision: 4,
+        });
+    });
+
+    it('rejects an invalid native scene creation scope before any write', async () => {
+        vi.mocked(invoke).mockResolvedValueOnce({workspace_generation: Number.MAX_SAFE_INTEGER + 1, revision: 0});
+        const service = TestBed.inject(EditorService);
+        await expect(service.authoringScope(service.workspaceGeneration())).rejects.toThrow('invalid authoring scope');
+        expect(invoke).toHaveBeenCalledExactlyOnceWith('editor_authoring_scope', undefined);
+    });
+
+    it('keeps the Input Actions catalog read from blocking scene edits', async () => {
+        const catalog = deferred<readonly unknown[]>();
+        vi.mocked(invoke)
+            .mockResolvedValueOnce(snapshot(4))
+            .mockReturnValueOnce(catalog.promise)
+            .mockResolvedValueOnce(capabilities)
+            .mockResolvedValueOnce(commandUpdate(snapshot(5)));
+        const service = TestBed.inject(EditorService);
+        await service.open('assets', 'scene.json');
+        const workspaceGeneration = service.workspaceGeneration();
+        const listing = service.listInputActions({workspaceGeneration, nativeGeneration: 17, revision: 4});
+        expect(invoke).toHaveBeenLastCalledWith('editor_list_input_actions', {
+            expectedGeneration: 17,
+            expectedRevision: 4
+        });
+        expect(service.busy()).toBe(false);
+        await expect(service.execute({type: 'select', keys: ['a']}, workspaceGeneration, 4))
+            .resolves.toMatchObject({revision: 5});
+        catalog.resolve([]);
+        await expect(listing).resolves.toEqual([]);
+    });
+
     it('serializes document commands using the revision returned by the preceding command', async () => {
         vi.mocked(invoke)
             .mockResolvedValueOnce(snapshot(4))

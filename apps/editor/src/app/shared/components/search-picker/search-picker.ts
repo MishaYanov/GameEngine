@@ -1,8 +1,11 @@
 import {
+    afterNextRender,
     afterRenderEffect,
     Component,
     computed,
     ElementRef,
+    inject,
+    Injector,
     input,
     linkedSignal,
     output,
@@ -34,13 +37,20 @@ export class EditorSearchPicker {
     readonly expanded = input(false);
     readonly autofocus = input(false);
     readonly clearable = input(false);
+    readonly describedBy = input<string | null>(null);
+    readonly resultLimit = input(Infinity);
+    readonly revealResults = input(false);
     readonly picked = output<string>();
 
     protected readonly id = `editor-search-picker-${nextPickerId++}`;
     protected readonly selected = computed(() => this.options().find(option => option.id === this.value()));
     protected readonly missing = computed(() => !!this.value() && !this.selected());
+    protected readonly descriptionIds = computed(() =>
+        [this.describedBy(), this.missing() ? this.id + '-missing' : null].filter(Boolean).join(' ') || null);
     protected readonly visible = computed(() => !this.disabled() && (this.expanded() || this.opened()));
     protected readonly display = computed(() => this.query() ?? this.selected()?.label ?? this.value() ?? '');
+    protected readonly displayTitle = computed(() => this.visible() ? null : this.selected()?.label ?? null);
+    private readonly injector = inject(Injector);
     private readonly field = viewChild.required<ElementRef<HTMLInputElement>>('field');
     private readonly list = viewChild<ElementRef<HTMLElement>>('list');
     private readonly opened = signal(false);
@@ -49,12 +59,27 @@ export class EditorSearchPicker {
         option,
         text: `${option.label} ${option.description ?? ''} ${option.keywords ?? ''} ${option.id}`.toLocaleLowerCase(),
     })));
-    protected readonly matches = computed(() => {
+    private readonly searchResult = computed(() => {
         const terms = (this.query() ?? '').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-        return this.searchable()
-            .filter(({text}) => terms.every(term => text.includes(term)))
-            .map(({option}) => option);
+        const limit = Math.max(1, this.resultLimit());
+        if (terms.length === 0) {
+            const options = this.options();
+            return options.length <= limit ? {options, limited: false} : {
+                options: options.slice(0, limit),
+                limited: true
+            };
+        }
+
+        const options: SearchPickerOption[] = [];
+        for (const {text, option} of this.searchable()) {
+            if (!terms.every(term => text.includes(term))) continue;
+            if (options.length >= limit) return {options, limited: true};
+            options.push(option);
+        }
+        return {options, limited: false};
     });
+    protected readonly matches = computed(() => this.searchResult().options);
+    protected readonly limited = computed(() => this.searchResult().limited);
     private readonly enabled = computed(() => this.matches().filter(option => !option.disabled));
     protected readonly active = linkedSignal({
         source: () => ({options: this.enabled(), query: this.query(), value: this.value()}),
@@ -83,8 +108,30 @@ export class EditorSearchPicker {
                 const itemBounds = item.getBoundingClientRect();
                 if (itemBounds.top < listBounds.top) list.scrollTop += itemBounds.top - listBounds.top;
                 else if (itemBounds.bottom > listBounds.bottom) list.scrollTop += itemBounds.bottom - listBounds.bottom;
+                if (this.revealResults()) this.revealInPane(list, item);
             },
         });
+    }
+
+    private revealInPane(list: HTMLElement, active: HTMLElement): void {
+        const field = this.field().nativeElement;
+        const owner = field.ownerDocument;
+        if (owner.activeElement !== field) return;
+        const view = owner.defaultView;
+        if (!view) return;
+        let pane = list.parentElement;
+        while (pane && pane !== owner.body) {
+            const overflow = view.getComputedStyle(pane).overflowY;
+            if ((overflow === 'auto' || overflow === 'scroll') && pane.scrollHeight > pane.clientHeight) break;
+            pane = pane.parentElement;
+        }
+        if (!pane || pane === owner.body) return;
+        const paneTop = pane.getBoundingClientRect().top + pane.clientTop;
+        const paneBottom = paneTop + pane.clientHeight;
+        const overlap = active.getBoundingClientRect().bottom - paneBottom;
+        const roomAboveField = field.getBoundingClientRect().top - paneTop;
+        // Move only the local pane and leave the filtered input visible.
+        if (overlap > 0 && roomAboveField > 0) pane.scrollTop += Math.min(overlap, roomAboveField);
     }
 
     protected optionId(id: string): string {
@@ -101,7 +148,11 @@ export class EditorSearchPicker {
         if (this.expanded()) return;
         this.opened.set(false);
         this.query.set(null);
-        this.field().nativeElement.value = this.display();
+        afterNextRender({
+            write: () => {
+                if (!this.visible()) this.field().nativeElement.value = this.display();
+            }
+        }, {injector: this.injector});
     }
 
     protected search(value: string): void {
@@ -112,16 +163,15 @@ export class EditorSearchPicker {
 
     protected choose(option: SearchPickerOption): void {
         if (this.disabled() || option.disabled) return;
-        this.close();
-        this.field().nativeElement.value = option.label;
         this.picked.emit(option.id);
+        this.close();
     }
 
     protected clear(): void {
         if (this.disabled()) return;
         this.field().nativeElement.focus({preventScroll: true});
-        this.close();
         this.picked.emit('');
+        this.close();
     }
 
     protected navigate(event: KeyboardEvent): void {

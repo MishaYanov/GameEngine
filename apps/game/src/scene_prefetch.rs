@@ -7,11 +7,11 @@ use std::{
 
 use gameplay_catalog::cinder_oath::intro_route;
 use runtime::{
-	project::ProjectData,
+	project::{ProjectData, SceneRoute, SceneRouteId},
 	scene_catalog::SceneId,
 	scene_data::ParsedScene,
 	scene_load_timing::SceneLoadTiming,
-	scene_prefetch::{PrefetchKey, PrefetchOutcome, ScenePrefetch},
+	scene_prefetch::{ConfirmedScene, PrefetchKey, PrefetchOutcome, ScenePrefetch},
 };
 
 const TARGET: &str = "scene_prefetch";
@@ -19,17 +19,26 @@ const TARGET: &str = "scene_prefetch";
 pub(super) struct PlayerPrefetch {
 	worker: ScenePrefetch,
 	root: PathBuf,
-	intro: SceneId,
-	arena: SceneId,
+	legacy_route: Option<(SceneId, SceneId)>,
+	approach: Option<SceneRouteId>,
 	generation: u64,
 	scheduled: bool,
 }
 
 impl PlayerPrefetch {
-	pub fn new(project: &ProjectData, root: &Path) -> Result<Option<Self>, String> {
-		let Some((intro, arena)) = intro_route(project)? else {
-			return Ok(None);
+	pub fn new(
+		project: &ProjectData,
+		root: &Path,
+		legacy_enabled: bool,
+	) -> Result<Option<Self>, String> {
+		let legacy_route = if legacy_enabled {
+			intro_route(project)?
+		} else {
+			None
 		};
+		if legacy_route.is_none() && project.scene_routes.is_empty() {
+			return Ok(None);
+		}
 		let worker = match ScenePrefetch::new() {
 			Ok(worker) => worker,
 			Err(_) => {
@@ -40,46 +49,76 @@ impl PlayerPrefetch {
 		Ok(Some(Self {
 			worker,
 			root: root.canonicalize().map_err(|error| error.to_string())?,
-			intro,
-			arena,
+			legacy_route,
+			approach: None,
 			generation: 0,
 			scheduled: false,
 		}))
 	}
 
 	pub fn prime(&mut self, current: &SceneId, project: &ProjectData) {
-		if self.scheduled || current != &self.intro {
+		let Some((intro, arena)) = &self.legacy_route else {
+			return;
+		};
+		if self.scheduled || current != intro || self.approach.is_some() {
 			return;
 		}
-		let path = project.scene_path(&self.arena).map(PathBuf::from);
+		let path = project.scene_path(arena).map(PathBuf::from);
 		// Retry only a contended mailbox. The real loader diagnoses bad sources.
 		if let Ok(path) = path
-			&& !self.worker.queue(self.key(&self.arena), path)
+			&& !self.worker.queue(self.key(arena), path)
 		{
 			return;
 		}
 		self.scheduled = true;
 	}
 
+	pub fn speculative_route(&self) -> Option<&SceneRouteId> {
+		self.approach.as_ref()
+	}
+
+	pub fn set_approach(&mut self, route: Option<&SceneRoute>, project: &ProjectData) {
+		if self.approach.as_ref() == route.map(|route| &route.id) {
+			return;
+		}
+		let Some(route) = route else {
+			self.worker.cancel();
+			self.approach = None;
+			return;
+		};
+		if let Ok(path) = project.scene_path(&route.to)
+			&& self.worker.queue(self.key(&route.to), PathBuf::from(path))
+		{
+			self.approach = Some(route.id.clone());
+		}
+	}
+
+	pub fn confirm(&self, scene: &SceneId, path: &str) -> bool {
+		self.worker.confirm(self.key(scene), PathBuf::from(path))
+	}
+
+	pub fn take_confirmed(&self, scene: &SceneId) -> Option<Result<ConfirmedScene, String>> {
+		self.worker.take_confirmed(&self.key(scene))
+	}
+
 	pub fn load(
 		&self,
 		scene: &SceneId,
-		path: &Path,
-	) -> Result<(ParsedScene, PrefetchOutcome, usize), String> {
+		relative: &Path,
+	) -> Result<(PathBuf, ParsedScene, PrefetchOutcome, usize), String> {
 		if let Some(prefetched) = self.worker.take(&self.key(scene)) {
-			return prefetched.load_or_refresh(path);
+			return prefetched.load_relative(relative);
 		}
-		Ok((
-			runtime::scene_io::load_data(path)?,
-			PrefetchOutcome::Miss,
-			0,
-		))
+		let (path, parsed) =
+			runtime::scene_io::load_confined_data_from_canonical_root(&self.root, relative)?;
+		Ok((path, parsed, PrefetchOutcome::Miss, 0))
 	}
 
 	pub fn invalidate(&mut self) {
 		self.worker.cancel();
 		self.generation = self.generation.wrapping_add(1);
 		self.scheduled = false;
+		self.approach = None;
 	}
 
 	fn key(&self, scene: &SceneId) -> PrefetchKey {

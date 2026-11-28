@@ -2,7 +2,9 @@ use std::{mem::size_of_val, sync::Arc};
 
 use ash::Instance;
 
-use super::{Vertex, VulkanDevice, VulkanMaterialLayout, VulkanMesh, VulkanTexture};
+use super::{
+	TextureColorSpace, Vertex, VulkanDevice, VulkanMaterialLayout, VulkanMesh, VulkanTexture,
+};
 
 /// Bounds staging payload retained by one synchronous batch, excluding GPU alignment.
 pub const MAX_UPLOAD_BATCH_BYTES: usize = 64 * 1024 * 1024;
@@ -21,12 +23,41 @@ pub struct Rgba8Upload<'a> {
 	pub pixels: &'a [u8],
 }
 
+/// RGBA8 upload whose stored values are color or linear texture data.
+#[derive(Clone, Copy)]
+pub struct Rgba8UploadWithColorSpace<'a> {
+	pub width: u32,
+	pub height: u32,
+	pub pixels: &'a [u8],
+	pub color_space: TextureColorSpace,
+}
+
+impl<'a> From<Rgba8Upload<'a>> for Rgba8UploadWithColorSpace<'a> {
+	fn from(upload: Rgba8Upload<'a>) -> Self {
+		Self {
+			width: upload.width,
+			height: upload.height,
+			pixels: upload.pixels,
+			color_space: TextureColorSpace::Srgb,
+		}
+	}
+}
+
 pub struct UploadedBatch {
 	pub meshes: Vec<VulkanMesh>,
 	pub textures: Vec<VulkanTexture>,
 }
 
+#[cfg(test)]
 fn validate(meshes: &[MeshUpload<'_>], textures: &[Rgba8Upload<'_>]) -> Result<(), String> {
+	let textures: Vec<_> = textures.iter().copied().map(Into::into).collect();
+	validate_with_color_space(meshes, &textures)
+}
+
+fn validate_with_color_space(
+	meshes: &[MeshUpload<'_>],
+	textures: &[Rgba8UploadWithColorSpace<'_>],
+) -> Result<(), String> {
 	if meshes.len().saturating_add(textures.len()) > MAX_UPLOAD_BATCH_RESOURCES {
 		return Err(format!(
 			"Upload batch exceeds {MAX_UPLOAD_BATCH_RESOURCES} resources"
@@ -61,9 +92,9 @@ pub(crate) fn upload(
 	device: &VulkanDevice,
 	layout: &Arc<VulkanMaterialLayout>,
 	meshes: &[MeshUpload<'_>],
-	textures: &[Rgba8Upload<'_>],
+	textures: &[Rgba8UploadWithColorSpace<'_>],
 ) -> Result<UploadedBatch, String> {
-	validate(meshes, textures)?;
+	validate_with_color_space(meshes, textures)?;
 	if meshes.is_empty() && textures.is_empty() {
 		return Ok(UploadedBatch {
 			meshes: Vec::new(),
@@ -87,6 +118,7 @@ pub(crate) fn upload(
 				texture.width,
 				texture.height,
 				texture.pixels,
+				texture.color_space,
 			)
 			.map(|(image, staging)| (image, staging, texture.width, texture.height))
 			.map_err(|error| error.to_string())

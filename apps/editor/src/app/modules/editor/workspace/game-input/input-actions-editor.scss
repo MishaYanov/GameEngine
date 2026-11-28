@@ -2,6 +2,11 @@
 :host { display: block; min-width: 0; }
 .fields, label { display: grid; gap: var(--space-2); }
 .asset-controls, .actions, .binding { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
+
+.asset-controls editor-search-picker {
+  flex: 1 1 15rem;
+  min-width: 0;
+}
 .action { border: 1px solid var(--color-border); padding: var(--space-2); }
 .action-heading { cursor: pointer; text-align: start; width: 100%; margin-block-end: var(--space-2); overflow-wrap: anywhere; }
 .action small { color: var(--color-text-secondary); }

@@ -5,13 +5,14 @@ use std::{
 };
 
 use gltf::mesh::Mode;
+use renderer::vulkan::MaterialSurface;
 
-use super::{ImageAssetError, MaterialData, MeshData};
+use super::{ImageAsset, ImageAssetError, MaterialData, MeshData};
 
 mod mesh;
 mod resources;
 
-pub use super::scene_import::{ImportedNode, ImportedScene};
+pub use super::scene_import::{ImportedNode, ImportedNormalDetail, ImportedScene};
 pub(super) use mesh::preflight_meshes;
 pub use resources::load_first_mesh;
 pub(super) use resources::{Resources, load_resources_in_root, load_warm_mesh};
@@ -21,9 +22,17 @@ pub(super) const IMPORT_LIMIT: usize = 256 * 1024 * 1024;
 pub struct ImportedPrimitive {
 	pub mesh: MeshData,
 	pub material: MaterialData,
+	pub surface: MaterialSurface,
 	pub primitive_index: usize,
 	pub mesh_index: usize,
 	pub base_color_image_index: Option<usize>,
+	pub normal_map: Option<ImportedNormalMap>,
+}
+
+pub struct ImportedNormalMap {
+	pub image_index: usize,
+	pub image: ImageAsset,
+	pub scale: f32,
 }
 
 #[derive(Debug)]
@@ -33,6 +42,7 @@ pub enum GltfLoaderError {
 	Image(ImageAssetError),
 	NoMeshes,
 	NoPrimitives,
+	SkinnedScene,
 	UnsupportedMode(Mode),
 	MissingPositions,
 	MissingIndices,
@@ -62,6 +72,10 @@ impl Display for GltfLoaderError {
 			Self::NoPrimitives => {
 				write!(formatter, "selected mesh contains no primitives")
 			}
+			Self::SkinnedScene => write!(
+				formatter,
+				"glTF resource rejected: skinned and morph-target nodes are not supported by static scene import"
+			),
 			Self::UnsupportedMode(mode) => {
 				write!(formatter, "unsupported primitive mode: {mode:?}")
 			}
@@ -150,6 +164,15 @@ pub fn load_scene(path: impl AsRef<Path>) -> Result<ImportedScene, GltfLoaderErr
 		.parent()
 		.ok_or_else(|| rejected("missing model directory"))?;
 	load_scene_in_root(&path, root)
+}
+
+/// Read one mesh's CPU metadata, resolving resources within the project asset root.
+pub fn load_mesh_metadata_in_root(
+	path: &Path,
+	root: &Path,
+	mesh_index: usize,
+) -> Result<ImportedScene, GltfLoaderError> {
+	super::metadata_import::load_scene_metadata(path, root, Some(mesh_index), None)
 }
 
 pub(super) fn load_scene_in_root(

@@ -13,6 +13,7 @@ import type { PrefabSourceDraft } from '../../../../core/editor/linked-prefabs.m
 import { EditorService } from '../../../../core/editor/editor.service';
 import { EditorDialog } from '../../../../shared/components/dialog/dialog';
 import {EditorSearchPicker} from '../../../../shared/components/search-picker/search-picker';
+import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {Vector3Field, type Vector3Change} from '../../../../shared/components/vector3-field/vector3-field';
 import { SceneEditingService } from '../scene-editing.service';
 import {sceneReferenceOptions} from '../scene-reference-options';
@@ -34,9 +35,9 @@ const MAX_PROP_MEMBERS = 4096;
 
 @Component({
 	selector: 'editor-prefab-authoring',
-    imports: [EditorDialog, EditorSearchPicker, PrefabSourceEditor, ReferenceBindings, Vector3Field],
+    imports: [EditorDialog, EditorIcon, EditorSearchPicker, PrefabSourceEditor, ReferenceBindings, Vector3Field],
 	templateUrl: './prefab-authoring.html',
-	styleUrl: '../game-settings/settings.scss',
+    styleUrls: ['../game-settings/settings.scss', '../assets-panel/asset-authoring.scss'],
 })
 export class PrefabAuthoring {
 	readonly selected = input<ModelAsset | null>(null);

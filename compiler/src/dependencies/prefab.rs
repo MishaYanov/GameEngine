@@ -46,6 +46,21 @@ impl Closure<'_> {
 		}
 	}
 
+	pub(super) fn projectile_dependency(&mut self, path: &str) -> Result<(), String> {
+		self.prefab_dependency(path)?;
+		let recorded_path = self
+			.catalog
+			.by_path(path)
+			.map_or(path, |asset| asset.path.as_str());
+		let key = self.key(&PathBuf::from(recorded_path))?;
+		let bytes = self
+			.generated_files
+			.get(&key)
+			.ok_or("Projectile launch Prop is missing from package preparation")?;
+		PrefabData::from_json(std::str::from_utf8(bytes).map_err(|error| error.to_string())?)?
+			.validate_projectile_launch()
+	}
+
 	fn prefab_contents(&mut self, relative: &Path) -> Result<(), String> {
 		let bytes = self.file(relative)?;
 		let mut prefab =
@@ -84,7 +99,7 @@ impl Closure<'_> {
 			prefab.entities = prefab.expanded_entities()?.into_owned();
 			prefab.composition = Default::default();
 		}
-		validate_scripts(&prefab)
+		validate_scripts(&prefab, self.root)
 			.map_err(|error| format!("Prefab {}: {error}", relative.display()))?;
 		self.entities(&prefab.entities)?;
 		self.generate(relative.to_path_buf(), prefab.to_json()?.into_bytes())?;
@@ -92,14 +107,19 @@ impl Closure<'_> {
 	}
 }
 
-fn validate_scripts(prefab: &PrefabData) -> Result<(), String> {
+fn validate_scripts(prefab: &PrefabData, root: &Path) -> Result<(), String> {
 	let entities: HashMap<_, _> = prefab
 		.entities
 		.iter()
 		.map(|entity| (&entity.key, entity))
 		.collect();
 	let slots: HashSet<_> = prefab.reference_slots.values().collect();
-	let descriptors = gameplay_catalog::script_descriptors();
+	let mut descriptors = gameplay_catalog::script_descriptors();
+	if prefab.entities.iter().any(|entity| entity.scripts.iter().any(|script| {
+		engine_core::components::project_script_asset(&script.settings.script_id).is_some()
+	})) {
+		descriptors.extend(gameplay_catalog::project_scripts::descriptors(root)?);
+	}
 	for entity in &prefab.entities {
 		for script in entity.scripts.iter().filter(|script| script.enabled) {
 			let result = descriptors

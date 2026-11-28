@@ -1,6 +1,67 @@
 use super::*;
+use std::time::Duration;
+
+const MAX_CONTEXT_PRESS: Duration = Duration::from_millis(500);
 
 impl ViewportInteraction {
+	pub fn take_context_click(&mut self) -> Option<SceneContextClick> {
+		self.context_click.take()
+	}
+
+	pub fn tracking_context_press(&self) -> bool {
+		self.navigation
+			.as_ref()
+			.is_some_and(|nav| nav.context_press.is_some())
+	}
+
+	pub(super) fn can_open_context_menu(
+		&self,
+		workspace: &EditorWorkspace,
+		modifiers: &ViewportModifiersDto,
+	) -> bool {
+		self.can_author(workspace)
+			&& !workspace.backend.session().has_transaction()
+			&& self.placement.is_none()
+			&& !(modifiers.alt || modifiers.control || modifiers.shift || modifiers.super_key)
+	}
+
+	pub(super) fn context_click_at_release(
+		&self,
+		workspace: &EditorWorkspace,
+		input: &ViewportInputDto,
+		extent: [u32; 2],
+		press: Option<&ContextPress>,
+	) -> Option<SceneContextClick> {
+		let press = press?;
+		let [x, y] = input.position?;
+		let session = workspace.backend.session();
+		if !self.can_open_context_menu(workspace, &input.modifiers)
+			|| session.revision() != press.revision
+			|| press.started.elapsed() > MAX_CONTEXT_PRESS
+			|| Vec2::new(x as f32, y as f32).distance(press.origin) >= press.threshold
+			|| x < 0.0
+			|| x >= f64::from(extent[0])
+			|| y < 0.0
+			|| y >= f64::from(extent[1])
+		{
+			return None;
+		}
+		let ray = self
+			.camera
+			.ray([x, y], extent, self.settings.projection)
+			.ok()?;
+		let snap = self.settings.snap.then_some(self.settings.move_snap);
+		let position = tools::placement_point(ray, &[], self.settings.plane, snap)
+			.map(|point| point.to_array());
+		Some(SceneContextClick {
+			workspace_generation: workspace.generation,
+			revision: session.revision(),
+			scene_id: session.active_scene_id().clone(),
+			normalized: [x / f64::from(extent[0]), y / f64::from(extent[1])],
+			position,
+		})
+	}
+
 	pub(super) fn selected_bounds(&self, workspace: &EditorWorkspace) -> Option<Bounds3> {
 		workspace
 			.backend
@@ -117,12 +178,28 @@ impl ViewportInteraction {
 	}
 
 	pub fn look_from_fly_motion(&mut self, delta: [f64; 2]) {
-		if self.is_flying() && delta != [0.0; 2] {
-			// Device motion is relative, independent of the cursor reaching an edge.
-			self.camera
-				.look(Vec2::new(delta[0] as f32, delta[1] as f32) * 0.35);
-			self.changed();
+		let mut delta = Vec2::new(delta[0] as f32, delta[1] as f32);
+		if !delta.is_finite() || delta == Vec2::ZERO {
+			return;
 		}
+		let Some(navigation) = self
+			.navigation
+			.as_mut()
+			.filter(|nav| nav.mode == NavigationMode::Fly)
+		else {
+			return;
+		};
+		if let Some(press) = navigation.context_press.as_mut() {
+			press.fly_motion += delta;
+			if press.fly_motion.length() < press.threshold {
+				return;
+			}
+			delta = press.fly_motion;
+			navigation.context_press = None;
+		}
+		// Device motion is relative, independent of the cursor reaching an edge.
+		self.camera.look(delta * 0.35);
+		self.changed();
 	}
 
 	pub(super) fn fly_movement(&self) -> Vec3 {

@@ -16,6 +16,15 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub enum SimulationAction {
+	EmitParticleBurst {
+		position: [f32; 3],
+		settings: crate::components::ParticleBurstSettings,
+	},
+	SetAnimatorBool {
+		entity: EntityKey,
+		parameter: String,
+		value: bool,
+	},
 	Despawn {
 		handle: RuntimeEntityHandle,
 	},
@@ -206,6 +215,7 @@ impl GameplayStatus {
 pub struct GameplayContext<'a> {
 	pub world: &'a RuntimeWorld,
 	pub collisions: &'a CollisionWorld,
+	pub resident_regions: &'a [SceneId],
 	pub input: &'a InputFrame,
 	/// The camera committed by the previous fixed step.
 	pub camera: &'a crate::Camera,
@@ -225,6 +235,12 @@ impl GameplayContext<'_> {
 }
 
 pub trait GameModule: Send {
+	/// Read a registered authorable scene-route flag from committed game progress.
+	/// Return None for unknown keys and Some(false) for a known closed condition.
+	fn route_flag(&self, _key: &str, _progress: ProgressView<'_>) -> Option<bool> {
+		None
+	}
+
 	fn needs_tick_with_progress(
 		&self,
 		_world: &RuntimeWorld,
@@ -268,6 +284,9 @@ pub trait GameModule: Send {
 pub trait GameModuleFactory: Send + Sync {
 	fn object_scripts(&self) -> &[super::ObjectScriptRegistration] {
 		&[]
+	}
+	fn project_scripts(&self) -> Result<Vec<super::ProjectScriptRegistration>, String> {
+		Ok(Vec::new())
 	}
 
 	/// Explicit references for portable authored assemblies. Modules define these

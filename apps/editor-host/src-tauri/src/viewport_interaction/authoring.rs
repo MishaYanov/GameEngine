@@ -60,6 +60,51 @@ impl ViewportInteraction {
 		Ok(())
 	}
 
+	pub(super) fn preview_drag_at(
+		&mut self,
+		workspace: &mut EditorWorkspace,
+		point: [f64; 2],
+	) -> Result<(), String> {
+		let Some(drag) = self.drag.as_mut() else {
+			return Ok(());
+		};
+		let (edits, space) = if drag.tool() == ViewportTool::Move {
+			let delta = drag.translation_delta(point)?;
+			if delta == self.drag_delta {
+				return Ok(());
+			}
+			self.drag_delta = delta;
+			let edits = self
+				.move_targets
+				.iter()
+				.map(|target| {
+					let mut transform = target.transform.clone();
+					transform.position = (Vec3::from_array(transform.position)
+						+ target.parent_inverse.transform_vector3(delta))
+						.to_array();
+					TransformEditDto {
+						key: target.key.clone(),
+						transform,
+					}
+				})
+				.collect();
+			(edits, TransformSpace::Local)
+		} else {
+			(drag.preview(point)?, TransformSpace::World)
+		};
+		if !edits.is_empty() {
+			self.execute(
+				workspace,
+				Command::SetTransforms {
+					edits,
+					space,
+					snap: false,
+				},
+			)?;
+		}
+		Ok(())
+	}
+
 	pub(super) fn cancel_transform(
 		&mut self,
 		workspace: &mut EditorWorkspace,

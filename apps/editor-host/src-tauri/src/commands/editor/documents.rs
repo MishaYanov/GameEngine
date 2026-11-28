@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Serialize)]
+pub struct AuthoringScopeDto {
+	workspace_generation: u64,
+	revision: u64,
+}
+
 struct ProjectReplacement {
 	expected_revision: Option<u64>,
 	discard_unsaved: bool,
@@ -194,6 +200,41 @@ pub async fn editor_reload(
 		w.reload_with_policy(expected_revision, policy.unwrap_or_default())
 	})
 	.await
+}
+
+/// Read the open workspace identity and revision even while the viewport is hidden.
+#[tauri::command]
+pub async fn editor_authoring_scope(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+) -> Result<AuthoringScopeDto, String> {
+	trusted_window(&window)?;
+	let shared = Arc::clone(&state.editor);
+	tauri::async_runtime::spawn_blocking(move || {
+		let slot = shared.lock().map_err(|_| "Editor state lock failed")?;
+		let workspace = slot.as_ref().ok_or("Open a project before authoring")?;
+		Ok(AuthoringScopeDto {
+			workspace_generation: workspace.generation,
+			revision: workspace.backend.session().revision(),
+		})
+	})
+		.await
+		.map_err(|error| format!("Authoring scope read failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn editor_create_scene(
+	window: WebviewWindow,
+	state: State<'_, EditorState>,
+	path: String,
+	expected_revision: u64,
+	expected_generation: u64,
+) -> Result<EditorSnapshotDto, String> {
+	trusted_window(&window)?;
+	workspace(state, true, Some("create_scene"), move |w| {
+		w.create_scene(&path, expected_revision, expected_generation)
+	})
+		.await
 }
 
 #[tauri::command]

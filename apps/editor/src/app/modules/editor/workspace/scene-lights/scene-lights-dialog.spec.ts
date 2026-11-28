@@ -34,8 +34,12 @@ describe('Scene Lights', () => {
             }
         });
         try {
+            const longLight = {
+                ...original, key: 'balcony',
+                name: 'The unusually long brass lantern illuminating the back wall of the upper balcony'
+            };
             const snapshot = signal({
-                mode: 'edit', revision: 7, active_scene_id: 'main', document: {lights: [original]},
+                mode: 'edit', revision: 7, active_scene_id: 'main', document: {lights: [original, longLight]},
             });
             const mutationError = signal<string | null>(null);
             const execute = vi.fn(async (command: EditorCommand) => {
@@ -72,13 +76,27 @@ describe('Scene Lights', () => {
             const root = fixture.nativeElement as HTMLElement;
             expect(fixture.componentInstance.show('lamp')).toBe(true);
             await fixture.whenStable();
-            const name = root.querySelector<HTMLInputElement>('input[type="text"]')!;
+            const name = root.querySelector<HTMLInputElement>('input[maxlength="1024"]')!;
+            const picker = root.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+            const pick = async (query: string) => {
+                picker.value = query;
+                picker.dispatchEvent(new Event('input', {bubbles: true}));
+                await fixture.whenStable();
+                picker.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+                await fixture.whenStable();
+            };
+            await pick('back wall');
+            expect(name.value).toBe(longLight.name);
+            expect(picker.title).toBe(longLight.name);
+            await pick('Lamp');
+            expect(name.value).toBe('Lamp');
             const rename = async (value: string) => {
                 name.value = value;
                 name.dispatchEvent(new Event('input'));
                 await fixture.whenStable();
             };
             await rename('Lantern');
+            expect(picker.disabled).toBe(true);
             const fields = [...root.querySelectorAll<HTMLInputElement>('input[inputmode="decimal"]')];
             expect(fields).toHaveLength(8);
             expect(fields.every(input => input.maxLength === MAX_AUTHORING_NUMBER_LENGTH)).toBe(true);

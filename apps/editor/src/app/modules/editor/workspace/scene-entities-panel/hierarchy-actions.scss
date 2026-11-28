@@ -1,0 +1,106 @@
+.hierarchy-tools {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-block: 1px solid var(--color-pane-edge);
+}
+
+.hierarchy-search {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  flex: 1 1 7rem;
+  min-width: 0;
+  min-height: 24px;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.hierarchy-collapse-all {
+  flex: none;
+  min-height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--color-pane-edge);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  cursor: var(--cursor-action);
+}
+
+.hierarchy-collapse-all:enabled:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-control-hover);
+}
+
+.hierarchy-collapse-all:disabled {
+  color: var(--color-text-disabled);
+  cursor: default;
+}
+
+.hierarchy-actions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px var(--space-1);
+  border-top: var(--border-width) solid var(--color-pane-edge);
+}
+
+.hierarchy-header-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+:is(.hierarchy-actions, .hierarchy-header-actions) button {
+  display: inline-grid;
+  place-items: center;
+  width: max(24px, var(--layout-subject-control-height));
+  height: max(24px, var(--layout-subject-control-height));
+  padding: 0;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: var(--cursor-action);
+}
+
+:is(.hierarchy-actions, .hierarchy-header-actions) button:enabled:hover {
+  border-color: var(--color-pane-edge);
+  background: var(--color-control-hover);
+}
+
+:is(.hierarchy-actions, .hierarchy-header-actions) button:disabled editor-icon {
+  color: var(--color-text-disabled);
+}
+
+.parent-picker {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.parent-picker p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.parenting-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+}
+
+.apply-parent:enabled {
+  background: var(--color-action);
+  color: var(--color-on-action);
+}

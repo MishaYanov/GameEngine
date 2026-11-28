@@ -35,6 +35,7 @@ impl Default for SceneAudioMix {
 #[cfg(windows)]
 struct Voice {
 	spec: engine_core::scene_audio::SceneAudioVoice,
+	sequence: Option<engine_core::EntityKey>,
 	state: VoiceState,
 }
 
@@ -117,6 +118,26 @@ impl NativeSceneAudio {
 		}
 	}
 
+	pub fn settle_sequences(&mut self, events: &[engine_core::sequence::SequenceEvent]) {
+		#[cfg(not(windows))]
+		let _ = events;
+		#[cfg(windows)]
+		for event in events {
+			use engine_core::{scene_audio::AudioOnsetCause, sequence::SequenceEvent};
+			let instance = match event {
+				SequenceEvent::Finished { instance, .. }
+				| SequenceEvent::Skipped { instance, .. }
+				| SequenceEvent::Cancelled { instance, .. } => instance,
+				_ => continue,
+			};
+			self.voices.retain(|voice| voice.sequence.as_ref() != Some(instance));
+			if let Some((_, pending)) = &mut self.pending {
+				pending.retain(|onset| !matches!(&onset.cause,
+					AudioOnsetCause::Sequence { instance: owner, .. } if owner == instance));
+			}
+		}
+	}
+
 	pub fn authored_music(&self) -> bool {
 		self.authored_music
 	}
@@ -171,6 +192,7 @@ impl NativeSceneAudio {
 						voice.bus == engine_core::components::AudioSourceBus::Music;
 					self.voices.push(Voice {
 						spec: voice,
+						sequence: None,
 						state: VoiceState::Ready(std::sync::Arc::new(clip)),
 					});
 				}
@@ -203,6 +225,10 @@ impl NativeSceneAudio {
 			.into_iter()
 			.take(MAX_SCENE_VOICES.saturating_sub(self.voices.len()))
 		{
+			let sequence = match onset.cause {
+				engine_core::scene_audio::AudioOnsetCause::Sequence { instance, .. } => Some(instance),
+				_ => None,
+			};
 			let spec = onset.voice;
 			let clip = if let Some(clip) = self.event_clips.get(&spec.clip) {
 				Arc::clone(clip)
@@ -232,6 +258,7 @@ impl NativeSceneAudio {
 			};
 			self.voices.push(Voice {
 				spec,
+				sequence,
 				state: VoiceState::Ready(clip),
 			});
 		}

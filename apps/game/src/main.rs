@@ -20,7 +20,9 @@ mod project_sound;
 mod scene_documents;
 mod scene_prefetch;
 mod scene_rendering;
+mod scene_transitions;
 mod selection_overlay;
+mod world_regions;
 
 #[cfg(test)]
 use scene_rendering::gameplay_hud_rows;
@@ -123,6 +125,10 @@ struct GameApp {
 	scene_load_timing: Option<SceneLoadTiming>,
 	scene_prefetch: Option<scene_prefetch::PlayerPrefetch>,
 	scene_prefetch_enabled: bool,
+	scene_transition: Option<scene_transitions::WaitingScene>,
+	failed_scene_transition: Option<runtime::game_session::SceneTransitionAttempt>,
+	world_streaming: Option<runtime::world_streaming::WorldStreaming>,
+	world_streaming_status: Option<String>,
 	transfer_directory: Option<PathBuf>,
 	project_path: Option<PathBuf>,
 	installed_project: bool,
@@ -131,6 +137,7 @@ struct GameApp {
 	smoke_test: bool,
 	smoke_scene_cycles: u32,
 	smoke_prefetch_probe: bool,
+	smoke_retain_recent_source: bool,
 	smoke_test_completed: bool,
 	fatal_error: Option<String>,
 }
@@ -272,7 +279,9 @@ impl GameApp {
 	fn needs_continuous_redraw(&self) -> bool {
 		if self.window_occluded
 			|| (self.standalone_runtime
-				&& ((self.game_completed() && !self.cinder_victory_animation_active())
+			&& ((self.game_completed() && !self.cinder_victory_animation_active()
+			&& self.editor.pending_scene_transition().is_none()
+			&& self.failed_scene_transition.is_none())
 					|| self.player_controls.is_open()))
 		{
 			return false;
@@ -286,7 +295,13 @@ impl GameApp {
 			return false;
 		}
 
-		self.editor.needs_tick()
+		self.scene_transition.is_some()
+			|| self.world_streaming.as_ref().is_some_and(|stream| self.editor.streaming_focus().is_some() && {
+			stream.waiting() || self.editor.play_status().is_some_and(|status| {
+				!stream.has_scope(&status.run_id, status.scene_generation)
+			})
+		})
+			|| self.editor.needs_tick()
 			|| self.editor.play_movement_held(&self.input)
 			|| (!self.standalone_runtime
 				&& self.authored.is_none()
@@ -406,8 +421,11 @@ impl GameApp {
 		{
 			return None;
 		}
-		let attack = self
-			.effective_input_profile()?
+		let profile = self.effective_input_profile()?;
+		if profile.contains_mouse_button(runtime::MouseButton::Left) {
+			return None;
+		}
+		let attack = profile
 			.actions
 			.iter()
 			.find(|binding| binding.id == "attack")?;
@@ -628,6 +646,7 @@ impl GameApp {
 		window: Arc<Window>,
 		asset_root: PathBuf,
 	) -> Result<(), String> {
+		let asset_root = asset_root.canonicalize().map_err(|error| error.to_string())?;
 		let audio_catalog = bridge::feedback_audio::load(&asset_root)?;
 		let project_audio = bridge::project_audio::load(&asset_root)?;
 		let size = window.inner_size();
@@ -635,8 +654,10 @@ impl GameApp {
 			.project
 			.clone()
 			.ok_or("Project configuration is not initialized")?;
-		let scene_path = play::resolve_scene_path(&asset_root, project.startup_scene_path()?)?;
-		let parsed = scene_io::load_data(&scene_path)?;
+		let (scene_path, parsed) = scene_io::load_confined_data_from_canonical_root(
+			&asset_root,
+			Path::new(project.startup_scene_path()?),
+		)?;
 		if let Some(timing) = &mut self.scene_load_timing {
 			timing.cpu_ready();
 			timing.gpu_started();
@@ -644,7 +665,7 @@ impl GameApp {
 		let renderer = WindowRenderer::new(Arc::clone(&window), size.width, size.height)?;
 		let mut loaded = scene_io::load_parsed(&parsed, &asset_root, &renderer)?;
 		let mut editor = SceneEditor::for_project(&loaded.scene, &loaded.camera, project.clone())?;
-		editor.set_module_resolver(Arc::new(gameplay_catalog::resolve))?;
+		editor.set_module_resolver(gameplay_catalog::project_resolver(&asset_root, gameplay_catalog::project_scripts::ScriptSource::Packaged))?;
 		let overlay = if !self.standalone_runtime {
 			Some(SelectionOverlay::new(&renderer, &mut loaded.assets)?)
 		} else {
@@ -667,14 +688,15 @@ impl GameApp {
 			tools.models = runtime::assets::catalog::scan_models(&asset_root)?;
 		}
 
-		let prefetch = if self.scene_prefetch_enabled {
-			scene_prefetch::PlayerPrefetch::new(&project, &asset_root)?
-		} else {
-			None
-		};
+		let prefetch = scene_prefetch::PlayerPrefetch::new(
+			&project, &asset_root, self.scene_prefetch_enabled,
+		)?;
 		if let Some(catalog) = &audio_catalog {
 			catalog.mix().validate_scenes(&project.scenes)?;
 		}
+		let world_streaming = (!project.world_regions.is_empty())
+			.then(|| runtime::world_streaming::WorldStreaming::new(&asset_root))
+			.transpose()?;
 		let feedback_audio = feedback_audio::FeedbackAudio::new(
 			audio_catalog,
 			!self.smoke_test,
@@ -688,6 +710,7 @@ impl GameApp {
 		}
 		self.scene = loaded.scene;
 		self.scene_prefetch = prefetch;
+		self.world_streaming = world_streaming;
 		self.asset_manager = Some(loaded.assets);
 		self.camera = loaded.camera;
 		if let Some(profile) = &self.input_profile_override {
@@ -940,6 +963,23 @@ impl ApplicationHandler for GameApp {
 				}
 				// Record first so editor mode/property changes can suppress the click.
 				let input_button = native_input::mouse_button(button);
+				let bound = self.editor.is_playing()
+					&& self.editor.play_input_action_map().is_none()
+					&& self
+					.effective_input_profile()
+					.is_some_and(|profile| profile.contains_mouse_button(input_button));
+				if bound
+					&& state == ElementState::Pressed
+					&& (self.window_occluded
+					|| !self
+					.window
+					.as_ref()
+					.is_some_and(|window| window.has_focus())
+					|| self.editor.simulation_paused()
+					|| self.game_completed())
+				{
+					return;
+				}
 				match state {
 					ElementState::Pressed => self.input.press(input_button),
 					ElementState::Released => self.input.release(input_button),
@@ -949,6 +989,12 @@ impl ApplicationHandler for GameApp {
 						if state == ElementState::Pressed {
 							self.set_mouse_capture(true);
 						}
+						if let Err(error) = self.submit_play_controls() {
+							self.report_editor_error(error);
+						}
+					}
+					_ if bound => {
+						// Submit both edges, including a complete click between frames.
 						if let Err(error) = self.submit_play_controls() {
 							self.report_editor_error(error);
 						}
@@ -1376,6 +1422,7 @@ fn run() -> Result<(), String> {
 	app.smoke_test = options.smoke_test;
 	app.smoke_scene_cycles = options.smoke_scene_cycles;
 	app.smoke_prefetch_probe = options.smoke_prefetch_probe;
+	app.smoke_retain_recent_source = options.smoke_retain_recent_source;
 	app.scene_prefetch_enabled = options.scene_prefetch;
 	if app.smoke_test {
 		suppress_smoke_error_dialogs();
@@ -1514,6 +1561,10 @@ mod asset_reimport_tests;
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_runtime_lifecycle.rs"]
 mod runtime_lifecycle_tests;
+
+#[cfg(all(test, windows))]
+#[path = "../tests/unit/tests_scene_flow.rs"]
+mod scene_flow_tests;
 
 #[cfg(all(test, windows))]
 #[path = "../tests/unit/tests_animation_native.rs"]

@@ -74,7 +74,7 @@ export class ProjectBuild {
     });
     protected readonly destination = signal('');
     protected readonly unsaved = computed(() => this.editor.dirty() || this.editing?.hasChanges() === true);
-    protected readonly available = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
+    readonly canExport = computed(() => this.editor.nativeAvailable && !!this.editor.snapshot() &&
         !this.opening() && !this.pending() && !this.readback()?.occupied && !this.drafts.pending() && !this.unsaved() && (this.editing?.ready() ??
             (!this.editor.busy() && !this.editor.playing() && !this.editor.snapshot()?.transaction)));
     private readonly projectIdentity = this.editor.workspaceGeneration;
@@ -131,8 +131,8 @@ export class ProjectBuild {
         message?.focus({preventScroll: true});
     }
 
-    protected async exportProject(): Promise<void> {
-        if (!this.available()) return;
+    async exportProject(): Promise<void> {
+        if (!this.canExport()) return;
         this.pending.set('choose');
         this.error.set(null);
         this.exportError.set(null);

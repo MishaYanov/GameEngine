@@ -1,4 +1,4 @@
-use super::{root_motion::RootMotionPlan, *};
+use super::{foot_ik::FootIkPlan, root_motion::RootMotionPlan, *};
 use crate::{
 	EntityKey, components::ComponentId, runtime_lifecycle::RuntimeEntityHandle,
 	scene_data::EntityData, world::RuntimeWorld,
@@ -27,6 +27,21 @@ pub struct PreparedAnimator {
 }
 
 impl PreparedAnimator {
+	pub fn validate_foot_ik(&self, settings: &AnimatorSettings) -> Result<(), String> {
+		self.foot_ik(settings).map(|_| ())
+	}
+
+	fn foot_ik(&self, settings: &AnimatorSettings) -> Result<Option<FootIkPlan>, String> {
+		let Some(foot) = &settings.foot_ik else {
+			return Ok(None);
+		};
+		settings.validate()?;
+		let PreparedAnimatorClips::Imported(asset) = &self.clips else {
+			return Err("Foot IK requires a prepared imported Character".into());
+		};
+		FootIkPlan::prepare(asset, foot).map(Some)
+	}
+
 	pub fn validate_root_motion(
 		&self,
 		actor: &EntityData,
@@ -56,6 +71,10 @@ impl PreparedAnimator {
 		let PreparedAnimatorClips::Imported(asset) = &self.clips else {
 			return Err("Animator root motion requires prepared imported clips".into());
 		};
+		let AnimatorBinding::Imported { source } = &settings.binding else {
+			return Err("Animator root motion requires an imported binding".into());
+		};
+		let source_node = asset.resolve_root_node(source, source_node)?;
 		RootMotionPlan::prepare(source_node, &self.graph, asset).map(Some)
 	}
 }
@@ -116,7 +135,10 @@ struct AnimatorInstance {
 	machine: AnimatorMachine,
 	root_motion: Option<Arc<RootMotionPlan>>,
 	pose: Pose,
+	foot_ik: Option<FootIkPlan>,
+	foot_pose: Option<Arc<AnimationPose>>,
 	fade_start: Option<Pose>,
+	script_bools: BTreeMap<String, bool>,
 }
 
 #[derive(Clone, Default)]
@@ -268,6 +290,7 @@ impl AnimatorBank {
 			let root_motion = prepared
 				.root_motion(entity, &component.settings)?
 				.map(Arc::new);
+			let foot_ik = prepared.foot_ik(&component.settings)?;
 			let pose = sample(
 				world,
 				&owner.key,
@@ -286,11 +309,33 @@ impl AnimatorBank {
 					machine,
 					root_motion,
 					pose,
+					foot_ik,
+					foot_pose: None,
 					fade_start: None,
+					script_bools: BTreeMap::new(),
 				},
 			);
 		}
 		Ok(Self { instances })
+	}
+
+	pub(crate) fn set_script_bool(
+		&mut self,
+		entity: &EntityKey,
+		parameter: String,
+		value: bool,
+	) -> Result<(), String> {
+		let animator = self
+			.instances
+			.get_mut(entity)
+			.ok_or("Script owner has no active Animator")?;
+		if !animator.prepared.graph.parameters.iter().any(|entry| {
+			entry.id == parameter && matches!(entry.source, AnimatorParameterSource::Boolean { .. })
+		}) {
+			return Err(format!("Animator has no Boolean parameter {parameter:?}"));
+		}
+		animator.script_bools.insert(parameter, value);
+		Ok(())
 	}
 
 	pub(crate) fn preserve_existing(&mut self, previous: &Self) {
@@ -317,7 +362,7 @@ impl AnimatorBank {
 		self.instances
 			.iter()
 			.filter_map(|(key, instance)| match &instance.pose {
-				Pose::Skeletal(pose) => Some((key, pose)),
+				Pose::Skeletal(pose) => Some((key, instance.foot_pose.as_deref().unwrap_or(pose))),
 				Pose::Visual(_) => None,
 			})
 	}
@@ -417,6 +462,7 @@ impl AnimatorBank {
 	pub(crate) fn prepare_root_motion(
 		&mut self,
 		input: &AnimatorTick<'_>,
+		sequence_owns: impl Fn(&EntityKey) -> bool,
 	) -> Result<BTreeMap<EntityKey, RootMotionDelta>, String> {
 		let mut requested = BTreeMap::new();
 		let no_actions = HashSet::new();
@@ -424,7 +470,7 @@ impl AnimatorBank {
 			return Err("Animator root motion fixed rate cannot be zero".into());
 		}
 		for (key, instance) in &mut self.instances {
-			if instance.root_motion.is_none() {
+			if instance.root_motion.is_none() || sequence_owns(key) {
 				continue;
 			}
 			let before_ticks = instance.machine.state_ticks;
@@ -440,7 +486,7 @@ impl AnimatorBank {
 			let state = &instance.prepared.graph.states[instance.machine.index];
 			let (
 				PreparedAnimatorClips::Imported(asset),
-				AnimationClipRef::Imported { clip_index, .. },
+				AnimationClipRef::Imported { source, clip_index },
 			) = (&instance.prepared.clips, &state.clip)
 			else {
 				return Err("Animator root motion lost its prepared imported clip".into());
@@ -448,7 +494,7 @@ impl AnimatorBank {
 			let rate = f64::from(input.fixed_hz);
 			let Some(displacement) = plan.delta(
 				asset,
-				*clip_index,
+				asset.resolve_clip_index(source, *clip_index)?,
 				before_ticks as f64 / rate,
 				instance.machine.state_ticks as f64 / rate,
 				state.looping,
@@ -477,11 +523,16 @@ impl AnimatorBank {
 		input: AnimatorTick<'_>,
 		revision: u64,
 		onsets: &mut Vec<crate::scene_audio::CommittedAudioOnset>,
+		sequence_owns: impl Fn(&EntityKey) -> bool,
+		mut foot_support: impl FnMut(&EntityKey, Vec3, f32) -> Option<f32>,
 	) -> Result<Vec<EntityKey>, String> {
 		let no_actions = HashSet::new();
 		let mut changed = BTreeSet::new();
 		for (key, instance) in &mut self.instances {
-			if world.entity_index(key).is_none() {
+			let Some(index) = world.entity_index(key) else {
+				continue;
+			};
+			if sequence_owns(key) {
 				continue;
 			}
 			if instance.root_motion.is_none() {
@@ -519,6 +570,17 @@ impl AnimatorBank {
 			} else {
 				instance.fade_start = None;
 			}
+			let foot_pose = if let (Some(plan), Pose::Skeletal(skeletal)) =
+				(instance.foot_ik, &pose)
+				&& input.motions.get(key).is_none_or(|motion| motion.grounded)
+			{
+				plan.apply(skeletal, world.world_matrices()[index], |sole, reach| {
+					foot_support(key, sole, reach)
+				})?
+					.map(Arc::new)
+			} else {
+				None
+			};
 			match (&instance.pose, &pose) {
 				(Pose::Visual(before), Pose::Visual(after)) if before != after => {
 					changed.extend(
@@ -528,14 +590,17 @@ impl AnimatorBank {
 							.map(|pose| pose.entity_key.clone()),
 					);
 				}
-				(Pose::Skeletal(before), Pose::Skeletal(after))
-					if before.local != after.local || before.clip_index != after.clip_index =>
-				{
-					changed.insert(key.clone());
+				(Pose::Skeletal(before), Pose::Skeletal(after)) => {
+					let before = instance.foot_pose.as_deref().unwrap_or(before);
+					let after = foot_pose.as_deref().unwrap_or(after);
+					if before.local != after.local || before.clip_index != after.clip_index {
+						changed.insert(key.clone());
+					}
 				}
 				_ => {}
 			}
 			instance.pose = pose;
+			instance.foot_pose = foot_pose;
 		}
 		self.prune(world);
 		Ok(changed.into_iter().collect())
@@ -567,6 +632,23 @@ impl AnimatorTick<'_> {
 
 impl AnimatorInstance {
 	fn advance(&mut self, input: &AnimatorStepInputs<'_>) -> Result<bool, String> {
+		let mut combined;
+		let overridden;
+		let input = if self.script_bools.is_empty() {
+			input
+		} else {
+			combined = input.cosmetic.cloned().unwrap_or_default();
+			combined.extend(
+				self.script_bools
+					.iter()
+					.map(|(key, value)| (key.clone(), *value)),
+			);
+			overridden = AnimatorStepInputs {
+				cosmetic: Some(&combined),
+				..*input
+			};
+			&overridden
+		};
 		let transition = self.machine.advance(&self.prepared.graph, input)?;
 		if transition && self.machine.blend_clock.is_some() {
 			self.fade_start = Some(self.pose.clone());
@@ -699,16 +781,20 @@ fn sample(
 	}
 	let state = &prepared.graph.states[machine.index];
 	match (&prepared.clips, &state.clip) {
-		(PreparedAnimatorClips::Imported(asset), AnimationClipRef::Imported { clip_index, .. }) => {
+		(
+			PreparedAnimatorClips::Imported(asset),
+			AnimationClipRef::Imported { source, clip_index },
+		) => {
+			let clip_index = asset.resolve_clip_index(source, *clip_index)?;
 			let duration = asset
 				.clips
-				.get(*clip_index as usize)
+				.get(clip_index as usize)
 				.ok_or("Animator clip disappeared")?
 				.duration_seconds;
 			let seconds = machine.state_ticks as f64 / f64::from(fixed_hz);
 			let mut local = sample_local(
 				asset,
-				*clip_index as usize,
+				clip_index as usize,
 				clip_time(seconds, duration, state.looping)?,
 			)?;
 			if let Some(plan) = root_motion {
@@ -722,7 +808,7 @@ fn sample(
 				local,
 				placement,
 				machine.state_ticks,
-				*clip_index,
+				clip_index,
 				MotionMode::Idle,
 				revision,
 			)

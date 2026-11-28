@@ -3,9 +3,19 @@
 	min-width: 0;
 }
 .components,
+.component-list,
 .component-form {
 	display: grid;
 	gap: var(--space-3);
+}
+
+.component-list[hidden] {
+  display: none;
+}
+
+.component-add {
+  padding-block-end: var(--space-2);
+  border-block-end: var(--border-width) solid var(--color-border-strong);
 }
 h3,
 h4,
@@ -124,6 +134,7 @@ fieldset {
 
 :host-context(html[data-theme='workbench']) {
   .components,
+  .component-list,
   .component-form {
     gap: var(--space-2);
   }

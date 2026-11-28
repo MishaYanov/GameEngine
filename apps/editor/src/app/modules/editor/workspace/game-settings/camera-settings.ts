@@ -17,6 +17,7 @@ import {EditorService} from '../../../../core/editor/editor.service';
 import {ViewportEditorService} from '../../../../core/editor/viewport-editor.service';
 import type {PreviewDefinition} from '../../../../core/editor/camera-preview';
 import {EditorDialog} from '../../../../shared/components/dialog/dialog';
+import {EditorIcon} from '../../../../shared/icons/editor-icon';
 import {CameraRigFields} from './camera-rig-fields';
 import {SelectedCameraPreviewService} from './selected-camera-preview.service';
 import {SceneEditingService} from '../scene-editing.service';
@@ -26,7 +27,7 @@ import {orbitDraft} from "./orbit-camera";
 
 @Component({
     selector: 'editor-camera-settings',
-    imports: [EditorDialog, CameraRigFields, DecimalPipe],
+    imports: [EditorDialog, CameraRigFields, DecimalPipe, EditorIcon],
     templateUrl: './camera-settings.html',
     styleUrl: './settings.scss',
 })

@@ -13,6 +13,10 @@ fn runtime_status_and_restart_use_separate_play_and_run_identities() {
 			scene_id: engine_core::scene_catalog::SceneId::new("finish").unwrap(),
 			paused: false,
 			pending_scene_id: None,
+			failed_scene_id: Some(engine_core::scene_catalog::SceneId::new("arena").unwrap()),
+			failed_scene_attempt_id: Some(5),
+			sequence: None,
+			resident_regions: Vec::new(),
 			gameplay: Some(GameplayStatus {
 				objective: "Run complete!".into(),
 				detail: None,
@@ -26,6 +30,8 @@ fn runtime_status_and_restart_use_separate_play_and_run_identities() {
 	assert_eq!(wire["game_status"]["play_session_id"], "play-1");
 	assert_eq!(wire["game_status"]["run_id"], "run-2");
 	assert_eq!(wire["game_status"]["scene_generation"], 1);
+	assert_eq!(wire["game_status"]["failed_scene_id"], "arena");
+	assert_eq!(wire["game_status"]["failed_scene_attempt_id"], 5);
 	let decoded: ViewportEditorStateDto = serde_json::from_value(wire.clone()).unwrap();
 	assert_eq!(decoded.game_status, state.game_status);
 	let mut legacy = wire;
@@ -131,5 +137,36 @@ fn collider_overlay_contract_roundtrips_and_legacy_state_defaults_to_hidden() {
 		json!({"type": "set_colliders", "visible": true, "scene_id": "main"}),
 	] {
 		assert!(serde_json::from_value::<ViewportActionDto>(malformed).is_err());
+	}
+}
+
+#[test]
+fn scene_display_contract_defaults_legacy_settings_and_validates_actions() {
+	use bridge::viewport::{ViewportActionDto, ViewportSettingsDto, ViewportShading};
+
+	let mut legacy = serde_json::to_value(ViewportSettingsDto::default()).unwrap();
+	let fields = legacy.as_object_mut().unwrap();
+	fields.remove("shading");
+	fields.remove("show_vertices");
+	let settings: ViewportSettingsDto = serde_json::from_value(legacy).unwrap();
+	assert_eq!(settings.shading, ViewportShading::Lit);
+	assert!(!settings.show_vertices);
+
+	for shading in ["lit", "unlit", "wireframe"] {
+		let wire = json!({"type": "set_shading", "shading": shading});
+		let action: ViewportActionDto = serde_json::from_value(wire.clone()).unwrap();
+		action.validate().unwrap();
+		assert_eq!(serde_json::to_value(action).unwrap(), wire);
+	}
+	let wire = json!({"type": "set_show_vertices", "visible": true});
+	let action: ViewportActionDto = serde_json::from_value(wire.clone()).unwrap();
+	action.validate().unwrap();
+	assert_eq!(serde_json::to_value(action).unwrap(), wire);
+
+	for invalid in [
+		json!({"type": "set_shading", "shading": "textureless"}),
+		json!({"type": "set_show_vertices", "visible": "true"}),
+	] {
+		assert!(serde_json::from_value::<ViewportActionDto>(invalid).is_err());
 	}
 }

@@ -3,6 +3,15 @@ use glam::{DVec2, DVec4, Mat4, Vec3};
 
 pub const MAX_EDITOR_LINES: usize = 16_384;
 
+/// Editor presentation for mesh surfaces in one viewport draw.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EditorShadingMode {
+	#[default]
+	Lit,
+	Unlit,
+	Wireframe,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EditorGrid {
 	pub origin: [f32; 3],
